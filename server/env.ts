@@ -4,6 +4,13 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   DATABASE_URL: z.string().min(1),
   DATA_DIR: z.string().default('/data'),
+  // Host-side path that is bind-mounted to DATA_DIR in the app container.
+  // Required when the app runs in a container and spawns sandbox containers
+  // on the same Docker daemon — the daemon resolves bind sources against the
+  // host filesystem, so we must translate container-local paths to host paths
+  // before calling `docker create`. When unset, falls back to DATA_DIR (for
+  // running the server directly on the host).
+  HOST_DATA_DIR: z.string().optional(),
   PUBLIC_URL: z.string().default('http://localhost:3000'),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),

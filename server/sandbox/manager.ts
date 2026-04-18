@@ -9,8 +9,10 @@ import { ensureNetwork, getDocker } from '../docker/client.js'
 import {
   SANDBOX_LABEL,
   opencodeDir,
+  opencodeHostDir,
   sandboxRootDir,
   workspaceDir,
+  workspaceHostDir,
 } from './paths.js'
 
 export interface SandboxSummary {
@@ -114,8 +116,8 @@ class SandboxManager {
       OpenStdin: false,
       HostConfig: {
         Binds: [
-          `${workspaceDir(id)}:/workspace`,
-          `${opencodeDir(id)}:/home/coder/.opencode`,
+          `${workspaceHostDir(id)}:/workspace`,
+          `${opencodeHostDir(id)}:/home/coder/.opencode`,
         ],
         NetworkMode: env.DOCKER_NETWORK,
         ReadonlyRootfs: true,
