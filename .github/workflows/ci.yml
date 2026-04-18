@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-lint-unit:
+    name: Typecheck / lint / unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  e2e:
+    name: Playwright smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cloudcode
+          POSTGRES_PASSWORD: cloudcode
+          POSTGRES_DB: cloudcode
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cloudcode -d cloudcode"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PLAYWRIGHT_DATABASE_URL: postgres://cloudcode:cloudcode@localhost:5432/cloudcode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run test:e2e
+
+  docker-build:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: cloud-code-app:ci
+      - name: Build base-sandbox image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/base-sandbox
+          push: false
+          tags: cloud-code-sandbox:ci
