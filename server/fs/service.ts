@@ -185,9 +185,17 @@ class SandboxWatcher {
   start(): void {
     if (this.watcher) return
     const root = workspaceDir(this.sandboxId)
+    // Polling is required on Docker Desktop for macOS/Windows: inotify
+    // events do not propagate through VirtioFS bind mounts when the writer
+    // is in a sibling container. Linux hosts would also be fine with
+    // inotify, but polling is safe everywhere and cheap for typical
+    // workspace sizes.
     this.watcher = chokidar.watch(root, {
       ignoreInitial: true,
       persistent: true,
+      usePolling: true,
+      interval: 500,
+      binaryInterval: 1000,
       ignored: (p: string) => {
         const rel = path.relative(root, p)
         if (!rel || rel.startsWith('..')) return false

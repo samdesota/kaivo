@@ -18,8 +18,26 @@ function clientIp(req: CreateFastifyContextOptions['req']): string {
   return req.ip || 'unknown'
 }
 
+function parseCookieHeader(header: string | undefined, name: string): string | null {
+  if (!header) return null
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=')
+    if (idx < 0) continue
+    const k = part.slice(0, idx).trim()
+    if (k !== name) continue
+    return decodeURIComponent(part.slice(idx + 1).trim())
+  }
+  return null
+}
+
 export async function createContext({ req, res }: CreateFastifyContextOptions): Promise<Context> {
-  const sid = (req as unknown as { cookies?: Record<string, string> }).cookies?.[SESSION_COOKIE]
+  // Fastify populates `req.cookies` for regular HTTP requests. For tRPC
+  // subscription upgrades, the trpc adapter hands us a raw IncomingMessage
+  // that hasn't passed through fastify's cookie parser — fall back to
+  // parsing the Cookie header directly in that case.
+  const sid =
+    (req as unknown as { cookies?: Record<string, string> }).cookies?.[SESSION_COOKIE] ??
+    parseCookieHeader(req.headers?.cookie as string | undefined, SESSION_COOKIE)
   const session = sid ? await resolveSession(sid) : null
   return { req, res, ip: clientIp(req), session }
 }
