@@ -12,6 +12,7 @@ import { LoginPage } from './routes/login'
 import { SetupPage } from './routes/setup'
 import { DashboardPage } from './routes/dashboard'
 import { SandboxDetailPage } from './routes/sandbox'
+import { SettingsPage } from './routes/settings'
 
 function RootLayout() {
   const navigate = useNavigate()
@@ -72,8 +73,19 @@ const sandboxRoute = createRoute({
   path: '/sandbox/$id',
   component: SandboxDetailPage,
 })
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  component: SettingsPage,
+})
 
-const routeTree = rootRoute.addChildren([indexRoute, loginRoute, setupRoute, sandboxRoute])
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  loginRoute,
+  setupRoute,
+  sandboxRoute,
+  settingsRoute,
+])
 
 export const router = createRouter({ routeTree })
 

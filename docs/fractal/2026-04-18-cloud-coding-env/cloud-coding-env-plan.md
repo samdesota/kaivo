@@ -101,6 +101,51 @@ Environment assumptions for all tests: operator has Docker installed; a Postgres
 
 ---
 
+## Handoff context (written 2026-04-18 after Phase 3 QA)
+
+These are facts the next implementer needs that are not derivable from reading the code alone.
+
+**OpenCode is already installed in the base sandbox image.**
+- Installed via `npm install -g opencode-ai` in `docker/base-sandbox/Dockerfile` (not the original `curl | bash` install script — that silently no-op'd on network hiccups; npm fails loudly). Current version: `1.4.12`. Binary at `/usr/bin/opencode`.
+- Rebuild with `npm run docker:sandbox` if you bump the version.
+
+**Provider keys bootstrap path exists.**
+- `.env.example` documents `ANTHROPIC_API_KEY_BOOTSTRAP` + `ANTHROPIC_BASE_URL_BOOTSTRAP` (and OPENAI equivalents).
+- Validated in `server/env.ts`; wired through `docker-compose.yml`.
+- Phase 4 should have `AgentService` (or a dedicated `ProviderKeysService`) read these on first start: if `secrets` has no matching row, encrypt + persist, then log "bootstrapped provider X from env, you can remove the env var now". The Settings UI is the long-term path (add/rotate/delete per provider).
+
+**Anthropic base URL rewrite for sandboxes (Docker Desktop).**
+- In the current dev setup the operator points Anthropic-compatible traffic at a local proxy at `http://localhost:8137` on the host. A sandbox container's `localhost` is the container itself, so we must rewrite `localhost` / `127.0.0.1` → `host.docker.internal` when injecting the base URL into the sandbox's `opencode serve` env.
+- On Linux hosts (where Docker Desktop's magic host alias isn't present), operators need `--add-host=host.docker.internal:host-gateway` on the sandbox container. Either add that flag unconditionally in `SandboxManager.createContainer` (harmless on Docker Desktop, required on Linux) or document as an operator knob.
+
+**Existing sandboxes don't have OpenCode running.**
+- Phase 3 shipped sandboxes that started without the `opencode serve` process. The Phase 4 bootstrap reconciler should detect active sandboxes with no OpenCode process and start it on demand, not just on create. UI: an "Agent not running" state with a "Start agent" button in the sandbox detail, wired to a `sandbox.startAgent` / `agent.bootstrap` mutation.
+
+**Auth cookie is already SameSite=Lax.**
+- Phase 3 changed `server/auth/cookie.ts` from Strict to Lax so the GitHub App OAuth callback could carry the session. The same works for any future OAuth-style redirects (e.g. if Phase 4 adds provider OAuth flows).
+
+**Reverse-proxy for the OpenCode web UI.**
+- The `AgentUIProxy` is a third reverse proxy on the main app (alongside `/preview/...` and the GitHub HTTP routes). Path: `/sandbox/:id/agent/*` → `http://<container-ip>:<opencode-port>/...`.
+- Reuse the proxy pattern from `server/preview/proxy.ts`: `onRequest` hook for HTTP, `@fastify/websocket` route for upgrades. Note: `@fastify/websocket` installs its own upgrade listener that races any manual `prependListener('upgrade')`; Phase 3 learned this the hard way and switched to registering a real Fastify WS route. Follow that pattern.
+- For HTTP, the existing preview proxy forwards the **full URL** (including the `/preview/<sb>/<port>/` prefix) upstream — this lets Vite (with `base` set) work without redirect loops. Decide whether the agent UI also needs its prefix preserved; OpenCode may have similar base-path sensitivity.
+- Auth header injection into the iframe: OpenCode's `opencode web` reads its own password from the env at start. The proxy should inject `Authorization: Bearer <password>` (or whatever OpenCode expects) so the iframe doesn't prompt for a second login. **Verify during implementation** — if OpenCode doesn't accept header-based auth on its web UI, fall back to the signed-URL scheme called out in the Spec, or (last resort) build our own UI on the SDK.
+
+**`host.docker.internal` from Docker Desktop on macOS.**
+- The existing `docker-compose.yml` doesn't add this to the sandbox containers yet (sandboxes are created at runtime by `SandboxManager`, not by compose). Add `ExtraHosts: ['host.docker.internal:host-gateway']` to the `HostConfig` in `SandboxManager.createContainer`; works on both Docker Desktop and Linux.
+
+**Path-based previews leak the proxy prefix to dev servers (v1 limitation).**
+- Documented in README + the demo repo `samdesota/demo-application` has a `VITE_BASE` env-var workaround in its `vite.config.ts`. Not blocking for Phase 4 but worth knowing — the agent UI will hit the same class of issue if its assets use absolute paths.
+
+**Dev/QA environment.**
+- Operator runs via `docker compose up` with `PUBLIC_URL=<tailscale-funnel-url>` set so GitHub App redirects work.
+- Because MagicDNS on the origin machine resolves the funnel hostname to the local Tailscale IP (no cert), a `/etc/hosts` override is required to point the hostname at the funnel public ingress IP for the operator's own browser. This is operator-side, not app-side.
+- Demo repo already created: `https://github.com/samdesota/demo-application` (private). It has Phase-3-specific hardcodes in `package.json` / `vite.config.ts` (the sandbox id + funnel host) — irrelevant to Phase 4 but note if you reuse it.
+
+**Encryption + secrets helpers are ready.**
+- `server/secrets/index.ts` exposes `putSecret(name, value)` / `getSecret(name)`. Use for provider keys (`provider.anthropic.api_key`, `provider.anthropic.base_url`, `sandbox.<id>.opencode_password`). Schema already has the `secrets` table; no migration needed.
+
+---
+
 ## Phase 4 — Built-in agent (OpenCode)
 
 **Ships:** `opencode serve` bootstrap inside sandboxes, `AgentService`, `AgentUIProxy`, provider-key settings, agent panel embed.
@@ -111,7 +156,11 @@ Environment assumptions for all tests: operator has Docker installed; a Postgres
 
 - Sandbox create → `opencode serve` started inside the container with a random password and provider keys injected from settings. Readiness probe succeeds within 5s.
 - OpenCode port + encrypted password recorded on the `sandboxes` row.
-- Settings UI: add Anthropic API key → stored encrypted; can be rotated and deleted. Missing provider key → agent panel shows "provider not configured" rather than crashing.
+- Settings UI: add Anthropic API key **and optional base URL** → both stored encrypted; can be rotated and deleted. Missing provider key → agent panel shows "provider not configured" rather than crashing.
+- `ANTHROPIC_API_KEY_BOOTSTRAP` / `ANTHROPIC_BASE_URL_BOOTSTRAP` env vars (and OpenAI equivalents) seed the encrypted store on first start when the corresponding row is absent; log a one-line note telling the operator they can unset the env var.
+- **Existing sandboxes** (created under Phase 2/3 without OpenCode) must be upgradable: reconciler detects missing OpenCode process → sandbox detail shows "Start agent" button → `sandbox.startAgent` mutation runs the same bootstrap on the live container.
+- Sandbox containers get `ExtraHosts: ['host.docker.internal:host-gateway']` so the injected Anthropic base URL can point at the operator's host loopback (common when a local LiteLLM/Anthropic-compatible proxy is in use).
+- Anthropic base URLs with `localhost` / `127.0.0.1` are auto-rewritten to `host.docker.internal` before being injected into the sandbox's `opencode serve` env.
 
 **Agent sessions via tRPC**
 

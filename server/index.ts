@@ -19,6 +19,8 @@ import { createContext } from './trpc/context.js'
 import { dockerPing, ensureNetwork } from './docker/client.js'
 import { sandboxManager } from './sandbox/manager.js'
 import { registerShellWsRoutes } from './ws/shell.js'
+import { registerGitHubRoutes } from './http/github.js'
+import { registerPreviewProxy } from './preview/proxy.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
@@ -49,6 +51,8 @@ async function buildServer() {
 
   await server.register(fastifyCookie, {})
   await registerShellWsRoutes(server)
+  registerPreviewProxy(server)
+  registerGitHubRoutes(server)
 
   server.get('/healthz', async () => ({ ok: true }))
 

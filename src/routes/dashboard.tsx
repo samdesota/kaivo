@@ -46,9 +46,14 @@ export function DashboardPage() {
           <div className="h-6 w-6 rounded bg-brand-500" />
           <h1 className="text-lg font-semibold">Cloud Coding Environment</h1>
         </div>
-        <Button onClick={onLogout} disabled={logout.isPending}>
-          {logout.isPending ? 'Signing out…' : 'Sign out'}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Link to="/settings" className="text-sm text-neutral-400 hover:text-neutral-200">
+            Settings
+          </Link>
+          <Button onClick={onLogout} disabled={logout.isPending}>
+            {logout.isPending ? 'Signing out…' : 'Sign out'}
+          </Button>
+        </div>
       </header>
 
       <main className="mx-auto max-w-4xl p-8 space-y-6">

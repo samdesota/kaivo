@@ -5,12 +5,21 @@ import { extractTrpcMessage } from '../lib/utils'
 import { Terminal } from './sandbox/terminal'
 import { FileTree } from './sandbox/file-tree'
 import { FileViewer } from './sandbox/file-viewer'
+import { ReposPanel } from './sandbox/repos'
+import { PortsPanel } from './sandbox/ports'
+import { PreviewFrame } from './sandbox/preview-frame'
+
+type SidebarTab = 'files' | 'repos' | 'ports'
+type MainTab = 'file' | 'preview'
 
 export function SandboxDetailPage() {
   const { id } = useParams({ from: '/sandbox/$id' })
   const navigate = useNavigate()
   const sb = trpc.sandbox.get.useQuery({ id }, { refetchInterval: 5_000 })
   const [openPath, setOpenPath] = useState<string | null>(null)
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
+  const [mainTab, setMainTab] = useState<MainTab>('file')
+  const [previewPort, setPreviewPort] = useState<number | null>(null)
 
   if (sb.isLoading) {
     return <div className="p-8 text-neutral-500">Loading sandbox…</div>
@@ -36,25 +45,98 @@ export function SandboxDetailPage() {
     <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
       <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="flex items-center gap-3">
-          <Link to="/" className="text-brand-500 hover:underline">←</Link>
+          <Link to="/" className="text-brand-500 hover:underline">
+            ←
+          </Link>
           <h1 className="text-sm font-semibold">{sb.data.name}</h1>
           <span className="text-xs text-neutral-500">
             {sb.data.id} · {sb.data.status} {sb.data.running ? '(running)' : '(stopped)'}
           </span>
         </div>
+        <Link to="/settings" className="text-xs text-neutral-400 hover:text-neutral-200">
+          Settings
+        </Link>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-72 shrink-0 overflow-auto border-r border-neutral-800">
-          <FileTree
-            sandboxId={id}
-            onOpen={(p) => setOpenPath(p)}
-            activePath={openPath}
-          />
+        <aside className="flex w-72 shrink-0 flex-col border-r border-neutral-800">
+          <div className="flex border-b border-neutral-800 text-xs">
+            {(['files', 'repos', 'ports'] as SidebarTab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setSidebarTab(t)}
+                className={
+                  'flex-1 px-2 py-1.5 uppercase tracking-wide ' +
+                  (sidebarTab === t
+                    ? 'bg-neutral-900 text-neutral-100'
+                    : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200')
+                }
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {sidebarTab === 'files' && (
+              <FileTree
+                sandboxId={id}
+                onOpen={(p) => {
+                  setOpenPath(p)
+                  setMainTab('file')
+                }}
+                activePath={openPath}
+              />
+            )}
+            {sidebarTab === 'repos' && <ReposPanel sandboxId={id} />}
+            {sidebarTab === 'ports' && (
+              <PortsPanel
+                sandboxId={id}
+                onPreview={(port) => {
+                  setPreviewPort(port)
+                  setMainTab('preview')
+                }}
+              />
+            )}
+          </div>
         </aside>
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-[40%] flex-1 overflow-auto border-b border-neutral-800">
-            {openPath ? (
+          <div className="flex items-center gap-1 border-b border-neutral-800 bg-neutral-950 px-3 py-1 text-xs">
+            <button
+              onClick={() => setMainTab('file')}
+              className={
+                'rounded px-2 py-0.5 ' +
+                (mainTab === 'file'
+                  ? 'bg-neutral-800 text-neutral-100'
+                  : 'text-neutral-400 hover:bg-neutral-900')
+              }
+            >
+              {openPath ? openPath : 'file'}
+            </button>
+            {previewPort != null && (
+              <button
+                onClick={() => setMainTab('preview')}
+                className={
+                  'rounded px-2 py-0.5 ' +
+                  (mainTab === 'preview'
+                    ? 'bg-neutral-800 text-neutral-100'
+                    : 'text-neutral-400 hover:bg-neutral-900')
+                }
+              >
+                preview :{previewPort}
+              </button>
+            )}
+          </div>
+          <div className="min-h-[40%] flex-1 overflow-hidden border-b border-neutral-800">
+            {mainTab === 'preview' && previewPort != null ? (
+              <PreviewFrame
+                sandboxId={id}
+                port={previewPort}
+                onClose={() => {
+                  setPreviewPort(null)
+                  setMainTab('file')
+                }}
+              />
+            ) : openPath ? (
               <FileViewer sandboxId={id} path={openPath} />
             ) : (
               <div className="p-6 text-sm text-neutral-500">Select a file to view.</div>

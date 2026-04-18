@@ -21,6 +21,12 @@ const schema = z.object({
     .union([z.literal('true'), z.literal('false')])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  // Phase 4 bootstrap knobs. Keys here are only consulted on first start
+  // (or when the corresponding DB row is absent) — see AgentService.
+  ANTHROPIC_API_KEY_BOOTSTRAP: z.string().optional(),
+  ANTHROPIC_BASE_URL_BOOTSTRAP: z.string().optional(),
+  OPENAI_API_KEY_BOOTSTRAP: z.string().optional(),
+  OPENAI_BASE_URL_BOOTSTRAP: z.string().optional(),
 })
 
 const parsed = schema.safeParse(process.env)

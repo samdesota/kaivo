@@ -9,7 +9,9 @@ export function setSessionCookie(reply: FastifyReply, sessionId: string, expires
   reply.setCookie(SESSION_COOKIE, sessionId, {
     httpOnly: true,
     secure: env.COOKIE_SECURE ?? isProd,
-    sameSite: 'strict',
+    // Lax (not Strict) so OAuth-style top-level redirects back to our domain
+    // — e.g. GitHub App manifest callback — still carry the session cookie.
+    sameSite: 'lax',
     path: '/',
     expires: expiresAt,
     maxAge: Math.floor(ABSOLUTE_TTL_MS / 1000),

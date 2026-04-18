@@ -5,7 +5,16 @@ A cloud coding environment that runs as a single Docker deployment inside a VPC.
 - [`docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-spec.md`](docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-spec.md)
 - [`docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-plan.md`](docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-plan.md)
 
-## Status — Phase 2
+## Status — Phase 3
+
+Shipped in Phase 3 (in addition to Phase 2):
+
+- `RepoService` — per-sandbox repo management. `repo.list` / `repo.add` / `repo.remove` tRPC procedures. Clones run through an in-container `git clone` and are tracked by a `jobs` row; progress streams to subscribers.
+- `JobManager` — generic job record + in-memory log buffer (500 lines) + tRPC `job.watch` subscription. Reconnect-friendly: `job.get` returns the current state for polling fallback.
+- `GitHubService` — GitHub App manifest bootstrap (`/api/github/connect` auto-submits the form; `/api/github/callback` exchanges the code; `/api/github/setup` captures the installation id). Installation tokens minted via RS256 JWT, cached per-process and in `github_token_cache` (60 min). `github.listOrgRepos` returns the install-scoped repo list.
+- `PreviewService` — per-sandbox `ss -lntp` poll every 3 s; diffs emitted over `preview.ports` subscription. Reverse proxy at `/preview/:sandboxId/:port/*` (HTTP + WebSocket), admin-cookie auth, strips `X-Frame-Options` / CSP so iframes load.
+- Settings route (`/settings`) with GitHub connect/disconnect.
+- Sandbox detail: tabbed sidebar (files / repos / ports), with a repo picker (URL or GitHub installation), a ports panel with one-click preview, and an iframe pane.
 
 Shipped in Phase 2 (in addition to Phase 1):
 
@@ -112,6 +121,11 @@ See `.env.example` for the full list. Highlights:
 │   ├── fs/              # FileService (host-side + chokidar watcher)
 │   ├── terminal/        # TerminalService (node-pty + xterm headless)
 │   ├── ws/              # raw WebSocket handler for /ws/shell/:id
+│   ├── jobs/            # JobManager (in-memory log buffer + DB row)
+│   ├── repo/            # RepoService (clone jobs)
+│   ├── github/          # GitHubService (app install, install tokens)
+│   ├── preview/         # PreviewService (port scan) + reverse proxy
+│   ├── http/            # non-tRPC HTTP routes (GitHub App manifest flow)
 │   ├── secrets/         # AES-256-GCM master-key module
 │   ├── trpc/            # tRPC init + routers
 │   ├── env.ts           # zod-validated env
