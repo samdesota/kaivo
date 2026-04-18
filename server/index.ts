@@ -16,6 +16,9 @@ import { loadMasterKey } from './secrets/index.js'
 import { seedAdminFromEnv, purgeExpiredSessions } from './auth/service.js'
 import { appRouter, type AppRouter } from './trpc/router.js'
 import { createContext } from './trpc/context.js'
+import { dockerPing, ensureNetwork } from './docker/client.js'
+import { sandboxManager } from './sandbox/manager.js'
+import { registerShellWsRoutes } from './ws/shell.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
@@ -45,11 +48,13 @@ async function buildServer() {
   })
 
   await server.register(fastifyCookie, {})
+  await registerShellWsRoutes(server)
 
   server.get('/healthz', async () => ({ ok: true }))
 
   await server.register(fastifyTRPCPlugin, {
     prefix: '/trpc',
+    useWSS: true,
     trpcOptions: {
       router: appRouter,
       createContext,
@@ -84,6 +89,20 @@ async function main() {
   await runMigrations(pool)
   await seedAdminFromEnv()
 
+  const dockerOk = await dockerPing()
+  if (dockerOk) {
+    try {
+      await ensureNetwork(env.DOCKER_NETWORK)
+      await sandboxManager.reconcile()
+    } catch (err) {
+      logger.warn({ err }, 'sandbox reconcile failed')
+    }
+  } else {
+    logger.warn(
+      'docker daemon not reachable — sandbox create/list will fail until /var/run/docker.sock is mounted',
+    )
+  }
+
   const server = await buildServer()
   await server.listen({ port: env.PORT, host: env.HOST })
   logger.info(`listening on http://${env.HOST}:${env.PORT}`)
@@ -93,9 +112,15 @@ async function main() {
   }, 60_000)
   purgeTimer.unref()
 
+  const reconcileTimer = setInterval(() => {
+    sandboxManager.reconcile().catch((err) => logger.warn({ err }, 'reconcile failed'))
+  }, 10_000)
+  reconcileTimer.unref()
+
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'shutting down')
     clearInterval(purgeTimer)
+    clearInterval(reconcileTimer)
     try {
       await server.close()
       await pool.end()

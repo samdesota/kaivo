@@ -2,7 +2,7 @@
 FROM node:20-bookworm-slim AS build
 WORKDIR /app
 
-# Build tools needed for native deps (bcrypt)
+# Build tools needed for native deps (bcrypt, node-pty)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
@@ -26,10 +26,14 @@ ENV NODE_ENV=production \
     DATA_DIR=/data \
     PORT=3000
 
-# docker CLI so `dockerode` / `docker exec` work for sandbox lifecycle (Phase 2+)
+# docker CLI + tini; the CLI is used by node-pty for interactive shells
+# (`docker exec -it <id> bash`) — the daemon itself lives on the host and is
+# reached via the mounted /var/run/docker.sock.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tini \
+    docker.io \
+    python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
@@ -39,6 +43,10 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/migrations ./migrations
 
+# Docker group inside the image so the non-root `node` user can read the
+# mounted docker socket. The host socket's gid will normally be remapped at
+# runtime via the compose `group_add:` entry.
+RUN groupadd -f -g 999 docker && usermod -aG docker node
 RUN mkdir -p /data && chown -R node:node /data
 USER node
 VOLUME ["/data"]

@@ -33,8 +33,13 @@ services:
       DOCKER_NETWORK: cloud-code-net
     volumes:
       - app-data:/data
-      # Phase 2+: docker socket mount
-      # - /var/run/docker.sock:/var/run/docker.sock
+      # Docker socket — app is the sole privileged boundary; it uses the
+      # socket to spawn/exec sandbox containers and read their state.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # macOS Docker Desktop maps host socket to a well-known gid; on Linux
+    # operators may need to adjust. 0 (root) works for Docker Desktop.
+    group_add:
+      - "0"
     ports:
       - "3000:3000"
     networks:

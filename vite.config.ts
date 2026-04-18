@@ -14,7 +14,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/trpc': 'http://localhost:3000',
+      '/trpc': { target: 'http://localhost:3000', ws: true },
+      '/ws': { target: 'http://localhost:3000', ws: true },
       '/api': 'http://localhost:3000',
       '/healthz': 'http://localhost:3000',
     },

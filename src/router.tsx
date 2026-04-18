@@ -11,6 +11,7 @@ import { trpc } from './trpc'
 import { LoginPage } from './routes/login'
 import { SetupPage } from './routes/setup'
 import { DashboardPage } from './routes/dashboard'
+import { SandboxDetailPage } from './routes/sandbox'
 
 function RootLayout() {
   const navigate = useNavigate()
@@ -36,7 +37,8 @@ function RootLayout() {
     if (!firstRun && authenticated && (p === '/login' || p === '/setup')) {
       void navigate({ to: '/', replace: true })
     }
-  }, [status.data, location.pathname, navigate])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.data, location.pathname])
 
   if (status.isLoading) {
     return (
@@ -65,8 +67,13 @@ const setupRoute = createRoute({
   path: '/setup',
   component: SetupPage,
 })
+const sandboxRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/sandbox/$id',
+  component: SandboxDetailPage,
+})
 
-const routeTree = rootRoute.addChildren([indexRoute, loginRoute, setupRoute])
+const routeTree = rootRoute.addChildren([indexRoute, loginRoute, setupRoute, sandboxRoute])
 
 export const router = createRouter({ routeTree })
 

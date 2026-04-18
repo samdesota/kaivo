@@ -5,7 +5,16 @@ A cloud coding environment that runs as a single Docker deployment inside a VPC.
 - [`docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-spec.md`](docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-spec.md)
 - [`docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-plan.md`](docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-plan.md)
 
-## Status — Phase 1
+## Status — Phase 2
+
+Shipped in Phase 2 (in addition to Phase 1):
+
+- `SandboxManager` — create / list / archive / delete / restart containers from the `base-sandbox` image, with bind-mounted workspace + opencode dirs, resource caps, read-only rootfs, and a boot-time reconciler.
+- `FileService` — host-side `fs` access to the bind-mounted workspace: `fs.list`, `fs.read` (5 MB cap, binary detection), `fs.write`, plus a debounced `chokidar` `fs.watch` tRPC subscription.
+- `TerminalService` — `node-pty` PTYs via `docker exec`, buffered through `@xterm/headless` with `@xterm/addon-serialize` for snapshot replay; multi-subscriber attach; `runOnce` bypass with 10 MB cap + timeout; raw WebSocket transport at `/ws/shell/:id`.
+- tRPC routers: `sandbox.*`, `fs.*`, `shell.*`, all `protectedProcedure` + zod.
+- Frontend: sandbox list on `/` with create/archive/delete/restart; `/sandbox/:id` with a live file tree, minimal textarea editor, and an xterm.js terminal wired to the WS endpoint.
+- `docker-compose.yml` now mounts `/var/run/docker.sock` into the `app` container so it can manage sandboxes; runtime image ships the `docker` CLI and native build tools for `node-pty`.
 
 Shipped in Phase 1:
 
@@ -16,7 +25,6 @@ Shipped in Phase 1:
 - Drizzle schema and SQL migrations, auto-applied on startup.
 - Master encryption key (`DATA_DIR/secrets.key`, mode 0600) with AES-256-GCM wrap/unwrap.
 - Admin auth: bootstrap, login, logout, session cookies (30-min idle, 7-day absolute), brute-force throttle.
-- React SPA with login, first-run setup, and empty dashboard scaffold.
 
 ## Requirements
 
@@ -42,10 +50,12 @@ ADMIN_PASSWORD_BOOTSTRAP=changeme docker compose up
 
 Then log in at `/login` with `changeme`.
 
-To build the base sandbox image (used starting in Phase 2):
+Before creating sandboxes, build the base sandbox image:
 
 ```bash
-docker build -t cloud-code-sandbox:dev docker/base-sandbox
+npm run docker:sandbox
+# equivalent to:
+# docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox
 ```
 
 ## Local development (without Docker app container)
@@ -79,6 +89,7 @@ The Vite dev server proxies `/trpc`, `/api`, and `/healthz` to the Fastify backe
 | `npm test` | Vitest unit suite. |
 | `npm run test:e2e` | Playwright smoke (requires a reachable Postgres at `PLAYWRIGHT_DATABASE_URL`). |
 | `npm run db:migrate` | Apply SQL migrations in `migrations/`. |
+| `npm run docker:sandbox` | Build the `cloud-code-sandbox:dev` base image (required before creating sandboxes). |
 
 ## Configuration
 
@@ -96,13 +107,18 @@ See `.env.example` for the full list. Highlights:
 ├── server/              # Fastify + tRPC + Drizzle backend
 │   ├── auth/            # bootstrap/login/logout + throttle + cookies
 │   ├── db/              # schema + migrations runner
+│   ├── docker/          # dockerode client + network helpers
+│   ├── sandbox/         # SandboxManager + path helpers
+│   ├── fs/              # FileService (host-side + chokidar watcher)
+│   ├── terminal/        # TerminalService (node-pty + xterm headless)
+│   ├── ws/              # raw WebSocket handler for /ws/shell/:id
 │   ├── secrets/         # AES-256-GCM master-key module
 │   ├── trpc/            # tRPC init + routers
 │   ├── env.ts           # zod-validated env
 │   └── index.ts         # entry point
 ├── src/                 # React SPA (Vite)
 │   ├── components/ui.tsx
-│   ├── routes/          # login / setup / dashboard
+│   ├── routes/          # login / setup / dashboard / sandbox detail
 │   ├── router.tsx       # TanStack Router + auth gate
 │   ├── trpc.ts          # typed tRPC client
 │   └── main.tsx
