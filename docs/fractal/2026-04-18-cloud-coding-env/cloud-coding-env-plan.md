@@ -1,0 +1,185 @@
+# Cloud Coding Environment — Execution Plan
+
+Five phases. One PR per phase. Each phase ships something end-to-end testable. No phase is merged until its acceptance checklist passes.
+
+Dependency lattice: **1 → 2 → (3 ∥ 4) → 5**. Phases 3 and 4 can be done in either order; plan assumes 3 first because repos and previews make phase 4 more fun to demo.
+
+Environment assumptions for all tests: operator has Docker installed; a Postgres is reachable (via the bundled compose file for local dev); Anthropic (or other provider) API key available for phase 4+.
+
+---
+
+## Phase 1 — Foundation
+
+**Ships:** monorepo + `app` Docker image + base-sandbox image + Postgres + Drizzle migrations + auth + empty React shell with a working login.
+
+**Acceptance:**
+
+- `docker compose up` brings up `app` + `postgres`. Both healthy.
+- `docker build` for `app` and `base-sandbox` images succeed. Base-sandbox image includes git, node, python, tmux-free (we're not using it), `opencode` binary, and runs as uid 1000.
+- First-run with no `ADMIN_PASSWORD_BOOTSTRAP`: `/` renders a "set admin password" form; submitting creates the admin row and logs the user in.
+- First-run with `ADMIN_PASSWORD_BOOTSTRAP` set: `/` renders the login form directly; env-var password works.
+- Logged-out user hitting any authed route gets redirected to `/login`.
+- `auth.login.mutate` with wrong password → generic error; correct → session cookie set; subsequent tRPC calls carry the session.
+- Idle cookie past 30 min → unauthorized; absolute 7 days → unauthorized.
+- `auth.logout.mutate` → `web_sessions` row deleted, cookie cleared.
+- Brute-force: 10 wrong attempts from one IP within 10 min → login temporarily locked for that IP.
+- `secrets.key` is created on first boot (mode 0600). A round-trip encrypt/decrypt test passes.
+- tRPC devtools / `@trpc/client` types resolve from the frontend.
+- CI green: typecheck, lint, unit tests, a smoke Playwright test that logs in.
+
+---
+
+## Phase 2 — Workspace (sandboxes + files + shells)
+
+**Ships:** `SandboxManager`, `FileService`, `TerminalService`, sandbox list, sandbox detail with file tree + terminal.
+
+**Acceptance:**
+
+**Sandboxes**
+
+- `sandbox.create.mutate({ name })` → DB row + running container (label `coding-env.sandbox=<id>`) + bind-mounted `workspace` + `opencode` dirs.
+- `sandbox.list.query` returns live status joined with Docker state.
+- `sandbox.archive` stops the container, preserves the workspace dir, keeps the DB row with `status=archived`.
+- `sandbox.delete` removes container + workspace dir + cascades DB rows.
+- Restarting `app` while a sandbox is active → reconciler finds the container by label, keeps it; user still sees it as active; no orphans.
+- Killing the sandbox container out-of-band → next reconciler tick marks it `crashed`; UI shows restart button.
+- Sandbox container runs as uid 1000, read-only rootfs, memory/cpu caps applied (verify via `docker inspect`).
+
+**File explorer**
+
+- `fs.list.query({ sandboxId, path: "/" })` returns top-level entries from the host-side workspace path.
+- `fs.write.mutate` + `fs.read.query` round-trip preserves content byte-for-byte.
+- Creating/modifying/deleting a file inside the sandbox via shell → `fs.watch.subscribe` emits a matching event within 1s.
+- File over 5 MB → read returns `tooLarge: true`, not the bytes.
+- Binary files (image, elf) → read returns binary sniff result; UI shows placeholder.
+- Path traversal (`fs.read({ path: "../../etc/passwd" })`) → rejected, returns error.
+
+**Shells**
+
+- `shell.create` → a PTY opens into the sandbox; `/ws/shell/:id` upgrade sends the serialized snapshot, then live bytes. Typing in the browser reaches the shell; output streams back.
+- Browser refresh → reconnecting to the same shell id replays the scrollback and continues live.
+- Two tabs attached to the same shell both see output; keystrokes from either reach the shell.
+- `shell.resize` → PTY cols/rows update; `stty size` inside the shell matches.
+- `shell.runOnce({ cmd: "echo hi" })` → returns `{ stdout: "hi\n", exitCode: 0, truncated: false }`.
+- `shell.runOnce` with a command that exits 42 → `exitCode: 42`.
+- `shell.runOnce` with 50 MB of output → `truncated: true`, stdout ≤ 10 MB.
+- `shell.runOnce({ timeoutMs: 500, cmd: "sleep 5" })` → error, process killed within a second or two.
+- Disposing a sandbox with active shells → all their sockets close cleanly, no orphaned node-pty processes on the host.
+- Scrollback buffer cap (10k lines) enforced.
+
+---
+
+## Phase 3 — Code workflows (repos + GitHub + preview)
+
+**Ships:** `RepoService`, `GitHubService`, `PreviewService` (port scan + reverse proxy), settings UI, repo picker, preview iframe pane.
+
+**Acceptance:**
+
+**Repos (URL)**
+
+- `repo.add.mutate({ sandboxId, source: "url", url, ref })` → clone runs as a tracked job; `job.watch.subscribe({ jobId })` streams progress; clone appears at `/workspace/repos/<slug>` inside the sandbox.
+- Invalid URL / bad ref → job ends with error; UI shows it.
+- Closing the browser mid-clone → reopening and subscribing to the same job id resumes progress (server kept working).
+- `repo.remove` → workspace files gone; DB row gone.
+
+**GitHub integration**
+
+- `github.connectStart` → redirect URL goes to GitHub's App manifest creation page with expected scopes.
+- GitHub redirects back to `/api/github/callback` → app exchanges code → `github_install` row populated; private key stored encrypted; UI shows "Connected to `<org>`".
+- `github.listOrgRepos` returns a non-empty list (against a test org with at least one repo).
+- `repo.add` with `source=github` clones using a freshly-minted installation token (not a stored PAT). Install tokens cached for ≤60 min.
+- Removing the GitHub App from the org → `github.listOrgRepos` returns a clear error; URL-based clones still work.
+
+**Preview**
+
+- Open a shell, `cd repos/<name>`, run a dev server (e.g., `python3 -m http.server 5173`) → within 5s `preview.ports.subscribe` emits an entry for port 5173.
+- Browser hits `/preview/<sandbox>/5173/` → served from the sandbox container. Static assets load. WebSockets to the dev server upgrade cleanly.
+- Kill the dev server → port disappears from the list within ~3s.
+- `/preview/<sandbox>/<port>/` while logged out → 401.
+- Content that sets `X-Frame-Options: DENY` → proxy strips it; iframe embed in the UI works.
+- Two concurrent dev servers on two different ports → both appear; both previewable independently.
+
+---
+
+## Phase 4 — Built-in agent (OpenCode)
+
+**Ships:** `opencode serve` bootstrap inside sandboxes, `AgentService`, `AgentUIProxy`, provider-key settings, agent panel embed.
+
+**Acceptance:**
+
+**Bootstrap**
+
+- Sandbox create → `opencode serve` started inside the container with a random password and provider keys injected from settings. Readiness probe succeeds within 5s.
+- OpenCode port + encrypted password recorded on the `sandboxes` row.
+- Settings UI: add Anthropic API key → stored encrypted; can be rotated and deleted. Missing provider key → agent panel shows "provider not configured" rather than crashing.
+
+**Agent sessions via tRPC**
+
+- `agent.sessionStart.mutate({ sandboxId, prompt })` → creates an OpenCode session + `agent_sessions` row; returns our id.
+- `agent.transcript.subscribe({ sessionId })` streams assistant output as the session runs.
+- `agent.sessionSend` → follow-up prompt reaches the running session.
+- `agent.sessionStatus` includes any pending permission requests from OpenCode.
+- `agent.sessionApprove` / `reject` resolves an approval; session proceeds or halts accordingly.
+- Killing the OpenCode process out-of-band → next call surfaces a restart attempt; on second failure, session marked `unavailable` with a clear error.
+- `agent_transcripts` table has rows for each turn (role, content, seq monotonic).
+
+**Embedded UI**
+
+- `/sandbox/:id/agent/` iframe loads `opencode web` without a second login prompt (header/token injection path verified). If header auth doesn't work: fallback path from Spec is in place and loads the iframe.
+- Agent edits a file → file tree shows the change; `fs.watch` fires; terminal running `git status` reflects the change.
+- Logged-out user hitting `/sandbox/:id/agent/*` directly → 401.
+
+---
+
+## Phase 5 — Agent Tool Protocol surface
+
+**Ships:** `ProtocolGateway` — `/.well-known/agent-tools.json`, `/agent/rpc`, `/agent/events`, page-mode SDK, `session.handshake`, `workspace.current_context`, static + dynamic instructions endpoints, all orchestrator tools wired.
+
+**Acceptance:**
+
+**Discovery + handshake**
+
+- `GET /.well-known/agent-tools.json` returns a valid manifest matching the protocol-spec schema. Validates against the schema from spec #1.
+- HTML shell includes `<link rel="agent-tools">`.
+- `session.handshake` called from an authenticated page → returns `{ token, expiresAt, context: { sandboxId } }`. Token is 256-bit base64url. `agent_tokens` has a matching `sha256(token)` row.
+- Called without the admin cookie → 401.
+- Handshake with no focused sandbox → clear error.
+
+**Endpoint-mode RPC**
+
+- `POST /agent/rpc` with no `Authorization` → 401.
+- With a valid token + correct `meta.context.sandboxId` → method dispatch works. With a mismatched sandboxId → error.
+- `sandbox.list` / `sandbox.create` via RPC round-trip with UI-visible effects.
+- `repo.add` via RPC clones into the right sandbox.
+- `shell.runCommand` via RPC returns stdout/stderr/exitCode.
+- `fs.read` / `fs.write` / `fs.list` sandbox-scoped; attempts outside workspace rejected.
+- `agent.session_start` via RPC → creates a session the UI's Agent panel also shows (shared state with phase 4).
+- `agent.session_send` → follow-up reaches the same session.
+- `agent.session_approve` / `reject` → pending gate resolved.
+- `$/cancel` for a long-running RPC call → aborts (e.g., cancels a mid-flight `shell.runCommand`).
+
+**Events stream**
+
+- `GET /agent/events` (SSE, authed) streams: `agent.transcript_delta`, `agent.pending_approval`, `shell.output` (for subscribed shells), `preview.ports_changed`, `fs.changed`, `session.invalidate`.
+- Token expiry mid-stream → `E_SESSION_EXPIRED` emitted; client re-handshakes and reconnects.
+- Admin logout → all open tokens for that cookie invalidated; active SSE connections close with `session.invalidate`.
+
+**Instructions**
+
+- `GET /agent/instructions.md` returns a non-empty static instruction doc. Hash embedded in the manifest matches its contents (cache correctness).
+- `workspace.current_context` returns the focused sandbox + active file + active shell; reflects the UI state when called from the page.
+- Manifest's `dynamicMaxTokens` honored — tool returns a payload under the budget.
+
+**End-to-end orchestrator demo**
+
+- Drive the whole system from a scripted external orchestrator: handshake → create sandbox → add repo → start dev server via `shell.runCommand` → observe port in `preview.ports` → start an agent session → watch transcript → approve one pending call → done. Scripted with a test client in the repo, asserts each step.
+
+---
+
+## Cross-cutting (checked at every phase)
+
+- Typecheck clean; lint clean.
+- No unpinned deps; no `any` in public APIs; zod schemas on every tRPC input.
+- Unit tests for any module with non-trivial logic; integration tests for tRPC routers against a real Postgres (testcontainers OK in CI).
+- Playwright smoke for the phase's headline user flow.
+- `README.md` updated with the newly-enabled operator-level functionality.
