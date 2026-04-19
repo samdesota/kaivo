@@ -110,6 +110,28 @@ The Vite dev server proxies `/trpc`, `/api`, and `/healthz` to the Fastify backe
 | `npm run db:migrate` | Apply SQL migrations in `migrations/`. |
 | `npm run docker:sandbox` | Build the `cloud-code-sandbox:dev` base image (required before creating sandboxes). |
 
+## Test harness: Anthropic mock
+
+`tests/mocks/anthropic/server.ts` is a tiny Anthropic-API-compatible HTTP server used by agent-flow tests. It responds to `POST /v1/messages` in both streaming (SSE) and non-streaming modes; tests pre-seed a script of assistant turns (text blocks, `tool_use` blocks, or mixed) and the mock replays them in order. Control endpoints: `POST /__script` to seed, `GET /__requests` to inspect what the agent asked, `POST /__reset` to clear state.
+
+Import it in unit tests directly:
+
+```ts
+import { createAnthropicMock } from '../mocks/anthropic/server.js'
+const mock = await createAnthropicMock()
+mock.setScript({ turns: [{ blocks: [{ type: 'text', text: 'hi' }] }] })
+// point `ANTHROPIC_BASE_URL` at `mock.url` and drive the flow
+await mock.close()
+```
+
+Or run it standalone so a sandbox container can reach it (via compose's `host.docker.internal`):
+
+```bash
+MOCK_ANTHROPIC_PORT=3101 tsx tests/mocks/anthropic/cli.ts
+```
+
+When `LIVE_LLM=1` is set, agent-flow tests that consult a provider are expected to bypass the mock and hit the real Anthropic endpoint — used for local manual verification only; CI always uses the mock.
+
 ## Configuration
 
 See `.env.example` for the full list. Highlights:
