@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { trpc } from '../../../trpc'
+import { extractTrpcMessage } from '../../../lib/utils'
 
 /**
- * Simple dropdown listing agent sessions for a sandbox, newest first. In
- * Phase 5 this is read-only; Phase 6 adds a "+ New session" affordance.
+ * Agent session switcher + "+ New session" affordance. Selecting a session
+ * swaps the transcript in place (caller rekeys TranscriptPane on sessionId
+ * change). New-session opens a small modal for an optional title + initial
+ * prompt.
  */
 export function SessionSwitcher({
   sandboxId,
@@ -15,6 +18,7 @@ export function SessionSwitcher({
   onSelect: (sessionId: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [modal, setModal] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   const sessions = trpc.agent.sessionList.useQuery(
     { sandboxId },
@@ -45,6 +49,15 @@ export function SessionSwitcher({
       </button>
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 w-80 rounded border border-neutral-800 bg-neutral-950 shadow-lg">
+          <button
+            onClick={() => {
+              setModal(true)
+              setOpen(false)
+            }}
+            className="flex w-full items-center gap-2 border-b border-neutral-800 px-3 py-1.5 text-left text-xs text-brand-400 hover:bg-neutral-900"
+          >
+            <span>+ New session</span>
+          </button>
           {sessions.isLoading && (
             <div className="px-3 py-2 text-xs text-neutral-500">Loading…</div>
           )}
@@ -73,6 +86,100 @@ export function SessionSwitcher({
           ))}
         </div>
       )}
+      {modal && (
+        <NewSessionModal
+          sandboxId={sandboxId}
+          onClose={() => setModal(false)}
+          onCreated={(id) => {
+            setModal(false)
+            onSelect(id)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function NewSessionModal({
+  sandboxId,
+  onClose,
+  onCreated,
+}: {
+  sandboxId: string
+  onClose: () => void
+  onCreated: (id: string) => void
+}) {
+  const [title, setTitle] = useState('')
+  const [prompt, setPrompt] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const start = trpc.agent.sessionStart.useMutation()
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const msg = prompt.trim()
+    if (!msg) return
+    setErr(null)
+    try {
+      const res = await start.mutateAsync({
+        sandboxId,
+        prompt: msg,
+        title: title.trim() || undefined,
+      })
+      onCreated(res.id)
+    } catch (e2) {
+      setErr(extractTrpcMessage(e2))
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={onSubmit}
+        className="w-full max-w-md rounded-lg border border-neutral-800 bg-neutral-950 p-4 shadow-xl"
+      >
+        <h2 className="mb-3 text-sm font-semibold text-neutral-100">New agent session</h2>
+        <label className="mb-2 block text-[11px] uppercase tracking-wide text-neutral-500">
+          Title (optional)
+        </label>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="e.g. fix auth bug"
+          className="mb-3 block w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 focus:border-brand-500/60 focus:outline-none"
+        />
+        <label className="mb-2 block text-[11px] uppercase tracking-wide text-neutral-500">
+          Initial prompt
+        </label>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={4}
+          placeholder="What do you want the agent to do?"
+          autoFocus
+          className="mb-3 block w-full resize-none rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 focus:border-brand-500/60 focus:outline-none"
+        />
+        {err && <div className="mb-3 text-xs text-red-400">{err}</div>}
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-900"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={start.isPending || !prompt.trim()}
+            className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+          >
+            {start.isPending ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

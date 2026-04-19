@@ -15,11 +15,13 @@ export function PartRenderer({
   part,
   state,
   role,
+  sessionId,
   onOpenShell,
 }: {
   part: Part
   state: TranscriptState
   role: string
+  sessionId: string
   onOpenShell?: (content: PaneContent) => void
 }) {
   if (HIDDEN.has(part.type)) return null
@@ -32,7 +34,14 @@ export function PartRenderer({
     case 'tool': {
       const callID = (part as { callID?: string }).callID
       const perm: PermissionRequest | undefined = callID ? permissionForCall(state, callID) : undefined
-      return <ToolPart part={part} permission={perm} onOpenShell={onOpenShell} />
+      return (
+        <ToolPart
+          part={part}
+          permission={perm}
+          sessionId={sessionId}
+          onOpenShell={onOpenShell}
+        />
+      )
     }
     case 'file':
       return <FilePart part={part} />

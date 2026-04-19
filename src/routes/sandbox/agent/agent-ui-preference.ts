@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 export type AgentUi = 'native' | 'iframe'
 
 const KEY = 'cloud-code.agent_ui'
-const DEFAULT: AgentUi = 'iframe'
+const DEFAULT: AgentUi = 'native'
 
 function read(): AgentUi {
   if (typeof window === 'undefined') return DEFAULT

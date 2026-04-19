@@ -19,10 +19,12 @@ interface ToolState {
 export function ToolPart({
   part,
   permission,
+  sessionId,
   onOpenShell,
 }: {
   part: Part
   permission?: PermissionRequest
+  sessionId: string
   onOpenShell?: (content: PaneContent) => void
 }) {
   const tool = (part as { tool?: string }).tool ?? 'tool'
@@ -30,7 +32,15 @@ export function ToolPart({
   const state: ToolState = ((part as { state?: ToolState }).state ?? {}) as ToolState
 
   if (tool === 'bash' || tool === 'cloud_bash') {
-    return <BashToolPart tool={tool} callID={callID} state={state} permission={permission} />
+    return (
+      <BashToolPart
+        tool={tool}
+        callID={callID}
+        state={state}
+        permission={permission}
+        sessionId={sessionId}
+      />
+    )
   }
   if (tool === 'pty' || tool === 'cloud_pty') {
     return (
@@ -38,11 +48,12 @@ export function ToolPart({
         tool={tool}
         state={state}
         permission={permission}
+        sessionId={sessionId}
         onOpenShell={onOpenShell}
       />
     )
   }
-  return <GenericToolPart tool={tool} state={state} permission={permission} />
+  return <GenericToolPart tool={tool} state={state} permission={permission} sessionId={sessionId} />
 }
 
 function StatusDot({ status }: { status?: string }) {
@@ -76,11 +87,13 @@ function BashToolPart({
   callID,
   state,
   permission,
+  sessionId,
 }: {
   tool: string
   callID: string
   state: ToolState
   permission?: PermissionRequest
+  sessionId: string
 }) {
   const [open, setOpen] = useState(false)
   const cmd = String((state.input as { command?: string } | undefined)?.command ?? '')
@@ -142,7 +155,11 @@ function BashToolPart({
           )}
         </div>
       )}
-      {permission && <div className="px-2 pb-2">{permission && <PermissionBanner req={permission} />}</div>}
+      {permission && (
+        <div className="px-2 pb-2">
+          <PermissionBanner req={permission} sessionId={sessionId} />
+        </div>
+      )}
       {!callID && null}
     </div>
   )
@@ -152,11 +169,13 @@ function PtyToolPart({
   tool,
   state,
   permission,
+  sessionId,
   onOpenShell,
 }: {
   tool: string
   state: ToolState
   permission?: PermissionRequest
+  sessionId: string
   onOpenShell?: (content: PaneContent) => void
 }) {
   const shellId = state.metadata?.cloudcode_shell_id
@@ -186,7 +205,7 @@ function PtyToolPart({
           </button>
         )}
       </div>
-      {permission && <PermissionBanner req={permission} />}
+      {permission && <PermissionBanner req={permission} sessionId={sessionId} />}
     </div>
   )
 }
@@ -195,10 +214,12 @@ function GenericToolPart({
   tool,
   state,
   permission,
+  sessionId,
 }: {
   tool: string
   state: ToolState
   permission?: PermissionRequest
+  sessionId: string
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -237,7 +258,11 @@ function GenericToolPart({
           )}
         </div>
       )}
-      {permission && <div className="px-2 pb-2"><PermissionBanner req={permission} /></div>}
+      {permission && (
+        <div className="px-2 pb-2">
+          <PermissionBanner req={permission} sessionId={sessionId} />
+        </div>
+      )}
     </div>
   )
 }

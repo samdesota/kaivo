@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { trpc } from '../../../trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
+import { Composer } from './composer'
 import {
   applyEvent,
   emptyTranscript,
@@ -109,14 +110,10 @@ export function AgentSessionView({
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {sessionId ? (
-          <TranscriptPane
-            key={sessionId}
-            sessionId={sessionId}
-            onOpenShell={onOpenShell}
-          />
+          <SessionPane key={sessionId} sessionId={sessionId} onOpenShell={onOpenShell} />
         ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-neutral-500">
-            No session yet.
+            No session yet. Click the session dropdown and choose <span className="mx-1 font-semibold">+ New session</span>.
           </div>
         )}
       </div>
@@ -124,7 +121,7 @@ export function AgentSessionView({
   )
 }
 
-function TranscriptPane({
+function SessionPane({
   sessionId,
   onOpenShell,
 }: {
@@ -132,6 +129,7 @@ function TranscriptPane({
   onOpenShell?: (content: PaneContent) => void
 }) {
   const [state, dispatch] = useReducer(reducer, undefined as unknown as TranscriptState, emptyTranscript)
+  const [reconnecting, setReconnecting] = useState(false)
 
   const messages = trpc.agent.sessionMessages.useQuery(
     { sessionId },
@@ -157,18 +155,32 @@ function TranscriptPane({
     })
   }, [sessionId, messages.data])
 
-  // Live-merge events.
+  // Live-merge events. `onError` flips the reconnect banner; tRPC's ws client
+  // auto-reconnects under the hood, so the banner clears on the next `onData`.
   trpc.agent.transcript.useSubscription(
     { sessionId },
     {
       onData(evt) {
+        setReconnecting(false)
         dispatch({
           type: 'event',
           evt: evt as { type: string; payload: Record<string, unknown> },
         })
       },
+      onError() {
+        setReconnecting(true)
+      },
     },
   )
+
+  const status = trpc.agent.sessionStatus.useQuery(
+    { sessionId },
+    { refetchInterval: 3_000 },
+  )
+  const pendingFromStatus = status.data?.pendingApprovals ?? []
+  // Merge with in-memory permission events so we catch requests that arrive
+  // between sessionStatus poll ticks.
+  const pendingCount = state.permissions.size > 0 ? state.permissions.size : pendingFromStatus.length
 
   const parts = useMemo(() => flattenParts(state), [state])
   const renderables = useMemo(
@@ -189,7 +201,6 @@ function TranscriptPane({
     getItemKey: (i) => renderables[i]!.part.id,
   })
 
-  // Auto-scroll to bottom when new parts arrive and user is near the bottom.
   const lastCount = useRef(0)
   useEffect(() => {
     const el = scrollRef.current
@@ -201,54 +212,62 @@ function TranscriptPane({
     lastCount.current = renderables.length
   }, [renderables.length])
 
-  if (messages.isLoading) {
-    return <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">Loading…</div>
-  }
-  if (messages.error) {
-    return (
-      <div className="p-4 text-xs text-red-400">
-        Failed to load transcript: {extractTrpcMessage(messages.error)}
-      </div>
-    )
-  }
-  if (renderables.length === 0) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">
-        No messages yet.
-      </div>
-    )
-  }
-
   return (
-    <div ref={scrollRef} className="flex-1 overflow-auto">
-      <div
-        className="relative w-full"
-        style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-      >
-        {rowVirtualizer.getVirtualItems().map((v) => {
-          const { part, role } = renderables[v.index]!
-          return (
-            <div
-              key={v.key}
-              ref={rowVirtualizer.measureElement}
-              data-index={v.index}
-              className="absolute left-0 right-0 px-4"
-              style={{
-                transform: `translateY(${v.start}px)`,
-                paddingTop: v.index === 0 ? 12 : 4,
-                paddingBottom: 4,
-              }}
-            >
-              <PartRenderer
-                part={part}
-                state={state}
-                role={role}
-                onOpenShell={onOpenShell}
-              />
-            </div>
-          )
-        })}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {reconnecting && (
+        <div className="border-b border-amber-500/40 bg-amber-500/5 px-3 py-1 text-[11px] text-amber-200">
+          Reconnecting…
+        </div>
+      )}
+      <div ref={scrollRef} className="flex-1 overflow-auto">
+        {messages.isLoading ? (
+          <div className="flex h-full items-center justify-center text-xs text-neutral-500">Loading…</div>
+        ) : messages.error ? (
+          <div className="p-4 text-xs text-red-400">
+            Failed to load transcript: {extractTrpcMessage(messages.error)}
+          </div>
+        ) : renderables.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-xs text-neutral-500">
+            No messages yet.
+          </div>
+        ) : (
+          <div
+            className="relative w-full"
+            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+          >
+            {rowVirtualizer.getVirtualItems().map((v) => {
+              const { part, role } = renderables[v.index]!
+              return (
+                <div
+                  key={v.key}
+                  ref={rowVirtualizer.measureElement}
+                  data-index={v.index}
+                  className="absolute left-0 right-0 px-4"
+                  style={{
+                    transform: `translateY(${v.start}px)`,
+                    paddingTop: v.index === 0 ? 12 : 4,
+                    paddingBottom: 4,
+                  }}
+                >
+                  <PartRenderer
+                    part={part}
+                    state={state}
+                    role={role}
+                    sessionId={sessionId}
+                    onOpenShell={onOpenShell}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
+      <Composer
+        sessionId={sessionId}
+        pendingApprovalReason={
+          pendingCount > 0 ? `Waiting on ${pendingCount} permission approval${pendingCount === 1 ? '' : 's'}.` : null
+        }
+      />
     </div>
   )
 }
