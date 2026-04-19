@@ -280,6 +280,14 @@ async function handleHttp(
   opts: { setCookie?: boolean } = {},
 ): Promise<void> {
   if (!(await isAuthed(req.headers.cookie as string | undefined))) {
+    // Redirect browser top-level navigations to the SPA's login page so the
+    // user sees a login screen instead of raw JSON. XHR/iframe callers still
+    // get the machine-readable 401.
+    const accept = (req.headers.accept as string | undefined) ?? ''
+    if (accept.includes('text/html')) {
+      reply.redirect('/login', 303)
+      return
+    }
     reply.code(401).send({ error: 'unauthorized' })
     return
   }

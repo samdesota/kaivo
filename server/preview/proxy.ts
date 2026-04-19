@@ -239,6 +239,13 @@ function safeClose(ws: WebSocket, code: number, reason: string): void {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleHttp(req: any, reply: any): Promise<void> {
   if (!(await isAuthed(req.headers.cookie as string | undefined))) {
+    // Top-level browser navigations land on the SPA's login page; XHR/iframe
+    // fetches keep the JSON 401 so they can surface a proper error to code.
+    const accept = (req.headers.accept as string | undefined) ?? ''
+    if (accept.includes('text/html')) {
+      reply.redirect('/login', 303)
+      return
+    }
     reply.code(401).send({ error: 'unauthorized' })
     return
   }
