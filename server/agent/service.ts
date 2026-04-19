@@ -193,11 +193,13 @@ class AgentService {
     sandboxId: string
     prompt?: string
     title?: string
+    directory?: string
     model?: { providerID: string; modelID: string }
   }): Promise<AgentSessionSummary> {
     const client = await this.getClient(input.sandboxId)
     const create = await client.session.create({
       body: { title: input.title },
+      ...(input.directory ? { query: { directory: input.directory } } : {}),
       throwOnError: true,
     })
     const ocSession = create.data
@@ -225,6 +227,7 @@ class AgentService {
             parts: [{ type: 'text', text: prompt }],
             ...(input.model ? { model: input.model } : {}),
           },
+          ...(input.directory ? { query: { directory: input.directory } } : {}),
         })
         .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
     }

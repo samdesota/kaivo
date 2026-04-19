@@ -111,8 +111,17 @@ function NewSessionModal({
 }) {
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [directory, setDirectory] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
   const start = trpc.agent.sessionStart.useMutation()
+  const repos = trpc.repo.list.useQuery({ sandboxId })
+
+  // Default to the first repo when the list loads (common case: one repo).
+  useEffect(() => {
+    if (directory) return
+    const first = repos.data?.[0]
+    if (first) setDirectory(first.workspacePath)
+  }, [directory, repos.data])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -123,6 +132,7 @@ function NewSessionModal({
         sandboxId,
         prompt: msg || undefined,
         title: title.trim() || undefined,
+        directory: directory || undefined,
       })
       onCreated(res.id)
     } catch (e2) {
@@ -150,6 +160,21 @@ function NewSessionModal({
           placeholder="e.g. fix auth bug"
           className="mb-3 block w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 focus:border-brand-500/60 focus:outline-none"
         />
+        <label className="mb-2 block text-[11px] uppercase tracking-wide text-neutral-500">
+          Working directory
+        </label>
+        <select
+          value={directory}
+          onChange={(e) => setDirectory(e.target.value)}
+          className="mb-3 block w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 focus:border-brand-500/60 focus:outline-none"
+        >
+          <option value="">(no repo — /workspace)</option>
+          {repos.data?.map((r) => (
+            <option key={r.id} value={r.workspacePath}>
+              {r.slug} — {r.workspacePath}
+            </option>
+          ))}
+        </select>
         <label className="mb-2 block text-[11px] uppercase tracking-wide text-neutral-500">
           Initial prompt (optional)
         </label>
