@@ -136,6 +136,7 @@ export function applyEvent(
     case 'permission.updated': {
       const p = evt.payload as {
         id?: string
+        callID?: string
         title?: string
         pattern?: string | string[]
         metadata?: Record<string, unknown>
@@ -148,7 +149,9 @@ export function applyEvent(
         title: p.title,
         pattern: p.pattern,
         metadata: p.metadata,
-        callID: (p.metadata as { callID?: string } | undefined)?.callID,
+        // Permission.callID is top-level on the payload; falling back to
+        // metadata.callID covers older OpenCode versions that nested it.
+        callID: p.callID ?? (p.metadata as { callID?: string } | undefined)?.callID,
         createdAt: p.time?.created,
       })
       return { ...state, permissions }

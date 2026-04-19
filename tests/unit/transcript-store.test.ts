@@ -65,19 +65,35 @@ describe('transcript-store', () => {
 
   it('permission.updated + permission.replied track pending approvals by callID', () => {
     let s = emptyTranscript()
+    // OpenCode's Permission has callID as a top-level field.
     s = applyEvent(s, {
       type: 'permission.updated',
       payload: {
         id: 'perm-1',
         sessionID: 's',
         title: 'Run bash?',
-        metadata: { callID: 'call-xyz' },
+        callID: 'call-xyz',
+        metadata: {},
         time: { created: 1 },
       },
     })
     expect(permissionForCall(s, 'call-xyz')?.id).toBe('perm-1')
     s = applyEvent(s, { type: 'permission.replied', payload: { permissionID: 'perm-1' } })
     expect(permissionForCall(s, 'call-xyz')).toBeUndefined()
+  })
+
+  it('permission.updated: falls back to metadata.callID for older payloads', () => {
+    const s = applyEvent(emptyTranscript(), {
+      type: 'permission.updated',
+      payload: {
+        id: 'perm-2',
+        sessionID: 's',
+        title: 'x',
+        metadata: { callID: 'legacy-call' },
+        time: { created: 1 },
+      },
+    })
+    expect(permissionForCall(s, 'legacy-call')?.id).toBe('perm-2')
   })
 
   it('tool-part status transitions are preserved on update', () => {
