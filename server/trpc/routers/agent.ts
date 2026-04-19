@@ -52,6 +52,9 @@ export const agentRouter = router({
         sandboxId: z.string().min(1),
         prompt: z.string().min(1).max(100_000),
         title: z.string().min(1).max(200).optional(),
+        model: z
+          .object({ providerID: z.string().min(1), modelID: z.string().min(1) })
+          .optional(),
       }),
     )
     .mutation(async ({ input }) => {

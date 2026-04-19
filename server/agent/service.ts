@@ -190,6 +190,7 @@ class AgentService {
     sandboxId: string
     prompt: string
     title?: string
+    model?: { providerID: string; modelID: string }
   }): Promise<AgentSessionSummary> {
     const client = await this.getClient(input.sandboxId)
     const create = await client.session.create({
@@ -215,7 +216,10 @@ class AgentService {
     void client.session
       .promptAsync({
         path: { id: ocSession.id },
-        body: { parts: [{ type: 'text', text: input.prompt }] },
+        body: {
+          parts: [{ type: 'text', text: input.prompt }],
+          ...(input.model ? { model: input.model } : {}),
+        },
       })
       .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
 

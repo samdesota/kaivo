@@ -5,6 +5,12 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["server/**/*.ts", "tests/setup.ts", "tests/unit/**/*.ts", "tests/mocks/**/*.ts"],
+  "include": [
+    "server/**/*.ts",
+    "tests/setup.ts",
+    "tests/unit/**/*.ts",
+    "tests/mocks/**/*.ts",
+    "scripts/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
