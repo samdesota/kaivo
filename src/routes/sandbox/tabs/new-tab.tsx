@@ -136,7 +136,14 @@ function ShellsList({
               }
             />
             <div className="min-w-0 flex-1">
-              <div className="truncate font-mono text-neutral-200">shell {s.id.slice(-8)}</div>
+              <div className="flex items-center gap-1.5 truncate font-mono text-neutral-200">
+                <span>shell {s.id.slice(-8)}</span>
+                {s.ownerKind === 'agent' && (
+                  <span className="rounded border border-brand-500/40 bg-brand-500/10 px-1 py-[1px] text-[8px] uppercase tracking-wide text-brand-500">
+                    agent
+                  </span>
+                )}
+              </div>
               <div className="truncate text-[10px] text-neutral-500">
                 cwd {s.cwd} · {s.cols}×{s.rows}
               </div>

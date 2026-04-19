@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { trpc } from '../../../trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
-import { Terminal } from '../terminal'
+import { XTermAttached } from '../xterm-attached'
 
 export function ShellTabContent({
   sandboxId,
@@ -37,6 +37,11 @@ export function ShellTabContent({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs">
         <span className="font-mono text-neutral-300">shell {shellId.slice(-8)}</span>
+        {info?.ownerKind === 'agent' && (
+          <span className="rounded border border-brand-500/40 bg-brand-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-brand-500">
+            agent
+          </span>
+        )}
         {info && (
           <span className="text-[10px] text-neutral-500">
             {info.cols}×{info.rows} · {info.alive ? 'running' : 'stopped'}
@@ -74,7 +79,7 @@ export function ShellTabContent({
             Shell terminated.
           </div>
         ) : (
-          <Terminal key={shellId} shellId={shellId} />
+          <XTermAttached key={shellId} shellId={shellId} />
         )}
       </div>
     </div>

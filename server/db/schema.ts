@@ -5,6 +5,7 @@ export type SandboxStatus = 'active' | 'archived' | 'crashed'
 export type JobState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type RepoSource = 'github' | 'url'
 export type AgentSessionStatus = 'active' | 'archived' | 'unavailable'
+export type ShellOwnerKind = 'human' | 'agent'
 
 export const admin = pgTable(
   'admin',
@@ -110,10 +111,21 @@ export const shellSessions = pgTable('shell_sessions', {
   cwd: text('cwd').notNull(),
   cols: integer('cols').notNull(),
   rows: integer('rows').notNull(),
+  ownerKind: text('owner_kind').$type<ShellOwnerKind>().notNull().default('human'),
+  ownerSessionId: text('owner_session_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
+})
+
+export const agentShellTokens = pgTable('agent_shell_tokens', {
+  tokenHash: text('token_hash').primaryKey(),
+  sandboxId: text('sandbox_id')
+    .notNull()
+    .references(() => sandboxes.id, { onDelete: 'cascade' }),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
 })
 
 export const agentSessions = pgTable('agent_sessions', {

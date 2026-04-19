@@ -28,9 +28,9 @@ const { SerializeAddon } = localRequire('@xterm/addon-serialize') as {
   }
 }
 import { ulid } from 'ulid'
-import { spawn as procSpawn } from 'node:child_process'
+import { spawn as procSpawn, type ChildProcess } from 'node:child_process'
 import { db } from '../db/client.js'
-import { shellSessions } from '../db/schema.js'
+import { shellSessions, type ShellOwnerKind } from '../db/schema.js'
 import { logger } from '../logger.js'
 import { sandboxManager } from '../sandbox/manager.js'
 
@@ -38,6 +38,10 @@ const SCROLLBACK_LINES = 10_000
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 32
 const RUN_ONCE_MAX_BYTES = 10 * 1024 * 1024
+// Run-once streaming ring buffer: a late-attaching UI sees this tail.
+const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
+// Retention after a run-once shell exits, so a user can still scroll back.
+const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
 
 export class ShellError extends Error {
   constructor(
@@ -55,6 +59,10 @@ export interface ShellInfo {
   cols: number
   rows: number
   cwd: string
+  ownerKind: ShellOwnerKind
+  ownerSessionId: string | null
+  isRunOnce: boolean
+  exitCode: number | null
   createdAt: Date
   lastActivityAt: Date
   alive: boolean
@@ -65,20 +73,45 @@ type Subscriber = (chunk: string) => void
 interface ShellHandle {
   id: string
   sandboxId: string
-  pty: IPty
+  pty: IPty | null
+  child: ChildProcess | null
   term: HeadlessTerminalType
   serialize: SerializeAddonType
   cols: number
   rows: number
   cwd: string
+  ownerKind: ShellOwnerKind
+  ownerSessionId: string | null
+  isRunOnce: boolean
+  exitCode: number | null
   createdAt: Date
   lastActivityAt: Date
   subscribers: Set<Subscriber>
   disposed: boolean
+  retentionTimer: NodeJS.Timeout | null
+}
+
+export interface RunOnceStreamOpts {
+  sandboxId: string
+  cmd: string
+  cwd?: string
+  cols?: number
+  rows?: number
+  ownerSessionId?: string | null
+  onStdout?: (chunk: Buffer) => void
+  onStderr?: (chunk: Buffer) => void
+  signal?: AbortSignal
+}
+
+export interface RunOnceStreamHandle {
+  shellId: string
+  exitPromise: Promise<{ exitCode: number; truncated: boolean }>
+  dispose(): Promise<void>
 }
 
 class TerminalService {
   private shells = new Map<string, ShellHandle>()
+  private runOnceRetentionMs = DEFAULT_RUN_ONCE_RETENTION_MS
 
   constructor() {
     // When a sandbox is deleted/archived, drop its shells.
@@ -94,6 +127,8 @@ class TerminalService {
     cols?: number
     rows?: number
     cwd?: string
+    ownerKind?: ShellOwnerKind
+    ownerSessionId?: string | null
   }): Promise<ShellInfo> {
     const sb = await sandboxManager.get(opts.sandboxId)
     if (!sb) throw new ShellError('not_found', 'sandbox not found')
@@ -105,6 +140,8 @@ class TerminalService {
     const cols = opts.cols ?? DEFAULT_COLS
     const rows = opts.rows ?? DEFAULT_ROWS
     const cwd = opts.cwd && opts.cwd.trim() !== '' ? opts.cwd : '/workspace'
+    const ownerKind: ShellOwnerKind = opts.ownerKind ?? 'human'
+    const ownerSessionId = opts.ownerSessionId ?? null
 
     const term = new HeadlessTerminal({
       cols,
@@ -131,15 +168,21 @@ class TerminalService {
       id,
       sandboxId: opts.sandboxId,
       pty,
+      child: null,
       term,
       serialize,
       cols,
       rows,
       cwd,
+      ownerKind,
+      ownerSessionId,
+      isRunOnce: false,
+      exitCode: null,
       createdAt: now,
       lastActivityAt: now,
       subscribers: new Set(),
       disposed: false,
+      retentionTimer: null,
     }
 
     pty.onData((data) => {
@@ -155,6 +198,7 @@ class TerminalService {
     })
     pty.onExit(({ exitCode }) => {
       logger.info({ id, exitCode }, 'pty exited')
+      handle.exitCode = exitCode
       this.dispose(id)
     })
 
@@ -165,6 +209,8 @@ class TerminalService {
       cwd,
       cols,
       rows,
+      ownerKind,
+      ownerSessionId,
     })
 
     return this.toInfo(handle)
@@ -175,10 +221,14 @@ class TerminalService {
     return h ? this.toInfo(h) : null
   }
 
+  /**
+   * Shells visible in the Shells panel: human and agent-persistent shells.
+   * Run-once agent shells host live tool output and don't auto-surface here.
+   */
   listBySandbox(sandboxId: string): ShellInfo[] {
     const out: ShellInfo[] = []
     for (const h of this.shells.values()) {
-      if (h.sandboxId === sandboxId) out.push(this.toInfo(h))
+      if (h.sandboxId === sandboxId && !h.isRunOnce) out.push(this.toInfo(h))
     }
     return out
   }
@@ -201,7 +251,7 @@ class TerminalService {
 
   sendKeys(id: string, data: string): void {
     const h = this.shells.get(id)
-    if (!h || h.disposed) return
+    if (!h || h.disposed || !h.pty) return
     h.pty.write(data)
     h.lastActivityAt = new Date()
   }
@@ -211,10 +261,12 @@ class TerminalService {
     if (!h || h.disposed) return
     h.cols = cols
     h.rows = rows
-    try {
-      h.pty.resize(cols, rows)
-    } catch (err) {
-      logger.warn({ err, id }, 'pty resize failed')
+    if (h.pty) {
+      try {
+        h.pty.resize(cols, rows)
+      } catch (err) {
+        logger.warn({ err, id }, 'pty resize failed')
+      }
     }
     h.term.resize(cols, rows)
     await db.update(shellSessions).set({ cols, rows }).where(eq(shellSessions.id, id))
@@ -225,6 +277,10 @@ class TerminalService {
     if (!h) return
     h.disposed = true
     this.shells.delete(id)
+    if (h.retentionTimer) {
+      clearTimeout(h.retentionTimer)
+      h.retentionTimer = null
+    }
     for (const sub of h.subscribers) {
       try {
         sub('\r\n\x1b[2m[session closed]\x1b[0m\r\n')
@@ -233,10 +289,19 @@ class TerminalService {
       }
     }
     h.subscribers.clear()
-    try {
-      h.pty.kill()
-    } catch {
-      // ignore — probably already exited
+    if (h.pty) {
+      try {
+        h.pty.kill()
+      } catch {
+        // ignore — probably already exited
+      }
+    }
+    if (h.child) {
+      try {
+        h.child.kill('SIGKILL')
+      } catch {
+        // ignore
+      }
     }
     try {
       h.term.dispose()
@@ -341,6 +406,166 @@ class TerminalService {
     })
   }
 
+  /**
+   * Streaming sibling of `runOnce`: runs a command in the sandbox, streams
+   * stdout/stderr through a headless xterm so the existing `/ws/shell/:id`
+   * path can attach and replay scrollback, and resolves `exitPromise` when
+   * the command completes. After exit, the handle is retained for
+   * `runOnceRetentionMs` (default 10 min) so late-attaching UIs still see
+   * the full scrollback.
+   *
+   * A `shell_sessions` row is written synchronously with
+   * `owner_kind='agent'` before the handle is returned; the row is deleted
+   * on dispose.
+   */
+  runOnceStream(opts: RunOnceStreamOpts): RunOnceStreamHandle {
+    const id = ulid().toLowerCase()
+    const cols = opts.cols ?? DEFAULT_COLS
+    const rows = opts.rows ?? DEFAULT_ROWS
+    const cwd = opts.cwd && opts.cwd.trim() !== '' ? opts.cwd : '/workspace'
+    const ownerSessionId = opts.ownerSessionId ?? null
+
+    const term = new HeadlessTerminal({
+      cols,
+      rows,
+      scrollback: SCROLLBACK_LINES,
+      allowProposedApi: true,
+    })
+    const serialize = new SerializeAddon()
+    term.loadAddon(serialize as unknown as ITerminalAddon)
+
+    const now = new Date()
+    const handle: ShellHandle = {
+      id,
+      sandboxId: opts.sandboxId,
+      pty: null,
+      child: null,
+      term,
+      serialize,
+      cols,
+      rows,
+      cwd,
+      ownerKind: 'agent',
+      ownerSessionId,
+      isRunOnce: true,
+      exitCode: null,
+      createdAt: now,
+      lastActivityAt: now,
+      subscribers: new Set(),
+      disposed: false,
+      retentionTimer: null,
+    }
+    this.shells.set(id, handle)
+
+    let ringBytes = 0
+    let truncated = false
+    const writeChunk = (chunk: Buffer) => {
+      if (handle.disposed) return
+      handle.lastActivityAt = new Date()
+      if (ringBytes + chunk.length > RUN_ONCE_STREAM_BUFFER_BYTES) {
+        // Headless xterm keeps its own scrollback; we only use ringBytes to
+        // mark the overall output as truncated for the exit event.
+        truncated = true
+      }
+      ringBytes += chunk.length
+      const str = chunk.toString('utf8')
+      term.write(str)
+      for (const sub of handle.subscribers) {
+        try {
+          sub(str)
+        } catch (err) {
+          logger.warn({ err, id }, 'run-once subscriber threw')
+        }
+      }
+    }
+
+    const exitPromise = (async (): Promise<{ exitCode: number; truncated: boolean }> => {
+      const sb = await sandboxManager.get(opts.sandboxId)
+      if (!sb) throw new ShellError('not_found', 'sandbox not found')
+      if (!sb.containerId || !sb.running) {
+        throw new ShellError('sandbox_unavailable', 'sandbox is not running')
+      }
+
+      await db.insert(shellSessions).values({
+        id,
+        sandboxId: opts.sandboxId,
+        cwd,
+        cols,
+        rows,
+        ownerKind: 'agent',
+        ownerSessionId,
+      })
+
+      return await new Promise<{ exitCode: number; truncated: boolean }>((resolve, reject) => {
+        if (handle.disposed) {
+          resolve({ exitCode: 130, truncated: false })
+          return
+        }
+        const child = procSpawn(
+          'docker',
+          ['exec', '-w', cwd, sb.containerId!, 'bash', '-lc', opts.cmd],
+          { stdio: ['ignore', 'pipe', 'pipe'] },
+        )
+        handle.child = child
+
+        const onAbort = () => {
+          try {
+            child.kill('SIGKILL')
+          } catch {
+            // ignore
+          }
+        }
+        if (opts.signal) {
+          if (opts.signal.aborted) onAbort()
+          else opts.signal.addEventListener('abort', onAbort, { once: true })
+        }
+
+        child.stdout.on('data', (c: Buffer) => {
+          writeChunk(c)
+          opts.onStdout?.(c)
+        })
+        child.stderr.on('data', (c: Buffer) => {
+          writeChunk(c)
+          opts.onStderr?.(c)
+        })
+
+        child.on('error', (err) => {
+          opts.signal?.removeEventListener('abort', onAbort)
+          reject(new ShellError('sandbox_unavailable', `docker exec failed: ${err.message}`))
+        })
+        child.on('exit', (code, signal) => {
+          opts.signal?.removeEventListener('abort', onAbort)
+          const exitCode = code ?? (signal ? 128 : 0)
+          handle.exitCode = exitCode
+          handle.child = null
+          // Flush xterm's write buffer so a late attach's snapshot reflects
+          // everything we saw from the child.
+          term.write('', () => {
+            if (!handle.disposed && this.runOnceRetentionMs > 0) {
+              handle.retentionTimer = setTimeout(
+                () => this.dispose(id),
+                this.runOnceRetentionMs,
+              )
+              handle.retentionTimer.unref?.()
+            } else if (!handle.disposed) {
+              this.dispose(id)
+            }
+            resolve({ exitCode, truncated })
+          })
+        })
+      })
+    })()
+    exitPromise.catch(() => undefined) // prevent unhandled rejection
+
+    return {
+      shellId: id,
+      exitPromise,
+      dispose: async () => {
+        this.dispose(id)
+      },
+    }
+  }
+
   private toInfo(h: ShellHandle): ShellInfo {
     return {
       id: h.id,
@@ -348,15 +573,23 @@ class TerminalService {
       cols: h.cols,
       rows: h.rows,
       cwd: h.cwd,
+      ownerKind: h.ownerKind,
+      ownerSessionId: h.ownerSessionId,
+      isRunOnce: h.isRunOnce,
+      exitCode: h.exitCode,
       createdAt: h.createdAt,
       lastActivityAt: h.lastActivityAt,
-      alive: !h.disposed,
+      alive: !h.disposed && h.exitCode === null,
     }
   }
 
-  // Test helper.
+  // Test helpers.
   __countShells(): number {
     return this.shells.size
+  }
+  /** Reduce retention for tests. */
+  __setRunOnceRetentionMs(ms: number): void {
+    this.runOnceRetentionMs = ms
   }
 }
 

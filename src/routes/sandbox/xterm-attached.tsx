@@ -4,7 +4,12 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { trpc } from '../../trpc'
 
-export function Terminal({ shellId }: { shellId: string }) {
+/**
+ * Attaches an xterm instance to an existing shell session via `/ws/shell/:id`.
+ * Works for any shell kind (human, agent-persistent, agent-run-once) — the
+ * shell's owner is determined server-side; this component only needs the id.
+ */
+export function XTermAttached({ shellId }: { shellId: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const resize = trpc.shell.resize.useMutation()
 
