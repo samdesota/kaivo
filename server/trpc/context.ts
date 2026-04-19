@@ -1,6 +1,6 @@
 import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
 import { resolveSession, type Session } from '../auth/service.js'
-import { SESSION_COOKIE } from '../auth/cookie.js'
+import { SESSION_COOKIE, clearSessionCookie } from '../auth/cookie.js'
 
 export interface Context {
   req: CreateFastifyContextOptions['req']
@@ -39,5 +39,16 @@ export async function createContext({ req, res }: CreateFastifyContextOptions): 
     (req as unknown as { cookies?: Record<string, string> }).cookies?.[SESSION_COOKIE] ??
     parseCookieHeader(req.headers?.cookie as string | undefined, SESSION_COOKIE)
   const session = sid ? await resolveSession(sid) : null
+  // If the client sent a cookie but it didn't resolve (session expired,
+  // DB wiped, different env) clear it on the response. Otherwise the stale
+  // cookie keeps riding along on every request and, combined with SPA auth
+  // redirects, can land the user in a redirect loop.
+  if (sid && !session && 'setCookie' in (res as object)) {
+    try {
+      clearSessionCookie(res as unknown as Parameters<typeof clearSessionCookie>[0])
+    } catch {
+      /* res may be a raw IncomingMessage upgrade — nothing to clear there */
+    }
+  }
   return { req, res, ip: clientIp(req), session }
 }
