@@ -20,9 +20,17 @@ function toTrpcError(err: unknown): TRPCError {
             : 'INTERNAL_SERVER_ERROR'
     return new TRPCError({ code, message: err.message, cause: err })
   }
+  // Non-AgentError: OpenCode SDK 1.4.17's `throwOnError: true` throws
+  // whatever the upstream body was, which is often a bare string (e.g.
+  // "Unauthorized"). Coerce to a string message so clients see something.
+  const msg =
+    typeof err === 'string'
+      ? err
+      : (err as { message?: string })?.message ?? String(err ?? 'agent error')
   return new TRPCError({
     code: 'INTERNAL_SERVER_ERROR',
-    message: (err as { message?: string })?.message ?? 'agent error',
+    message: msg,
+    cause: err,
   })
 }
 

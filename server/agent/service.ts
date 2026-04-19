@@ -10,6 +10,7 @@ import {
   OpenCodeError,
   getOpenCodePassword,
   isOpenCodeReady,
+  opencodeBasicAuthHeader,
   resolveEndpoint,
   startOpenCode,
 } from './opencode.js'
@@ -159,7 +160,9 @@ class AgentService {
     if (cached) return cached
     const client = createOpencodeClient({
       baseUrl: `http://${ep.ip}:${ep.port}`,
-      headers: { Authorization: `Bearer ${ep.password}` },
+      // OpenCode's server enforces Basic auth with username=opencode when
+      // OPENCODE_SERVER_PASSWORD is set; Bearer was rejected with 401.
+      headers: { Authorization: opencodeBasicAuthHeader(ep.password) },
     })
     this.clients.set(sandboxId, client)
     return client

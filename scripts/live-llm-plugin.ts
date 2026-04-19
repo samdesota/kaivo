@@ -239,10 +239,12 @@ async function main(): Promise<void> {
   } catch (err) {
     failedReason = (err as Error).message ?? String(err)
   } finally {
-    if (sandboxId) {
+    if (sandboxId && !process.env.LIVE_LLM_KEEP_SANDBOX) {
       log(`cleanup: archive + delete sandbox ${sandboxId}`)
       await trpcMutate('sandbox.archive', { id: sandboxId }).catch(() => undefined)
       await trpcMutate('sandbox.delete', { id: sandboxId }).catch(() => undefined)
+    } else if (sandboxId) {
+      log(`LIVE_LLM_KEEP_SANDBOX set — leaving sandbox ${sandboxId} for inspection`)
     }
     await pool.end().catch(() => undefined)
   }
