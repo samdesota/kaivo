@@ -1,0 +1,19 @@
+{
+  "name": "@cloud-code/opencode-plugin",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that bridges bash/pty tool calls to the cloud-code app's agentShell router.",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.4.17",
+    "tsup": "^8.5.0",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.4",
+    "zod": "4.1.8"
+  }
+}

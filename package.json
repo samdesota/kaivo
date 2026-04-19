@@ -14,12 +14,14 @@
     "build:client": "vite build",
     "build:server": "tsup",
     "start": "node dist/server/index.js",
-    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json",
+    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json && cd packages/opencode-plugin && npm run typecheck",
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "db:migrate": "tsx server/db/migrate-cli.ts",
-    "docker:sandbox": "docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox"
+    "build:plugin": "cd packages/opencode-plugin && npm install --no-audit --no-fund --silent && npm run build",
+    "prepare:sandbox-image": "npm run build:plugin && mkdir -p docker/base-sandbox/plugin && cp packages/opencode-plugin/dist/index.js docker/base-sandbox/plugin/index.js",
+    "docker:sandbox": "npm run prepare:sandbox-image && docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

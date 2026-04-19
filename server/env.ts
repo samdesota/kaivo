@@ -17,6 +17,10 @@ const schema = z.object({
   ADMIN_PASSWORD_BOOTSTRAP: z.string().optional(),
   SANDBOX_BASE_IMAGE: z.string().default('cloud-code-sandbox:dev'),
   DOCKER_NETWORK: z.string().default('cloud-code-net'),
+  // URL sandboxes use to reach the app for agentShell.* calls. Container
+  // DNS on the shared docker network, so `http://app:3000` is the default.
+  // Override in dev when the app listens on the host (`host.docker.internal`).
+  SANDBOX_APP_URL: z.string().default('http://app:3000'),
   COOKIE_SECURE: z
     .union([z.literal('true'), z.literal('false')])
     .optional()

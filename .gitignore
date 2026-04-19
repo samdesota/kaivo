@@ -1,5 +1,6 @@
 node_modules
 dist
+docker/base-sandbox/plugin/
 .env
 .env.local
 .env.*.local

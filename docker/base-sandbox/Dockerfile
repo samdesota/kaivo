@@ -31,12 +31,17 @@ RUN npm install -g --omit=dev "opencode-ai@${OPENCODE_VERSION}" \
  && which opencode \
  && opencode --version
 
+# cloud-code OpenCode plugin. Built in CI (`npm run build` in
+# packages/opencode-plugin) and COPY'd into the image. Bundle is dep-free.
+COPY plugin/index.js /opt/cloud-code-plugin/index.js
+
 # Non-root coder user (uid/gid 1000 matches app container + workspace)
 RUN groupadd -g 1000 coder \
  && useradd -m -u 1000 -g coder -s /bin/bash coder
 
 RUN mkdir -p /workspace /home/coder/.opencode \
- && chown -R coder:coder /workspace /home/coder
+ && chown -R coder:coder /workspace /home/coder \
+ && chmod -R a+r /opt/cloud-code-plugin
 
 USER coder
 WORKDIR /workspace

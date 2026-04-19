@@ -11,6 +11,11 @@ export default tseslint.config(
       '.vite/**',
       'coverage/**',
       'migrations/**',
+      'docker/base-sandbox/plugin/**',
+      // Plugin has its own tsconfig; it's typechecked separately. Skip it
+      // here so the root eslint doesn't reach bundled deps or need its
+      // devDependencies installed to type-aware lint.
+      'packages/**',
     ],
   },
   ...tseslint.configs.recommended,

@@ -1,14 +1,22 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { request as undiciRequest } from 'undici'
 import { db } from '../db/client.js'
 import { repos, sandboxes } from '../db/schema.js'
+import { env } from '../env.js'
 import { logger } from '../logger.js'
 import { getSecret, putSecret } from '../secrets/index.js'
 import { sandboxManager } from '../sandbox/manager.js'
+import { opencodeDir } from '../sandbox/paths.js'
 import { previewService } from '../preview/service.js'
 import { buildProviderEnv } from './providers.js'
+import {
+  mintAgentShellToken,
+  revokeAgentShellTokensForSandbox,
+} from './token.js'
 
 export class OpenCodeError extends Error {
   constructor(
@@ -107,12 +115,22 @@ export async function startOpenCode(sandboxId: string): Promise<OpenCodeEndpoint
   if (Object.keys(providerEnv).length === 0) {
     logger.warn({ sandboxId }, 'starting opencode without any provider keys configured')
   }
-  const env: Record<string, string> = {
+
+  // Rotate agent-shell token every opencode boot. Old tokens die with the
+  // previous opencode serve process; revoking them ensures a stale plugin
+  // copy can't reach the app.
+  await revokeAgentShellTokensForSandbox(sandboxId)
+  const { token: agentShellToken } = await mintAgentShellToken(sandboxId)
+  await ensurePluginConfig(sandboxId)
+
+  const execEnv: Record<string, string> = {
     ...providerEnv,
     // OpenCode's server enforces this as a bearer check; log line reads
     // "OPENCODE_SERVER_PASSWORD is not set; server is unsecured" when absent.
     OPENCODE_SERVER_PASSWORD: password,
     HOME: '/home/coder',
+    CLOUDCODE_AGENT_TOKEN: agentShellToken,
+    CLOUDCODE_APP_URL: env.SANDBOX_APP_URL,
   }
 
   // Kill any stale process (readiness-probed false but still running).
@@ -138,7 +156,7 @@ export async function startOpenCode(sandboxId: string): Promise<OpenCodeEndpoint
     // Log to /tmp; /workspace is user-owned and keeps logs out of git repos.
     `opencode serve --port ${port} --hostname 0.0.0.0 >/tmp/opencode.log 2>&1 &`,
   ]
-  await runExec(sb.containerId, cmd, env)
+  await runExec(sb.containerId, cmd, execEnv)
 
   const deadline = Date.now() + READY_TIMEOUT_MS
   while (Date.now() < deadline) {
@@ -275,4 +293,43 @@ function runExec(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/**
+ * The sandbox image ships our OpenCode plugin at
+ * `/opt/cloud-code-plugin/index.js`. Each sandbox's `~/.opencode/` is
+ * bind-mounted from the host (see sandbox/manager.ts), so writing the
+ * config here makes it visible inside the container.
+ *
+ * We merge into any existing config so operator overrides (provider
+ * customisations, etc.) survive.
+ */
+const PLUGIN_CONTAINER_PATH = '/opt/cloud-code-plugin/index.js'
+
+async function ensurePluginConfig(sandboxId: string): Promise<void> {
+  const dir = opencodeDir(sandboxId)
+  const file = path.join(dir, 'config.json')
+  let current: Record<string, unknown> = {}
+  try {
+    const raw = await fs.readFile(file, 'utf8')
+    current = JSON.parse(raw) as Record<string, unknown>
+  } catch (err) {
+    const e = err as { code?: string }
+    if (e.code !== 'ENOENT') {
+      logger.warn({ err, sandboxId }, 'opencode config.json read failed; overwriting')
+      current = {}
+    }
+  }
+  const pluginList = Array.isArray(current.plugin)
+    ? (current.plugin as unknown[])
+    : []
+  const already = pluginList.some(
+    (p) =>
+      (typeof p === 'string' && p === PLUGIN_CONTAINER_PATH) ||
+      (Array.isArray(p) && p[0] === PLUGIN_CONTAINER_PATH),
+  )
+  const next = already ? pluginList : [...pluginList, PLUGIN_CONTAINER_PATH]
+  const merged = { ...current, plugin: next }
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(file, JSON.stringify(merged, null, 2), 'utf8')
 }
