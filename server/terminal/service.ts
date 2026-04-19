@@ -249,6 +249,13 @@ class TerminalService {
     }
   }
 
+  /** Returns the current scrollback snapshot, or null if unknown/disposed. */
+  snapshot(id: string): string | null {
+    const h = this.shells.get(id)
+    if (!h || h.disposed) return null
+    return h.serialize.serialize({ scrollback: SCROLLBACK_LINES })
+  }
+
   sendKeys(id: string, data: string): void {
     const h = this.shells.get(id)
     if (!h || h.disposed || !h.pty) return
