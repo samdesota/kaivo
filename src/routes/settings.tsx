@@ -3,6 +3,7 @@ import { Link, useSearch } from '@tanstack/react-router'
 import { trpc } from '../trpc'
 import { Button, Card, FormError, Input } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
+import { ProvidersSection } from './settings/providers'
 
 export function SettingsPage() {
   const search = useSearch({ strict: false }) as { github?: string }
@@ -54,6 +55,8 @@ export function SettingsPage() {
       </header>
 
       <main className="mx-auto max-w-3xl space-y-6 p-8">
+        <ProvidersSection />
+
         <Card className="max-w-none">
           <h2 className="mb-1 text-lg font-medium">GitHub integration</h2>
           <p className="mb-4 text-sm text-neutral-400">

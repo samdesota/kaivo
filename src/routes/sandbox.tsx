@@ -8,9 +8,10 @@ import { FileViewer } from './sandbox/file-viewer'
 import { ReposPanel } from './sandbox/repos'
 import { PortsPanel } from './sandbox/ports'
 import { PreviewFrame } from './sandbox/preview-frame'
+import { AgentPanel } from './sandbox/agent-panel'
 
 type SidebarTab = 'files' | 'repos' | 'ports'
-type MainTab = 'file' | 'preview'
+type MainTab = 'file' | 'preview' | 'agent'
 
 export function SandboxDetailPage() {
   const { id } = useParams({ from: '/sandbox/$id' })
@@ -112,6 +113,17 @@ export function SandboxDetailPage() {
             >
               {openPath ? openPath : 'file'}
             </button>
+            <button
+              onClick={() => setMainTab('agent')}
+              className={
+                'rounded px-2 py-0.5 ' +
+                (mainTab === 'agent'
+                  ? 'bg-neutral-800 text-neutral-100'
+                  : 'text-neutral-400 hover:bg-neutral-900')
+              }
+            >
+              agent
+            </button>
             {previewPort != null && (
               <button
                 onClick={() => setMainTab('preview')}
@@ -127,7 +139,9 @@ export function SandboxDetailPage() {
             )}
           </div>
           <div className="min-h-[40%] flex-1 overflow-hidden border-b border-neutral-800">
-            {mainTab === 'preview' && previewPort != null ? (
+            {mainTab === 'agent' ? (
+              <AgentPanel sandboxId={id} />
+            ) : mainTab === 'preview' && previewPort != null ? (
               <PreviewFrame
                 sandboxId={id}
                 port={previewPort}

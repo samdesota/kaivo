@@ -21,6 +21,9 @@ import { sandboxManager } from './sandbox/manager.js'
 import { registerShellWsRoutes } from './ws/shell.js'
 import { registerGitHubRoutes } from './http/github.js'
 import { registerPreviewProxy } from './preview/proxy.js'
+import { registerAgentProxy } from './agent/proxy.js'
+import { agentService } from './agent/service.js'
+import { bootstrapProvidersFromEnv } from './agent/providers.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
@@ -52,6 +55,7 @@ async function buildServer() {
   await server.register(fastifyCookie, {})
   await registerShellWsRoutes(server)
   registerPreviewProxy(server)
+  registerAgentProxy(server)
   registerGitHubRoutes(server)
 
   server.get('/healthz', async () => ({ ok: true }))
@@ -76,9 +80,18 @@ async function buildServer() {
       prefix: '/',
       index: ['index.html'],
     })
-    // SPA fallback for client-side routes
+    // SPA fallback for client-side routes. Proxy routes (`/preview/...`,
+    // `/sandbox/:id/agent/...`) are intercepted by their own onRequest hooks
+    // and will have already responded by the time not-found runs — but we
+    // still return 404 on the off-chance, since the SPA doesn't own them.
     server.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/trpc') || req.url.startsWith('/api') || req.url.startsWith('/agent')) {
+      if (
+        req.url.startsWith('/trpc') ||
+        req.url.startsWith('/api') ||
+        req.url.startsWith('/agent') ||
+        req.url.startsWith('/preview/') ||
+        /^\/sandbox\/[^/]+\/agent(\/|$)/.test(req.url)
+      ) {
         return reply.code(404).send({ error: 'not found' })
       }
       return reply.sendFile('index.html')
@@ -92,12 +105,17 @@ async function main() {
   await loadMasterKey()
   await runMigrations(pool)
   await seedAdminFromEnv()
+  await bootstrapProvidersFromEnv()
+
+  agentService.wireSandboxLifecycle()
 
   const dockerOk = await dockerPing()
   if (dockerOk) {
     try {
       await ensureNetwork(env.DOCKER_NETWORK)
       await sandboxManager.reconcile()
+      // Kick off opencode on any surviving sandboxes. Non-fatal on failure.
+      await agentService.reconcile()
     } catch (err) {
       logger.warn({ err }, 'sandbox reconcile failed')
     }
@@ -121,10 +139,21 @@ async function main() {
   }, 10_000)
   reconcileTimer.unref()
 
+  // Re-bootstrap opencode on any sandbox where the process has died; longer
+  // interval than the sandbox reconcile because the ready-probe inside each
+  // call is an HTTP round-trip per sandbox.
+  const agentReconcileTimer = setInterval(() => {
+    agentService
+      .reconcile()
+      .catch((err) => logger.warn({ err }, 'agent reconcile failed'))
+  }, 30_000)
+  agentReconcileTimer.unref()
+
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'shutting down')
     clearInterval(purgeTimer)
     clearInterval(reconcileTimer)
+    clearInterval(agentReconcileTimer)
     try {
       await server.close()
       await pool.end()

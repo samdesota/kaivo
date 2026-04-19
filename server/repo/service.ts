@@ -7,6 +7,7 @@ import { logger } from '../logger.js'
 import { sandboxManager } from '../sandbox/manager.js'
 import { jobManager, type Job } from '../jobs/manager.js'
 import { githubService, GitHubError } from '../github/service.js'
+import { registerProject } from '../agent/opencode.js'
 
 export class RepoError extends Error {
   constructor(
@@ -288,6 +289,10 @@ class RepoService {
         githubRepoId: ctx.githubRepoId,
         githubFullName: ctx.githubFullName,
       })
+
+      // Tell OpenCode about the new repo so it shows up in the agent's
+      // folder picker. Non-fatal — the clone succeeded either way.
+      void registerProject(ctx.sandboxId, ctx.workspacePath).catch(() => {})
 
       await jobManager.update(ctx.job.id, {
         state: 'succeeded',

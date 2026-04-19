@@ -26,8 +26,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # OpenCode CLI (phase 4 uses `opencode serve`; installed here so the image is ready).
 # The install script is unreliable inside CI builds (`| bash` silently no-ops on
 # any 4xx); install via npm so the build fails if the package isn't fetched.
-ARG OPENCODE_VERSION=
-RUN npm install -g --omit=dev "opencode-ai${OPENCODE_VERSION:+@}${OPENCODE_VERSION}" \
+ARG OPENCODE_VERSION=1.4.14
+RUN npm install -g --omit=dev "opencode-ai@${OPENCODE_VERSION}" \
  && which opencode \
  && opencode --version
 

@@ -126,6 +126,11 @@ class SandboxManager {
           '/run': 'rw,nosuid,size=64m',
           '/home/coder': 'rw,nosuid,size=512m,uid=1000,gid=1000',
         },
+        // Lets the sandbox reach the operator's host loopback — required when
+        // provider base URLs (e.g. a local LiteLLM proxy) point at
+        // host.docker.internal. Harmless on Docker Desktop (where the alias
+        // is already present) and required on Linux (where it isn't).
+        ExtraHosts: ['host.docker.internal:host-gateway'],
         Memory: 4 * 1024 * 1024 * 1024, // 4 GiB
         NanoCpus: 2 * 1_000_000_000,
         PidsLimit: 512,

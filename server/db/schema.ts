@@ -1,9 +1,10 @@
-import { pgTable, text, timestamp, integer, check, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, integer, bigint, check, jsonb } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 export type SandboxStatus = 'active' | 'archived' | 'crashed'
 export type JobState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type RepoSource = 'github' | 'url'
+export type AgentSessionStatus = 'active' | 'archived' | 'unavailable'
 
 export const admin = pgTable(
   'admin',
@@ -113,4 +114,29 @@ export const shellSessions = pgTable('shell_sessions', {
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
+})
+
+export const agentSessions = pgTable('agent_sessions', {
+  id: text('id').primaryKey(),
+  sandboxId: text('sandbox_id')
+    .notNull()
+    .references(() => sandboxes.id, { onDelete: 'cascade' }),
+  opencodeSessionId: text('opencode_session_id').notNull(),
+  title: text('title'),
+  status: text('status').$type<AgentSessionStatus>().notNull().default('active'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastActivityAt: timestamp('last_activity_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+})
+
+export const agentTranscripts = pgTable('agent_transcripts', {
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => agentSessions.id, { onDelete: 'cascade' }),
+  seq: bigint('seq', { mode: 'number' }).notNull(),
+  role: text('role').notNull(),
+  contentJson: jsonb('content_json').$type<Record<string, unknown>>().notNull(),
+  ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
 })

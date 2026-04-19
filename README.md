@@ -5,7 +5,17 @@ A cloud coding environment that runs as a single Docker deployment inside a VPC.
 - [`docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-spec.md`](docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-spec.md)
 - [`docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-plan.md`](docs/fractal/2026-04-18-cloud-coding-env/cloud-coding-env-plan.md)
 
-## Status — Phase 3
+## Status — Phase 4
+
+Shipped in Phase 4 (in addition to Phase 3):
+
+- Built-in **OpenCode agent**: each active sandbox gets `opencode serve` bootstrapped on container start, bound to the container's docker-network IP (never published to the host) and gated by a per-sandbox random bearer token stored encrypted in `secrets`.
+- `AgentService` — tRPC `agent.*` surface: `sessionList`, `sessionStart`, `sessionSend`, `sessionStatus`, `sessionApprove`, `sessionReject`, and a `transcript` subscription. Pending approvals are tracked in-memory and mirrored via events; `agent_sessions` + `agent_transcripts` persist a minimal cross-session history.
+- `AgentUIProxy` — `/sandbox/:id/agent/*` (HTTP + WS) reverse-proxies the OpenCode web UI. Admin cookie gates the proxy; the bearer token is injected as `Authorization` upstream so the embedded iframe doesn't prompt for a second login.
+- **Provider keys**: Settings UI for Anthropic and OpenAI (API key + optional base URL). Stored encrypted; the sandbox's `opencode serve` receives them via `-e` flags at start.
+- **Env bootstrap**: `ANTHROPIC_API_KEY_BOOTSTRAP` / `ANTHROPIC_BASE_URL_BOOTSTRAP` (and OpenAI equivalents) seed the encrypted store on first run. A one-line log tells the operator they can unset the env var afterwards.
+- **Upgrading existing sandboxes**: the sandbox detail page shows an "Agent not running" state with a "Start agent" button for sandboxes created before Phase 4 — the boot reconciler also auto-starts OpenCode on surviving sandboxes.
+- **Loopback rewrite**: provider base URLs like `http://localhost:8137` (common for local LiteLLM / Anthropic-compatible proxies) are rewritten to `http://host.docker.internal:8137` before being injected into the sandbox. New sandbox containers get `ExtraHosts: host.docker.internal:host-gateway` so this works on both Docker Desktop and Linux hosts.
 
 Shipped in Phase 3 (in addition to Phase 2):
 
@@ -108,6 +118,7 @@ See `.env.example` for the full list. Highlights:
 - `DATA_DIR` — where `secrets.key`, workspaces, and app-local state live. Defaults to `/data` in Docker, `./data` locally.
 - `ADMIN_PASSWORD_BOOTSTRAP` — optional first-run admin password. Ignored once an admin row exists.
 - `PUBLIC_URL` — used by the GitHub App flow (Phase 3) and the agent-tool manifest (Phase 5).
+- `ANTHROPIC_API_KEY_BOOTSTRAP` / `ANTHROPIC_BASE_URL_BOOTSTRAP` (plus OpenAI equivalents) — optional; seeded into the encrypted `secrets` table on first run when the corresponding row is absent. Remove from the environment once you see the "bootstrapped" log line.
 
 ## Layout
 
@@ -125,6 +136,7 @@ See `.env.example` for the full list. Highlights:
 │   ├── repo/            # RepoService (clone jobs)
 │   ├── github/          # GitHubService (app install, install tokens)
 │   ├── preview/         # PreviewService (port scan) + reverse proxy
+│   ├── agent/           # OpenCode bootstrap, AgentService, AgentUIProxy
 │   ├── http/            # non-tRPC HTTP routes (GitHub App manifest flow)
 │   ├── secrets/         # AES-256-GCM master-key module
 │   ├── trpc/            # tRPC init + routers

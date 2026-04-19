@@ -7,6 +7,8 @@ import { repoRouter } from './routers/repo.js'
 import { githubRouter } from './routers/github.js'
 import { previewRouter } from './routers/preview.js'
 import { jobRouter } from './routers/job.js'
+import { agentRouter } from './routers/agent.js'
+import { settingsRouter } from './routers/settings.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -17,6 +19,8 @@ export const appRouter = router({
   github: githubRouter,
   preview: previewRouter,
   job: jobRouter,
+  agent: agentRouter,
+  settings: settingsRouter,
 })
 
 export type AppRouter = typeof appRouter
