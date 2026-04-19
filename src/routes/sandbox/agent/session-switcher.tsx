@@ -116,13 +116,12 @@ function NewSessionModal({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const msg = prompt.trim()
-    if (!msg) return
     setErr(null)
+    const msg = prompt.trim()
     try {
       const res = await start.mutateAsync({
         sandboxId,
-        prompt: msg,
+        prompt: msg || undefined,
         title: title.trim() || undefined,
       })
       onCreated(res.id)
@@ -152,13 +151,13 @@ function NewSessionModal({
           className="mb-3 block w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 focus:border-brand-500/60 focus:outline-none"
         />
         <label className="mb-2 block text-[11px] uppercase tracking-wide text-neutral-500">
-          Initial prompt
+          Initial prompt (optional)
         </label>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={4}
-          placeholder="What do you want the agent to do?"
+          placeholder="Leave blank to start empty and use the composer."
           autoFocus
           className="mb-3 block w-full resize-none rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 focus:border-brand-500/60 focus:outline-none"
         />
@@ -173,7 +172,7 @@ function NewSessionModal({
           </button>
           <button
             type="submit"
-            disabled={start.isPending || !prompt.trim()}
+            disabled={start.isPending}
             className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
           >
             {start.isPending ? 'Creating…' : 'Create'}

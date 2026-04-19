@@ -58,7 +58,7 @@ export const agentRouter = router({
     .input(
       z.object({
         sandboxId: z.string().min(1),
-        prompt: z.string().min(1).max(100_000),
+        prompt: z.string().min(1).max(100_000).optional(),
         title: z.string().min(1).max(200).optional(),
         model: z
           .object({ providerID: z.string().min(1), modelID: z.string().min(1) })

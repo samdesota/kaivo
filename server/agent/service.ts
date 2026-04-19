@@ -191,7 +191,7 @@ class AgentService {
 
   async sessionStart(input: {
     sandboxId: string
-    prompt: string
+    prompt?: string
     title?: string
     model?: { providerID: string; modelID: string }
   }): Promise<AgentSessionSummary> {
@@ -214,17 +214,20 @@ class AgentService {
       lastActivityAt: now,
     })
 
-    // Fire the initial prompt (async: don't block returning the id; UI can
-    // subscribe to the transcript stream before we return anyway).
-    void client.session
-      .promptAsync({
-        path: { id: ocSession.id },
-        body: {
-          parts: [{ type: 'text', text: input.prompt }],
-          ...(input.model ? { model: input.model } : {}),
-        },
-      })
-      .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
+    // Fire the initial prompt asynchronously if provided; users can also
+    // create an empty session and send the first message via the composer.
+    if (input.prompt) {
+      const prompt = input.prompt
+      void client.session
+        .promptAsync({
+          path: { id: ocSession.id },
+          body: {
+            parts: [{ type: 'text', text: prompt }],
+            ...(input.model ? { model: input.model } : {}),
+          },
+        })
+        .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
+    }
 
     this.ensureSubscription(input.sandboxId)
 
