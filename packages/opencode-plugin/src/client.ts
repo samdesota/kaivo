@@ -199,21 +199,29 @@ export class AgentShellClient {
 
 function parseSseFrame(frame: string): RunOnceEvent | null {
   const lines = frame.split('\n')
+  let eventName = ''
   let data = ''
   for (const l of lines) {
-    if (l.startsWith('data:')) data += l.slice(5).trim()
+    if (l.startsWith('event:')) eventName = l.slice(6).trim()
+    else if (l.startsWith('data:')) data += l.slice(5).trim()
   }
+  // fastify-tRPC wraps real payloads in `data: {"json": <event>}` and uses
+  // `event: connected` / `event: return` as stream-lifecycle markers we
+  // ignore.
+  if (eventName === 'connected' || eventName === 'return') return null
   if (!data || data === '[DONE]') return null
   try {
     const parsed = JSON.parse(data) as {
-      result?: { type?: string; data?: unknown }
-      error?: { message?: string }
+      json?: unknown
+      error?: { message?: string; json?: { message?: string } }
+      // Some tRPC variants use this older shape.
+      result?: { data?: unknown }
     }
-    if (parsed.error) throw new Error(parsed.error.message ?? 'sse trpc error')
-    // httpSubscriptionLink wraps payloads in { result: { type: 'data', data: ... } }.
-    const payload = parsed.result?.data
-    const decoded = sjDecode(payload) as RunOnceEvent | undefined
-    return decoded ?? null
+    if (parsed.error) {
+      throw new Error(parsed.error.message ?? parsed.error.json?.message ?? 'sse trpc error')
+    }
+    const payload = 'json' in parsed ? parsed.json : parsed.result?.data
+    return (sjDecode({ json: payload }) as RunOnceEvent | undefined) ?? null
   } catch (err) {
     void err
     return null

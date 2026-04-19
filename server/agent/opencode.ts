@@ -1,5 +1,3 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import { eq } from 'drizzle-orm'
@@ -10,7 +8,6 @@ import { env } from '../env.js'
 import { logger } from '../logger.js'
 import { getSecret, putSecret } from '../secrets/index.js'
 import { sandboxManager } from '../sandbox/manager.js'
-import { opencodeDir } from '../sandbox/paths.js'
 import { previewService } from '../preview/service.js'
 import { buildProviderEnv } from './providers.js'
 import {
@@ -34,7 +31,10 @@ export class OpenCodeError extends Error {
 }
 
 const DEFAULT_PORT = 4096
-const READY_TIMEOUT_MS = 5_000
+// Raised from 5s: `opencode serve` now installs the `@opencode-ai/plugin`
+// peer package into `~/.config/opencode/node_modules` on first boot and
+// loads our bundled plugin, which pushes cold-start over the old limit.
+const READY_TIMEOUT_MS = 20_000
 const READY_POLL_MS = 200
 
 function passwordSecretName(sandboxId: string): string {
@@ -297,39 +297,55 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * The sandbox image ships our OpenCode plugin at
- * `/opt/cloud-code-plugin/index.js`. Each sandbox's `~/.opencode/` is
- * bind-mounted from the host (see sandbox/manager.ts), so writing the
- * config here makes it visible inside the container.
+ * `/opt/cloud-code-plugin/index.js`. OpenCode's config loader only picks
+ * up plugins from:
+ *   - project-local `opencode.json` (resolved from cwd)
+ *   - global `~/.config/opencode/opencode.json` (XDG)
+ * and expects each entry to be a `file://` URI for absolute local paths.
  *
- * We merge into any existing config so operator overrides (provider
- * customisations, etc.) survive.
+ * `~/.config/opencode/` lives on the container's tmpfs (/home/coder), so
+ * we re-write the config via `docker exec` on every startOpenCode call
+ * rather than relying on the bind-mounted `~/.opencode` dir (which
+ * OpenCode does NOT read).
  */
-const PLUGIN_CONTAINER_PATH = '/opt/cloud-code-plugin/index.js'
+const PLUGIN_CONTAINER_PATH = 'file:///opt/cloud-code-plugin/index.js'
+const CONFIG_CONTAINER_PATH = '/home/coder/.config/opencode/opencode.json'
 
 async function ensurePluginConfig(sandboxId: string): Promise<void> {
-  const dir = opencodeDir(sandboxId)
-  const file = path.join(dir, 'config.json')
-  let current: Record<string, unknown> = {}
-  try {
-    const raw = await fs.readFile(file, 'utf8')
-    current = JSON.parse(raw) as Record<string, unknown>
-  } catch (err) {
-    const e = err as { code?: string }
-    if (e.code !== 'ENOENT') {
-      logger.warn({ err, sandboxId }, 'opencode config.json read failed; overwriting')
-      current = {}
-    }
-  }
-  const pluginList = Array.isArray(current.plugin)
-    ? (current.plugin as unknown[])
-    : []
-  const already = pluginList.some(
-    (p) =>
-      (typeof p === 'string' && p === PLUGIN_CONTAINER_PATH) ||
-      (Array.isArray(p) && p[0] === PLUGIN_CONTAINER_PATH),
-  )
-  const next = already ? pluginList : [...pluginList, PLUGIN_CONTAINER_PATH]
-  const merged = { ...current, plugin: next }
-  await fs.mkdir(dir, { recursive: true })
-  await fs.writeFile(file, JSON.stringify(merged, null, 2), 'utf8')
+  const sb = await sandboxManager.get(sandboxId)
+  if (!sb?.containerId) return
+  const cfg = { plugin: [PLUGIN_CONTAINER_PATH] }
+  const json = JSON.stringify(cfg)
+  // Use `tee` so we don't have to worry about shell-escaping the payload;
+  // docker exec streams stdin through.
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      'docker',
+      [
+        'exec',
+        '-i',
+        '-u',
+        '1000:1000',
+        sb.containerId!,
+        'bash',
+        '-lc',
+        `mkdir -p $(dirname ${CONFIG_CONTAINER_PATH}) && cat > ${CONFIG_CONTAINER_PATH}`,
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    )
+    const errBufs: Buffer[] = []
+    child.stderr.on('data', (b) => errBufs.push(Buffer.from(b)))
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code === 0) resolve()
+      else
+        reject(
+          new Error(
+            `ensurePluginConfig exec exited ${code}: ${Buffer.concat(errBufs).toString('utf8').slice(0, 300)}`,
+          ),
+        )
+    })
+    child.stdin.write(json)
+    child.stdin.end()
+  })
 }

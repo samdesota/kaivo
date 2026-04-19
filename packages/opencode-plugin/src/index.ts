@@ -42,9 +42,17 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       : readEnv()
   if (!creds) {
     // Credentials absent: tools won't be registered. Agent falls back to
-    // OpenCode's own bash tool.
+    // OpenCode's own bash tool. Log so operators can see why.
+    const tokenSet = !!process.env[TOKEN_ENV]
+    const urlSet = !!process.env[APP_URL_ENV]
+    console.error(
+      `[cloud-code-plugin] env missing — tokenSet=${tokenSet} urlSet=${urlSet}; tools not registered`,
+    )
     return {}
   }
+  console.error(
+    `[cloud-code-plugin] registering cloud_bash + cloud_pty (appUrl=${creds.appUrl})`,
+  )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
     token: creds.token,
@@ -213,5 +221,11 @@ function truncateTitle(s: string): string {
  */
 const plugin: Plugin = async () => buildHooks()
 
-export default { server: plugin }
+/**
+ * OpenCode requires path-based (file://) plugins to export an `id` so the
+ * plugin system can key hooks and reloads on it. Without this field,
+ * 1.4.14's loader logs `must export id  failed to load plugin` and skips
+ * hook registration entirely — the tools silently don't show up.
+ */
+export default { id: 'cloud-code', server: plugin }
 export { plugin }

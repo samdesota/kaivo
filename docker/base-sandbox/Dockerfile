@@ -39,11 +39,20 @@ COPY plugin/index.js /opt/cloud-code-plugin/index.js
 RUN groupadd -g 1000 coder \
  && useradd -m -u 1000 -g coder -s /bin/bash coder
 
-RUN mkdir -p /workspace /home/coder/.opencode \
+RUN mkdir -p /workspace /home/coder/.opencode /home/coder/.config/opencode \
  && chown -R coder:coder /workspace /home/coder \
  && chmod -R a+r /opt/cloud-code-plugin
 
 USER coder
+WORKDIR /home/coder/.config/opencode
+
+# Pre-install the @opencode-ai/plugin peer dep so `opencode serve` skips its
+# background npm install on first boot. Match the version opencode-ai ships
+# (same major.minor) so the loader doesn't re-resolve at runtime.
+RUN echo '{"dependencies":{"@opencode-ai/plugin":"1.4.14"}}' > package.json \
+ && npm install --no-audit --no-fund --omit=dev \
+ && ls node_modules/@opencode-ai/plugin/package.json
+
 WORKDIR /workspace
 
 # Idle; the app `docker exec`s into this container for everything.

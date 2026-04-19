@@ -27,19 +27,15 @@ function makeCtx(sessionID = 'oc-sess-1'): FakeToolCtx {
   }
 }
 
-/** Encode an SSE stream from a list of tRPC event payloads. */
+/** Encode an SSE stream that matches what fastify-tRPC actually sends. */
 function sseStream(events: Array<Record<string, unknown> | null>): ReadableStream<Uint8Array> {
   const enc = new TextEncoder()
-  const chunks: Uint8Array[] = []
+  const chunks: Uint8Array[] = [enc.encode('event: connected\ndata: {}\n\n')]
   for (const e of events) {
-    if (e === null) chunks.push(enc.encode('data: [DONE]\n\n'))
-    else
-      chunks.push(
-        enc.encode(
-          `data: ${JSON.stringify({ result: { type: 'data', data: { json: e } } })}\n\n`,
-        ),
-      )
+    if (e === null) continue
+    chunks.push(enc.encode(`data: ${JSON.stringify({ json: e })}\n\n`))
   }
+  chunks.push(enc.encode('event: return\ndata: \n\n'))
   return new ReadableStream({
     start(controller) {
       for (const c of chunks) controller.enqueue(c)

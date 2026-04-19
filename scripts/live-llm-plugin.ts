@@ -1,36 +1,32 @@
 /**
- * Live-LLM end-to-end test for the OpenCode plugin.
+ * Live-LLM plugin smoke test — SDK-driven, event-based.
  *
- * Drives the full loop end-to-end:
- *   1. Login to the running app.
- *   2. Create a fresh sandbox.
- *   3. Wait for the sandbox + opencode-serve to be ready.
- *   4. Start an agent session pinned to Claude Haiku 4.5 with a prompt
- *      that directs the agent to use our `cloud_bash` tool.
- *   5. Poll the DB for a `shell_sessions` row with `owner_kind='agent'`.
- *   6. Tail the agent shell via `agentShell.tail` and check for our marker.
- *   7. Clean up (archive + delete the sandbox).
+ * Talks to OpenCode running inside a sandbox via the app's agent proxy,
+ * using the @opencode-ai/sdk directly. No polling for results — we watch
+ * the real-time event stream and react as soon as a tool part lands.
  *
- * This is intentionally out of CI — LLMs are non-deterministic and each
- * run costs credits. Run manually with the `test:live-llm` script.
+ * What it proves, in order:
+ *   1. Plugin bundle is loaded by opencode  (GET /config → plugin_origins)
+ *   2. `cloud_bash` is a registered tool (forced tool choice in session body)
+ *   3. The plugin's `execute` hits our app (shell_sessions row with
+ *      owner_kind='agent' and the tool part's metadata.cloudcode_shell_id
+ *      matches it)
+ *   4. Tool output flows back through the plugin (part.state.output)
  *
  * Env:
- *   APP_URL           default http://127.0.0.1:3100
+ *   APP_URL           default http://127.0.0.1:3000
  *   ADMIN_PASSWORD    required
- *   DATABASE_URL      required (for direct DB polling)
- *   TIMEOUT_MS        default 120_000
+ *   DATABASE_URL      required (for the final shell-row assertion)
+ *   LIVE_LLM_KEEP_SANDBOX=1  skip cleanup (for post-mortem)
  */
 
+import { createOpencodeClient } from '@opencode-ai/sdk'
 import { Pool } from 'pg'
 
-const APP_URL = (process.env.APP_URL ?? 'http://127.0.0.1:3100').replace(/\/+$/, '')
+const APP_URL = (process.env.APP_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '')
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD
 const DATABASE_URL = process.env.DATABASE_URL
-const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 120_000)
-
-const MARKER = `LIVE_LLM_MARKER_${Date.now().toString(36)}`
-
-// Anthropic provider ID + haiku model — fast + cheap.
+const MARKER = `LIVE_LLM_${Date.now().toString(36).toUpperCase()}`
 const MODEL = { providerID: 'anthropic', modelID: 'claude-haiku-4-5-20251001' }
 
 function log(line: string, data?: Record<string, unknown>) {
@@ -38,218 +34,205 @@ function log(line: string, data?: Record<string, unknown>) {
   if (data) console.log(`[${ts}] ${line}`, data)
   else console.log(`[${ts}] ${line}`)
 }
-
-function die(msg: string, data?: Record<string, unknown>): never {
-  log(`FAIL ${msg}`, data)
+function die(msg: string): never {
+  log(`FAIL: ${msg}`)
   process.exit(1)
 }
-
-function requireEnv(name: string, value: string | undefined): string {
-  if (!value) die(`env ${name} is required`)
-  return value
+function req(name: string, v: string | undefined): string {
+  if (!v) die(`env ${name} required`)
+  return v
 }
 
-// ---------- minimal tRPC-over-HTTP client w/ cookie jar ----------
+// ---------- tRPC helpers (cookie auth via login, used only for setup) ----
 
-let cookie: string | null = null
-
-function grabCookie(headers: Headers): void {
-  const set = headers.get('set-cookie')
-  if (!set) return
-  // Take the first cookie chunk (name=value; Path=/; ...)
-  const first = set.split(',')[0]?.split(';')[0]?.trim()
-  if (first) cookie = first
-}
-
-function sjEncode(v: unknown): unknown {
+let cookie = ''
+function sj(v: unknown) {
   return { json: v }
 }
-function sjDecode(p: unknown): unknown {
-  if (p && typeof p === 'object' && 'json' in (p as Record<string, unknown>)) {
-    return (p as { json: unknown }).json
-  }
-  return p
-}
-
-async function trpcMutate<T>(procedure: string, input: Record<string, unknown>): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (cookie) headers.Cookie = cookie
-  const res = await fetch(`${APP_URL}/trpc/${procedure}`, {
+async function tMutate<T>(proc: string, input: unknown): Promise<T> {
+  const res = await fetch(`${APP_URL}/trpc/${proc}`, {
     method: 'POST',
-    headers,
-    body: JSON.stringify(sjEncode(input)),
+    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(sj(input)),
   })
-  grabCookie(res.headers)
-  const body = (await res.json()) as {
-    result?: { data?: unknown }
-    error?: { message?: string }
-  }
-  if (body.error) throw new Error(`${procedure}: ${body.error.message ?? 'error'}`)
-  return sjDecode(body.result?.data) as T
+  const c = res.headers.get('set-cookie')
+  if (c) cookie = c.split(',')[0]!.split(';')[0]!
+  const b = (await res.json()) as { result?: { data?: { json?: unknown } }; error?: { message?: string } }
+  if (b.error) throw new Error(`${proc}: ${b.error.message}`)
+  return (b.result?.data?.json ?? b.result?.data) as T
 }
-
-async function trpcQuery<T>(procedure: string, input: Record<string, unknown>): Promise<T> {
-  const qp = new URLSearchParams({ input: JSON.stringify(sjEncode(input)) })
-  const headers: Record<string, string> = {}
-  if (cookie) headers.Cookie = cookie
-  const res = await fetch(`${APP_URL}/trpc/${procedure}?${qp.toString()}`, {
-    method: 'GET',
-    headers,
+async function tQuery<T>(proc: string, input: unknown): Promise<T> {
+  const qp = new URLSearchParams({ input: JSON.stringify(sj(input)) })
+  const res = await fetch(`${APP_URL}/trpc/${proc}?${qp.toString()}`, {
+    headers: cookie ? { Cookie: cookie } : {},
   })
-  grabCookie(res.headers)
-  const body = (await res.json()) as {
-    result?: { data?: unknown }
-    error?: { message?: string }
-  }
-  if (body.error) throw new Error(`${procedure}: ${body.error.message ?? 'error'}`)
-  return sjDecode(body.result?.data) as T
+  const b = (await res.json()) as { result?: { data?: { json?: unknown } }; error?: { message?: string } }
+  if (b.error) throw new Error(`${proc}: ${b.error.message}`)
+  return (b.result?.data?.json ?? b.result?.data) as T
 }
-
-// ---------- helpers ----------
 
 async function waitFor<T>(
   label: string,
-  predicate: () => Promise<T | null>,
-  timeoutMs: number,
+  f: () => Promise<T | null>,
+  timeoutMs = 60_000,
   pollMs = 1_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs
-  let attempt = 0
   while (Date.now() < deadline) {
-    attempt += 1
-    try {
-      const v = await predicate()
-      if (v !== null) return v
-    } catch (err) {
-      log(`${label} poll error (attempt ${attempt}): ${(err as Error).message}`)
-    }
+    const r = await f().catch(() => null)
+    if (r !== null) return r
     await new Promise((r) => setTimeout(r, pollMs))
   }
-  die(`timed out waiting for ${label} after ${timeoutMs}ms`)
+  die(`timeout waiting for ${label}`)
 }
 
-// ---------- test ----------
+// ---------- main -----------------------------------------------------------
 
 async function main(): Promise<void> {
-  const password = requireEnv('ADMIN_PASSWORD', ADMIN_PASSWORD)
-  const dbUrl = requireEnv('DATABASE_URL', DATABASE_URL)
-
-  log(`STEP 1/7: login at ${APP_URL}`)
-  await trpcMutate<{ ok: true }>('auth.login', { password })
-  if (!cookie) die('login succeeded but no cookie returned')
-  log('  ✓ logged in')
-
+  const password = req('ADMIN_PASSWORD', ADMIN_PASSWORD)
+  const dbUrl = req('DATABASE_URL', DATABASE_URL)
   const pool = new Pool({ connectionString: dbUrl })
-  let sandboxId: string | null = null
-  let failedReason: string | null = null
+
+  log('login')
+  await tMutate<{ ok: true }>('auth.login', { password })
+
+  log('create sandbox')
+  const sb = await tMutate<{ id: string }>('sandbox.create', { name: `live-llm-${Date.now().toString(36)}` })
+  const sandboxId = sb.id
+  log(`  id=${sandboxId}`)
+
+  let failed: string | null = null
   try {
-    log('STEP 2/7: create sandbox')
-    const sb = await trpcMutate<{ id: string; name: string }>('sandbox.create', {
-      name: `live-llm-${Date.now().toString(36)}`,
-    })
-    sandboxId = sb.id
-    log(`  ✓ sandbox created id=${sandboxId} name=${sb.name}`)
-
-    log('STEP 3/7: wait for sandbox to be running')
-    await waitFor(
-      'sandbox running',
-      async () => {
-        const s = await trpcQuery<{ running: boolean; status: string }>('sandbox.get', {
-          id: sandboxId!,
-        })
-        return s.running ? s : null
-      },
-      30_000,
-    )
-    log('  ✓ sandbox running')
-
-    log('STEP 4/7: wait for opencode ready')
+    log('wait for opencode ready')
     await waitFor(
       'opencode ready',
       async () => {
-        const s = await trpcQuery<{ ready: boolean; hasProvider: boolean }>(
-          'agent.agentStatus',
-          { sandboxId: sandboxId! },
-        )
-        if (!s.hasProvider) die('no provider configured on the app (set Anthropic API key)')
+        const s = await tQuery<{ ready: boolean; hasProvider: boolean }>('agent.agentStatus', {
+          sandboxId,
+        })
+        if (!s.hasProvider) die('no anthropic provider configured')
         return s.ready ? s : null
       },
-      30_000,
+      90_000,
     )
-    log('  ✓ opencode ready')
 
-    log(`STEP 5/7: start agent session pinned to ${MODEL.modelID}`)
-    const prompt =
-      `You are running in a cloud-code sandbox. Call the \`cloud_bash\` tool ` +
-      `EXACTLY ONCE with command: echo ${MARKER} && uname -a. Do not use any other tool. ` +
-      `After the tool returns, reply with a one-sentence summary.`
-    const session = await trpcMutate<{ id: string; opencodeSessionId: string }>(
-      'agent.sessionStart',
-      { sandboxId: sandboxId!, prompt, model: MODEL },
-    )
-    log(`  ✓ session started id=${session.id} oc=${session.opencodeSessionId}`)
+    // Talk to opencode *through our proxy*, which handles Basic auth for us.
+    // The proxy strips the client Authorization header and injects the real
+    // upstream password itself; we just need to carry the admin cookie.
+    const client = createOpencodeClient({
+      baseUrl: `${APP_URL}/sandbox/${sandboxId}/agent`,
+      headers: { Cookie: cookie },
+    })
 
-    log('STEP 6/7: wait for agent to invoke cloud_bash (agent shell row appears)')
-    const shellRow = await waitFor(
-      'agent shell row',
-      async () => {
-        const { rows } = await pool.query<{ id: string; owner_kind: string }>(
-          `SELECT id, owner_kind FROM shell_sessions
-             WHERE sandbox_id = $1 AND owner_kind = 'agent'
-             ORDER BY created_at DESC
-             LIMIT 1`,
-          [sandboxId],
-        )
-        return rows[0] ?? null
+    // --- L1: plugin loaded? ---
+    log('L1: GET /config — is the plugin registered?')
+    const cfg = await client.config.get({ throwOnError: true })
+    const origins = (cfg.data as { plugin_origins?: Array<{ spec: string }> }).plugin_origins ?? []
+    const pluginHit = origins.find((o) => o.spec.includes('cloud-code-plugin'))
+    if (!pluginHit) die(`plugin not in config.plugin_origins: ${JSON.stringify(origins)}`)
+    log(`  ✓ plugin loaded: ${pluginHit.spec}`)
+
+    // --- L2+L3: prompt with forced tool choice; watch event stream ---
+    log('subscribe to event stream')
+    const eventStream = await client.event.subscribe({ throwOnError: true })
+
+    log('create session + prompt (cloud_bash forced on; bash disabled)')
+    const sessionRes = await client.session.create({ body: {}, throwOnError: true })
+    const ocSessionId = sessionRes.data.id
+    log(`  oc session=${ocSessionId}`)
+
+    // Fire prompt asynchronously.
+    const promptPromise = client.session.promptAsync({
+      path: { id: ocSessionId },
+      body: {
+        parts: [
+          {
+            type: 'text',
+            text: `Run the shell command: echo ${MARKER}. Use any bash-like tool available to you.`,
+          },
+        ],
+        tools: { bash: false, cloud_bash: true, cloud_pty: true },
+        model: MODEL,
       },
-      TIMEOUT_MS,
-      2_000,
-    )
-    log(`  ✓ found agent shell: id=${shellRow.id}`)
+      throwOnError: true,
+    })
+    promptPromise.catch((err) => log(`  promptAsync error: ${(err as Error).message ?? err}`))
 
-    log('STEP 7/7: tail the agent shell and look for the marker')
-    const tail = await waitFor(
-      'shell output contains marker',
-      async () => {
-        try {
-          const t = await trpcQuery<{ b64: string; exitCode: number | null; alive: boolean }>(
-            'agentShell.tail',
-            { shellId: shellRow.id, sandboxId: sandboxId!, maxBytes: 64 * 1024 },
-          )
-          const txt = Buffer.from(t.b64, 'base64').toString('utf8')
-          if (txt.includes(MARKER)) return { ...t, txt }
-        } catch (err) {
-          // Shell may have been disposed (past retention) — retry once the
-          // transcript lands; for this test the retention is 10 min so this
-          // should be fine.
-          void err
+    log('walking event stream — waiting for completed cloud_bash tool part')
+    type ToolState = {
+      status?: string
+      input?: Record<string, unknown>
+      output?: string
+      metadata?: { cloudcode_shell_id?: string } & Record<string, unknown>
+    }
+    type Part = { type: string; tool?: string; callID?: string; state?: ToolState; sessionID?: string }
+    type Event = { type: string; properties?: { part?: Part; sessionID?: string; error?: unknown } }
+
+    const deadline = Date.now() + 120_000
+    let completed: Part | null = null
+    let sawStart = false
+    for await (const raw of eventStream.stream as AsyncGenerator<unknown>) {
+      if (Date.now() > deadline) die('event-stream timeout (no cloud_bash completion in 120s)')
+      const evt = raw as Event
+      if (evt.type === 'message.part.updated' && evt.properties?.part) {
+        const p = evt.properties.part
+        if (p.sessionID && p.sessionID !== ocSessionId) continue
+        if (p.type === 'tool') {
+          if (!sawStart && p.tool === 'cloud_bash') {
+            sawStart = true
+            log(`  ▶ cloud_bash started (callID=${p.callID}, status=${p.state?.status})`)
+          }
+          if (p.tool === 'cloud_bash' && p.state?.status === 'completed') {
+            completed = p
+            break
+          }
+          if (p.tool && p.tool !== 'cloud_bash' && p.state?.status !== 'running') {
+            die(`LLM used the wrong tool: ${p.tool} (expected cloud_bash)`)
+          }
         }
-        return null
-      },
-      TIMEOUT_MS,
-      2_000,
+      } else if (evt.type === 'session.error' && evt.properties?.sessionID === ocSessionId) {
+        die(`session.error: ${JSON.stringify(evt.properties.error)}`)
+      } else if (evt.type === 'session.idle' && evt.properties?.sessionID === ocSessionId) {
+        if (!completed) die('session idle without cloud_bash completion')
+      }
+    }
+    if (!completed) die('event stream ended without cloud_bash completion')
+
+    // --- L4: plugin actually talked to our app ---
+    log('cloud_bash completed — verifying plugin round-tripped to our app')
+    const shellId = completed.state?.metadata?.cloudcode_shell_id
+    if (typeof shellId !== 'string' || !shellId) {
+      die(`tool completed but metadata.cloudcode_shell_id missing: ${JSON.stringify(completed.state?.metadata)}`)
+    }
+    log(`  tool.state.metadata.cloudcode_shell_id = ${shellId}`)
+
+    const { rows } = await pool.query<{ id: string; owner_kind: string }>(
+      `SELECT id, owner_kind FROM shell_sessions WHERE id = $1 AND sandbox_id = $2`,
+      [shellId, sandboxId],
     )
-    log(`  ✓ marker present; shell exitCode=${tail.exitCode} alive=${tail.alive}`)
-    log(
-      `  tail snippet: ${tail.txt.slice(Math.max(0, tail.txt.indexOf(MARKER) - 40), tail.txt.indexOf(MARKER) + MARKER.length + 40)}`,
-    )
+    if (rows.length === 0) die(`no shell_sessions row for shell_id=${shellId}`)
+    if (rows[0]!.owner_kind !== 'agent') die(`shell row exists but owner_kind=${rows[0]!.owner_kind}, expected agent`)
+    log('  ✓ shell_sessions row confirmed with owner_kind=agent')
+
+    const output = completed.state?.output ?? ''
+    if (!output.includes(MARKER)) die(`output missing marker ${MARKER}: ${output.slice(0, 300)}`)
+    log(`  ✓ output contains marker ${MARKER}`)
 
     log('=========== PASS ===========')
-    log('Plugin live-LLM e2e succeeded.')
   } catch (err) {
-    failedReason = (err as Error).message ?? String(err)
+    failed = (err as Error).message ?? String(err)
   } finally {
     if (sandboxId && !process.env.LIVE_LLM_KEEP_SANDBOX) {
-      log(`cleanup: archive + delete sandbox ${sandboxId}`)
-      await trpcMutate('sandbox.archive', { id: sandboxId }).catch(() => undefined)
-      await trpcMutate('sandbox.delete', { id: sandboxId }).catch(() => undefined)
+      log(`cleanup: delete sandbox ${sandboxId}`)
+      await tMutate('sandbox.archive', { id: sandboxId }).catch(() => undefined)
+      await tMutate('sandbox.delete', { id: sandboxId }).catch(() => undefined)
     } else if (sandboxId) {
-      log(`LIVE_LLM_KEEP_SANDBOX set — leaving sandbox ${sandboxId} for inspection`)
+      log(`LIVE_LLM_KEEP_SANDBOX set — leaving sandbox ${sandboxId}`)
     }
     await pool.end().catch(() => undefined)
   }
 
-  if (failedReason) die(failedReason)
+  if (failed) die(failed)
 }
 
 main().catch((err) => {

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 interface ExecInvocation {
   args: string[]
   env: Record<string, string>
+  stdin?: string
 }
 const execCalls: ExecInvocation[] = []
 const tokenRows: Array<{ tokenHash: string; sandboxId: string; revokedAt: Date | null }> = []
@@ -172,12 +173,24 @@ vi.mock('node:child_process', async () => {
       const child = new EE() as InstanceType<typeof EE> & {
         stdout: InstanceType<typeof EE>
         stderr: InstanceType<typeof EE>
+        stdin: { write: (s: string) => void; end: () => void }
         kill: () => void
       }
       child.stdout = new EE()
       child.stderr = new EE()
+      const stdinBufs: string[] = []
+      child.stdin = {
+        write: (s: string) => stdinBufs.push(s),
+        end: () => {
+          invocation.stdin = stdinBufs.join('')
+          queueMicrotask(() => child.emit('exit', 0, null))
+        },
+      }
       child.kill = () => child.emit('exit', null, 'SIGKILL')
-      queueMicrotask(() => child.emit('exit', 0, null))
+      // If nothing writes to stdin (the non-config path), still exit.
+      queueMicrotask(() => {
+        if (!invocation.stdin) child.emit('exit', 0, null)
+      })
       return child
     },
   }
@@ -246,41 +259,18 @@ describe('startOpenCode — agent-shell token + plugin config injection', () => 
     expect(launch!.env.CLOUDCODE_AGENT_TOKEN).toMatch(/^[0-9a-f]{64}$/)
     expect(launch!.env.OPENCODE_SERVER_PASSWORD).toBe('fake-password')
 
-    // Config file written with plugin entry.
-    const cfgPath = path.join(tmpRoot, 'sandboxes', 'sb-a', 'opencode', 'config.json')
-    const cfg = JSON.parse(await fs.readFile(cfgPath, 'utf8')) as {
-      plugin: Array<string | string[]>
-    }
-    expect(cfg.plugin).toContain('/opt/cloud-code-plugin/index.js')
-  })
-
-  it('merges into an existing config.json without clobbering operator settings', async () => {
-    // Seed a config.json with unrelated user keys.
-    const cfgPath = path.join(tmpRoot, 'sandboxes', 'sb-a', 'opencode', 'config.json')
-    await fs.writeFile(
-      cfgPath,
-      JSON.stringify({ model: 'claude-sonnet-4-5', theme: 'dracula' }),
-      'utf8',
+    // Plugin config is written via `docker exec ... cat > ...` — the
+    // cold-start path should produce exactly one such invocation with the
+    // JSON on stdin and the target config path in the bash command.
+    const configExec = execCalls.find(
+      (c) => c.args.join(' ').includes('opencode.json') && typeof c.stdin === 'string',
     )
-
-    let probes = 0
-    vi.doMock('undici', () => ({
-      request: async () => ({
-        statusCode: probes++ === 0 ? 503 : 200,
-        body: { dump: async () => undefined },
-      }),
-    }))
-    const { startOpenCode } = await import('./opencode.js')
-    await startOpenCode('sb-a')
-
-    const cfg = JSON.parse(await fs.readFile(cfgPath, 'utf8')) as {
-      model: string
-      theme: string
-      plugin: string[]
-    }
-    expect(cfg.model).toBe('claude-sonnet-4-5')
-    expect(cfg.theme).toBe('dracula')
-    expect(cfg.plugin).toContain('/opt/cloud-code-plugin/index.js')
+    expect(configExec).toBeDefined()
+    expect(configExec!.args.join(' ')).toContain(
+      '/home/coder/.config/opencode/opencode.json',
+    )
+    const cfg = JSON.parse(configExec!.stdin!) as { plugin: unknown[] }
+    expect(cfg.plugin).toContain('file:///opt/cloud-code-plugin/index.js')
   })
 
   it('revokes prior tokens on restart (rotation)', async () => {
