@@ -1,5 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { AgentPanel } from '../agent-panel'
+import { AgentSessionView } from '../agent/session-view'
+import { useAgentUiPreference } from '../agent/agent-ui-preference'
 import { ShellsDropdown, PreviewsDropdown } from './dropdowns'
 import { RightPane } from './right-pane'
 import { type PaneContent, useRightPaneState } from './tab-state'
@@ -13,6 +15,7 @@ interface TabShellProps {
 
 export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: TabShellProps) {
   const [state, dispatch] = useRightPaneState(sandboxId)
+  const [agentUi, setAgentUi] = useAgentUiPreference()
 
   const openContent = (content: PaneContent) => {
     dispatch({ type: 'open', content, activate: true })
@@ -31,6 +34,13 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAgentUi(agentUi === 'native' ? 'iframe' : 'native')}
+            className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
+            title="Toggle native ↔ iframe agent UI"
+          >
+            Agent UI: {agentUi}
+          </button>
           <ShellsDropdown sandboxId={sandboxId} onOpen={openContent} />
           <PreviewsDropdown sandboxId={sandboxId} onOpen={openContent} />
           <Link
@@ -48,7 +58,11 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
           aria-label="Agents"
         >
           <div className="flex min-h-0 w-full flex-col">
-            <AgentPanel sandboxId={sandboxId} />
+            {agentUi === 'native' ? (
+              <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
+            ) : (
+              <AgentPanel sandboxId={sandboxId} />
+            )}
           </div>
         </section>
         <section

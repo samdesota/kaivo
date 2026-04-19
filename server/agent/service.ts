@@ -253,6 +253,28 @@ class AgentService {
       .where(eq(agentSessions.id, row.id))
   }
 
+  /**
+   * Cold-load the full message history for a session. UI hydrates from this,
+   * then switches to the live `transcript` subscription. Messages are returned
+   * in OpenCode's canonical order (the SDK response is already sorted).
+   */
+  async sessionMessages(
+    sessionId: string,
+  ): Promise<
+    Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>
+  > {
+    const row = await this.requireSession(sessionId)
+    const client = await this.getClient(row.sandboxId)
+    const res = await client.session.messages({
+      path: { id: row.opencodeSessionId },
+      throwOnError: true,
+    })
+    return (res.data ?? []) as Array<{
+      info: Record<string, unknown>
+      parts: Array<Record<string, unknown>>
+    }>
+  }
+
   async sessionStatus(input: { sessionId: string }): Promise<{
     session: AgentSessionSummary
     pendingApprovals: PendingApproval[]

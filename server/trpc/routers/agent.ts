@@ -99,6 +99,16 @@ export const agentRouter = router({
       }
     }),
 
+  sessionMessages: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await agentService.sessionMessages(input.sessionId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionApprove: protectedProcedure
     .input(
       z.object({
