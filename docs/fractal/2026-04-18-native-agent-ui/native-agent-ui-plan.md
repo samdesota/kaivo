@@ -1,8 +1,8 @@
 # Native Agent UI — Execution Plan
 
-Six phases. One PR per phase. Each phase ships something end-to-end testable.
+Seven phases. One PR per phase. Each phase ships something end-to-end testable.
 
-Dependency lattice: **0 → 1 → 2 → 3 → 4 → 5**. Phase 0 is a test-harness prereq; phases 1 and 2 don't use it but land first so the harness has real endpoints to drive in its own smoke. Phases 3–5 depend on it.
+Dependency lattice: **0 → 1 → 2 → 3 → 4 → 5 → 6**. Phase 0 is a test-harness prereq. Phase 1 is the new UI shell and can land with the existing iframe + existing shell panel inside it — no dependency on later phases. Phases 2–4 are the server-side bridge. Phase 5 lands the native agent view inside the already-shipped shell.
 
 Environment for all tests: the operator has Phase-1–4 of `cloud-coding-env` running (compose up, sandboxes can be created, OpenCode runs in them). A real Anthropic key is **not** required for CI — phase 0 provides a deterministic fake. Live-key runs are gated by `LIVE_LLM=1` and skipped in CI.
 
@@ -31,9 +31,29 @@ Environment for all tests: the operator has Phase-1–4 of `cloud-coding-env` ru
 
 ---
 
-## Phase 1 — Streaming shells foundation
+## Phase 1 — Sandbox tab shell
 
-**Ships:** `shell_sessions.owner_kind` / `owner_session_id` columns, `TerminalService.runOnceStream`, `agent_shell_tokens` table (schema only, no auth wiring yet). Refactored `<XTermAttached shellId>` component reused by the Shells panel.
+**Ships:** new sandbox detail page with fixed Agents-left / tabs-right layout; right-pane tab types `newtab`, `shell`, `file`, `preview`; top-chrome Shells + Previews dropdowns; localStorage tab persistence. Existing iframe is embedded as the Agents pane's content for now. Old `/sandbox/:id/agent|shells|preview` routes removed and replaced with a single route.
+
+**Acceptance:**
+
+- Opening a fresh sandbox: Agents pane shows the existing iframe (placeholder until phase 5); right pane shows a single `newtab`.
+- `newtab` lists: quick actions ([ New shell ]), running shells (via `shell.list`), running previews (via `preview.ports`), and the file tree (`fs.list` / `fs.watch`).
+- Clicking a shell in the `newtab` list or Shells dropdown → adds a `shell` tab and activates it. xterm shows the shell's scrollback replayed via the existing `/ws/shell/:id` WebSocket.
+- Clicking `[terminate]` on a shell (in the dropdown, newtab, or shell-tab ⋯ menu) → calls `shell.dispose`; entry disappears from all views; if a tab was open for that shell it stays open but shows a "shell terminated" placeholder.
+- **Closing a shell tab does not terminate the shell.** Verify: open shell in tab, run `watch date`, close the tab, reopen from Shells dropdown → shell still running with uninterrupted output.
+- Clicking a file in the `newtab` tree → opens a `file` tab with the file contents. Closing and reopening hits `fs.read` afresh.
+- Clicking a preview in the Previews dropdown → opens a `preview` tab with an iframe pointing at `/preview/:id/:port/`. Multiple previews on multiple ports → multiple tabs.
+- Refreshing the browser: tab set restored from localStorage. Dropped tabs: any `shell` tab whose id is missing from `shell.list`. If all tabs drop, a fresh `newtab` appears.
+- Navigating between sandboxes: each sandbox has its own tab state (separate localStorage key).
+- No visual regressions to the existing agent iframe, shell input, or preview proxy.
+- Playwright smoke: open sandbox → open shell from newtab → close tab → verify shell survives via Shells dropdown → reopen shell → see live output.
+
+---
+
+## Phase 2 — Streaming shells foundation
+
+**Ships:** `shell_sessions.owner_kind` / `owner_session_id` columns, `TerminalService.runOnceStream`, `agent_shell_tokens` table (schema only, no auth wiring yet). Refactored `<XTermAttached shellId>` component reused by the Shells tab and the newtab list.
 
 **Acceptance:**
 
@@ -48,7 +68,7 @@ Environment for all tests: the operator has Phase-1–4 of `cloud-coding-env` ru
 
 ---
 
-## Phase 2 — `agentShell.*` router + token auth
+## Phase 3 — `agentShell.*` router + token auth
 
 **Ships:** `agentShellProcedure` middleware (bearer-or-cookie), `agentShell` router (`runOnce`, `open`, `write`, `close`, `tail`), token minting/verification, test client.
 
@@ -66,7 +86,7 @@ Environment for all tests: the operator has Phase-1–4 of `cloud-coding-env` ru
 
 ---
 
-## Phase 3 — OpenCode plugin (bash + pty)
+## Phase 4 — OpenCode plugin (bash + pty)
 
 **Ships:** `packages/opencode-plugin`, base-sandbox image with plugin preinstalled and config wired, `SandboxManager` injects `CLOUDCODE_AGENT_TOKEN` + `CLOUDCODE_APP_URL`, reconciler handles missing tokens on existing sandboxes.
 
@@ -90,13 +110,13 @@ Environment for all tests: the operator has Phase-1–4 of `cloud-coding-env` ru
 
 ---
 
-## Phase 4 — Native AgentSessionView (read-only)
+## Phase 5 — Native AgentSessionView (read-only)
 
-**Ships:** `agent.sessionMessages` tRPC query, `AgentSessionView` route with transcript renderers (`TextPart`, `ReasoningPart`, `ToolPart` for `bash` / `pty` / other, `FilePart`, `PatchPart`, `StepFinish`), permission banner (display only), `<XTermAttached>` integration for expanded bash parts. Feature-flagged behind `preferences.agent_ui='native'`.
+**Ships:** `agent.sessionMessages` tRPC query, `AgentSessionView` mounted as the Agents-pane content inside the phase-1 tab shell, with transcript renderers (`TextPart`, `ReasoningPart`, `ToolPart` for `bash` / `pty` / other, `FilePart`, `PatchPart`, `StepFinish`), permission banner (display only), `<XTermAttached>` integration for expanded bash parts. Feature-flagged behind `preferences.agent_ui='native'`; iframe remains the default until phase 6.
 
 **Acceptance:**
 
-- New route `/sandbox/:id/agent/:sessionId` renders when preference `agent_ui='native'`. Old iframe still reachable when `agent_ui='iframe'`.
+- With `agent_ui='native'`, the Agents pane renders `AgentSessionView` in place of the iframe; layout, right-pane tabs, and shells dropdown unaffected.
 - Cold load: opening a prior session fetches `agent.sessionMessages`, renders the whole history in order. Part order matches OpenCode's canonical order (stable across reloads).
 - Live updates: starting a new session (driven by the phase-0 mock with a canned multi-part script) → new parts appear in the native view as they arrive, no page reload.
 - Text parts stream character-by-character (delta merges in place). Assistant cursor visible while `state.status === 'running'`; hidden on `completed`.
@@ -106,18 +126,18 @@ Environment for all tests: the operator has Phase-1–4 of `cloud-coding-env` ru
   - Exit code and duration visible in expanded header.
 - `ToolPart` for a `pty` open:
   - Collapsed: `Opened shell <label>`.
-  - Expanded: "Open in Shells panel" link navigates to the shells route with the agent-owned shell focused.
+  - Expanded: "Open shell" button adds a shell tab in the right pane and activates it.
 - `FilePart` / `PatchPart`: collapsed `<path> +A -D`; expanded renders a unified diff.
-- `PermissionRequestBanner` appears inline at the tool part with the matching `callID` when `permission.updated` fires. Buttons are disabled / display-only in this phase (approval wiring is phase 5).
+- `PermissionRequestBanner` appears inline at the tool part with the matching `callID` when `permission.updated` fires. Buttons are disabled / display-only in this phase (approval wiring is phase 6).
 - Long transcripts (≥ 500 parts) render with virtualization; scroll stays smooth. Collapsing/expanding a part does not reflow the whole list.
 - Two tabs open on the same session: both receive live updates; both can expand a bash part and watch output concurrently.
-- Logged-out user hitting `/sandbox/:id/agent/:sessionId` → redirected to login (tRPC cookie auth still enforced for `sessionMessages` and `transcript`).
+- Logged-out user hitting the sandbox page → redirected to login (tRPC cookie auth still enforced for `sessionMessages` and `transcript`).
 
 ---
 
-## Phase 5 — Composer, permission approval, parity cutover
+## Phase 6 — Composer, permission approval, parity cutover
 
-**Ships:** composer (sessionSend), permission approve/reject wired to existing procedures, session-list sidebar, session-create button, polish (empty states, error states, reconnect banner). Preference flipped to `native` by default; `AgentUIProxy` removed.
+**Ships:** composer (sessionSend), permission approve/reject wired to existing procedures, session switcher (dropdown at top of Agents pane), session-create flow, polish (empty states, error states, reconnect banner). Preference flipped to `native` by default; `AgentUIProxy` removed; the Agents pane no longer has an iframe fallback.
 
 **Acceptance:**
 
@@ -125,10 +145,10 @@ Environment for all tests: the operator has Phase-1–4 of `cloud-coding-env` ru
 - Composer disabled with a banner when `sessionStatus` shows a pending permission; approving/rejecting re-enables it.
 - Approve button: tool call resumes; the banner disappears; session proceeds. `sessionApprove` is called with `always: false` by default; a checkbox offers "always allow this kind".
 - Reject: the tool call surfaces an error part and the session waits for the next user turn.
-- Session list sidebar:
+- Session switcher dropdown (top of Agents pane):
   - Lists sessions for the current sandbox, newest first.
-  - "New session" button → `sessionStart` with a small modal for optional title + initial prompt.
-  - Clicking a session navigates to it.
+  - "New session" option → `sessionStart` with a small modal for optional title + initial prompt.
+  - Selecting a session swaps the transcript in place (no page navigation).
 - Network drops mid-stream: transcript subscription auto-reconnects (existing `AgentService.scheduleRestart`); a small "Reconnecting…" banner shows during the gap.
 - Preference default flipped to `'native'`. An escape hatch in settings allows reverting to `'iframe'` for one release.
 - `AgentUIProxy`, its route, and the asset-rewrite code removed. Base-sandbox image no longer needs the `opencode web` UI for our use (keep the binary; it just stops being embedded).

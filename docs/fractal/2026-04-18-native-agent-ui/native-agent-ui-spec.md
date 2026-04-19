@@ -14,9 +14,22 @@ Phase 4 shipped a basic OpenCode web-UI proxy (iframe). The UI works but is miss
 ### Scope
 
 - Replace the `/sandbox/:id/agent/*` iframe with a native React panel rendered by our SPA.
+- Restructure the whole sandbox detail page around a new **tab shell** (two panes: Agents-left / tabs-right). Previous routes (`/agent`, `/shells`, `/preview`) collapse into right-pane tab types.
 - Keep everything non-UI the same: `AgentService`, OpenCode `serve` per sandbox, transcripts table, permission flow, tRPC surface. Extend, don't rewrite.
 - When parity is reached, delete `AgentUIProxy` (`server/agent/proxy.ts`) and the asset-rewrite code.
-- Out of scope: changing OpenCode, adding model-config UI, session branching, replacing OpenCode for non-embedded users.
+- Out of scope: changing OpenCode, adding model-config UI, session branching, replacing OpenCode for non-embedded users. Dynamic pane splitting is planned-for but not built in v1.
+
+### Sandbox tab shell (new UI structure)
+
+- **Two-pane layout.** Left (70%): fixed Agents pane. Right (30%): tab container.
+- **Right-pane tab types:** `newtab`, `shell`, `file`, `preview`. `newtab` is the default and landing page.
+- **`newtab` content:** quick actions (`+ New shell`), running-shells list (click-open or terminate), running-previews list (click-open), and a file tree over the sandbox workspace. Clicking a file opens it as a new `file` tab.
+- **Shell lifecycle is independent of tabs.** Closing a shell tab does not terminate the shell; the shell stays live in `TerminalService`. A separate explicit terminate action is available (in the shells dropdown, on the `newtab` list, or via a shell-tab menu).
+- **Top-chrome Shells dropdown.** Lists all running shells across open and closed tabs; offers open/terminate per shell. A parallel Previews dropdown does the same for live ports (data already available from `preview.ports` subscription).
+- **Agents pane = the Native Agent UI.** Session switcher (dropdown) + transcript + composer. Not collapsible in v1.
+- **Pane tree model designed for dynamic splitting.** v1 only constructs fixed shapes (single-leaf right-pane tabs); v2 can add arbitrary splits without changing the model or storage.
+- **Tab state persists in localStorage** per sandbox in v1. Upgrade to DB if cross-device parity is needed.
+- **Agent-opened persistent shells** appear in the Shells pool with an "agent" badge; same open/terminate affordances.
 
 ### The shell bridge (central requirement)
 
@@ -47,9 +60,9 @@ Phase 4 shipped a basic OpenCode web-UI proxy (iframe). The UI works but is miss
 - Cold load for the transcript panel: `client.session.messages({ id })` → returns full `[{ info, parts }]` array. Hydrate the UI, then switch to live stream. (Same pattern as xterm's snapshot+live.)
 - Expose the underlying events as a stable discriminated union over tRPC — don't leak raw OpenCode types into frontend; wrap them to insulate us from SDK churn.
 
-### UI layout
+### Agents-pane UI
 
-- **Sandbox detail → Agent tab.** Session list (sidebar) + transcript (main) + composer (bottom).
+- **Agents pane** = session switcher (dropdown at top) + transcript (main) + composer (bottom). Lives in the left pane of the tab shell; not itself a tab.
 - **Transcript is a sequence of rendered `Part`s**, not chat bubbles. Each part has a default compact rendering and a click-to-expand detail.
 - **Part renderers:**
   - `text` / `reasoning`: prose, streaming deltas in place.
@@ -265,11 +278,107 @@ pty: {
 - Add a tRPC query: `agent.sessionMessages({ sessionId })`.
 - No change to existing `sessionStart` / `sessionSend` / approve / reject.
 
+### Frontend: Sandbox tab shell
+
+The sandbox detail page is restructured around a fixed two-pane layout with a tab container on the right. Previous sub-routes (`/agent`, `/shells`, `/preview`) are removed; everything lives under one route and tab state is client-side.
+
+**Layout sketch:**
+
+```
+┌─────────────────────── Sandbox: my-sbx ──────────────────────────────────┐
+│                              Shells ▾ (3)  Previews ▾ (1)   ⚙ status     │
+├────────────────────────┬─────────────────────────────────────────────────┤
+│ Agents                 │ [tests*] [server/auth.ts] [5173 preview] [+]    │
+│ session ▾ fix auth     │ ────────────────────────────────────────────── │
+│ ────────────────────── │ $ npm test --watch                              │
+│ > swap cookie to Lax   │  RUNS server/auth/cookie.spec.ts                │
+│ v $ npm test …running  │ ...                                             │
+│ > edit cookie.ts +3-1  │                                                 │
+│ …                      │                                                 │
+│ ┌────────────────────┐ │                                                 │
+│ │> message …  [Send] │ │                                                 │
+│ └────────────────────┘ │                                                 │
+└────────────────────────┴─────────────────────────────────────────────────┘
+        70%                                30%
+```
+
+**New-tab page (right-pane default):**
+
+```
+┌─ [+ New*] ────────────────────────────────────────────────────────────────┐
+│   Quick actions   [ New shell ]                                           │
+│                                                                           │
+│   Running shells                                                          │
+│    ● tests         npm test --watch              [open] [terminate]       │
+│    ● dev server    npm run dev    (agent)        [open] [terminate]       │
+│                                                                           │
+│   Running previews                                                        │
+│    ● :5173         dev server                    [open]                   │
+│                                                                           │
+│   Files                                                                   │
+│    v repos/cloud-code-tools/                                              │
+│      > server/                                                            │
+│        README.md                                                          │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+**Pane tree data model** (designed for dynamic splitting; v1 only emits fixed shapes):
+
+```ts
+type PaneNode =
+  | { kind: 'leaf'; content: PaneContent }
+  | { kind: 'split'; dir: 'h' | 'v'; ratio: number; children: [PaneNode, PaneNode] }
+
+type PaneContent =
+  | { type: 'newtab' }
+  | { type: 'shell';   shellId: string }
+  | { type: 'file';    path: string }
+  | { type: 'preview'; port: number }
+
+interface RightPaneState {
+  tabs: Array<{ id: string; title: string; content: PaneContent }>
+  activeTabId: string
+}
+```
+
+v1 uses `RightPaneState` directly; the `PaneNode` type is declared but only leaf-single shapes are constructed. Dynamic splitting in a later release will replace `RightPaneState.tabs[].content` with a `PaneNode` root.
+
+**Tab persistence:**
+
+- `localStorage` key `sandbox.<id>.rightPane` holds the `RightPaneState` JSON.
+- On sandbox open: hydrate from localStorage; if empty or invalid, initialize with `{ tabs: [{ newtab }], activeTabId: <newtab.id> }`.
+- On tab changes (add/remove/activate/reorder), persist synchronously.
+- **Shells referenced by closed tabs remain live** — the tab state only describes views, not shell lifecycle. On hydration, each `shell` tab checks `shell.list` and drops itself if the shell id no longer exists.
+
+**Top-chrome dropdowns:**
+
+- **Shells ▾ (n)**: backed by `shell.list.query({ sandboxId })` (already exists, filtered to current sandbox). Each entry: status dot, label, command preview, `owner_kind` badge, `[open] [terminate]`. `open` dispatches "add shell tab & activate"; `terminate` calls existing `shell.dispose`.
+- **Previews ▾ (n)**: backed by `preview.ports.subscribe({ sandboxId })`. Each entry: port, process hint, `[open]`. `open` dispatches "add preview tab & activate".
+- Both are popovers closed by click-outside.
+
+**Right-pane tab chrome:**
+
+- Each tab: title + small close button. Close removes the tab from state; does **not** terminate the backing shell / preview.
+- `+` at the end of the tab bar opens a new `newtab`.
+- Overflow: horizontal scroll on the tab bar; no dropdown in v1.
+
+**Tab content renderers** (`src/routes/sandbox/tabs/`):
+
+- `NewTabContent` — quick actions, running-shells list (consumes `shell.list`), running-previews list (consumes `preview.ports`), file tree (consumes `fs.list` / `fs.watch` — both already exist).
+- `ShellTabContent` — wraps the existing `<XTermAttached shellId>`. A small toolbar on top with label, exit status (if applicable), and a ⋯ menu offering "Terminate shell".
+- `FileTabContent` — file viewer (read-only in v1; the file editor is a separate future concern — the current minimal editor in the codebase can be lifted in).
+- `PreviewTabContent` — iframe pointed at `/preview/:sandboxId/:port/`. Reuses the existing reverse proxy verbatim.
+
+**Route changes:**
+
+- `src/routes/sandbox/$sandboxId.tsx` becomes the tab-shell host. It renders `<AgentSessionView>` (left) and `<RightPaneTabs>` (right). No sub-routes.
+- Old `sandbox/$sandboxId/agent`, `sandbox/$sandboxId/shells`, `sandbox/$sandboxId/preview` routes removed. Any deep links in docs/PR comments get redirected via a simple `<Navigate>` shim during one release.
+
 ### Frontend: `AgentSessionView`
 
-Location: new directory under `src/routes/sandbox/agent/`. Replaces the iframe embed.
+Location: new directory under `src/routes/sandbox/agent/`. Rendered as the left-pane content of the tab shell.
 
-- **Route:** `/sandbox/:sandboxId/agent` (session list) and `/sandbox/:sandboxId/agent/:sessionId`.
+- **Mount point:** inside the tab shell at `<LeftPane>`; not a standalone route.
 - **Data:**
   - TanStack Query key `['agent','messages',sessionId]` populated by `agent.sessionMessages`.
   - tRPC `agent.transcript` subscription merges events into the same cache (immutable updates; part lookups by `partID`).
@@ -338,6 +447,10 @@ On `app` restart: reconciler re-reads tokens; if a token row is missing for an a
 - **Two tabs watching the same session.** Both subscribe to `agent.transcript`; both can attach to the same shell's WS. Merged keystrokes only apply to persistent shells (bash run-once shells are output-only from the user's POV; typing into them does nothing useful — disable composer in the `BashToolPart` inline xterm).
 - **Plugin tool throws.** Plugin wraps everything in try/catch and returns a structured `{ exitCode: 1, stderr: "<err.message>" }` so OpenCode never sees a JS exception (it would otherwise mark the session errored).
 - **Switching `agent.ui` mid-session.** Both renderers are just views of the same `agent_sessions` / OpenCode state; switch reloads the page. No data migration.
+- **Stored tab references a dead shell.** On hydration, shell tabs verify against `shell.list`; missing shells drop silently. An empty tab set falls back to a single `newtab`.
+- **Closing the last right-pane tab.** Auto-open a `newtab` — the right pane always has at least one tab.
+- **Preview tab whose port is no longer listening.** Tab stays open; iframe shows a "port closed" placeholder served by the preview proxy. User closes the tab manually.
+- **localStorage quota or corruption.** Catch parse errors, log, reset to default `newtab` state. Never block render on tab-state issues.
 
 ### Dependencies (new)
 
@@ -376,10 +489,21 @@ packages/opencode-plugin/   # NEW workspace package
   src/trpc-client.ts
 
 src/routes/sandbox/
+  $sandboxId.tsx            # tab-shell host (replaces sub-routes)
+  shell/
+    tab-shell.tsx           # top chrome + Shells/Previews dropdowns + LeftPane/RightPane
+    right-pane-tabs.tsx     # tab bar + content dispatch
+    tab-state.ts            # RightPaneState + localStorage persistence
+  tabs/
+    new-tab.tsx             # quick actions, shells/previews lists, file tree
+    shell-tab.tsx           # <XTermAttached> + terminate menu
+    file-tab.tsx            # file viewer
+    preview-tab.tsx         # iframe to /preview/:id/:port/
   agent/
-    index.tsx               # session list
-    session.tsx             # AgentSessionView
+    session-view.tsx        # AgentSessionView (left pane)
+    session-switcher.tsx    # dropdown at top of AgentSessionView
     parts/                  # one file per Part renderer
-    xterm-attached.tsx      # factored from terminal.tsx
-  shells/                   # updated to show owner_kind + label
+    xterm-attached.tsx      # factored from terminal.tsx; shared with shell-tab
 ```
+
+Old `sandbox/$sandboxId/{agent,shells,preview}` route files are removed.
