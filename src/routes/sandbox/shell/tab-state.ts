@@ -1,0 +1,192 @@
+import { useEffect, useReducer, useRef } from 'react'
+
+export type PaneContent =
+  | { type: 'newtab' }
+  | { type: 'shell'; shellId: string }
+  | { type: 'file'; path: string }
+  | { type: 'preview'; port: number }
+
+export interface Tab {
+  id: string
+  title: string
+  content: PaneContent
+}
+
+export interface RightPaneState {
+  tabs: Tab[]
+  activeTabId: string
+}
+
+export type RightPaneAction =
+  | { type: 'open'; content: PaneContent; title?: string; activate?: boolean }
+  | { type: 'activate'; tabId: string }
+  | { type: 'close'; tabId: string }
+  | { type: 'setTitle'; tabId: string; title: string }
+  | { type: 'pruneShells'; liveShellIds: ReadonlySet<string> }
+  | { type: 'hydrate'; state: RightPaneState }
+
+function makeTabId(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
+}
+
+export function defaultTitle(c: PaneContent): string {
+  if (c.type === 'newtab') return 'New'
+  if (c.type === 'shell') return `shell ${c.shellId.slice(-6)}`
+  if (c.type === 'file') {
+    const parts = c.path.split('/').filter(Boolean)
+    return parts[parts.length - 1] ?? c.path
+  }
+  if (c.type === 'preview') return `:${c.port}`
+  return 'Tab'
+}
+
+function sameContent(a: PaneContent, b: PaneContent): boolean {
+  if (a.type !== b.type) return false
+  if (a.type === 'shell' && b.type === 'shell') return a.shellId === b.shellId
+  if (a.type === 'file' && b.type === 'file') return a.path === b.path
+  if (a.type === 'preview' && b.type === 'preview') return a.port === b.port
+  return a.type === 'newtab' && b.type === 'newtab'
+}
+
+export function initialState(): RightPaneState {
+  const newtab: Tab = { id: makeTabId(), title: 'New', content: { type: 'newtab' } }
+  return { tabs: [newtab], activeTabId: newtab.id }
+}
+
+export function rightPaneReducer(state: RightPaneState, action: RightPaneAction): RightPaneState {
+  switch (action.type) {
+    case 'hydrate': {
+      if (action.state.tabs.length === 0) return initialState()
+      const ids = new Set(action.state.tabs.map((t) => t.id))
+      const activeTabId = ids.has(action.state.activeTabId)
+        ? action.state.activeTabId
+        : (action.state.tabs[0]?.id ?? '')
+      return { tabs: action.state.tabs, activeTabId }
+    }
+    case 'open': {
+      const existing = state.tabs.find((t) => sameContent(t.content, action.content))
+      if (existing) {
+        return action.activate === false ? state : { ...state, activeTabId: existing.id }
+      }
+      const tab: Tab = {
+        id: makeTabId(),
+        title: action.title ?? defaultTitle(action.content),
+        content: action.content,
+      }
+      const activate = action.activate !== false
+      return {
+        tabs: [...state.tabs, tab],
+        activeTabId: activate ? tab.id : state.activeTabId,
+      }
+    }
+    case 'activate': {
+      if (!state.tabs.some((t) => t.id === action.tabId)) return state
+      return { ...state, activeTabId: action.tabId }
+    }
+    case 'close': {
+      const idx = state.tabs.findIndex((t) => t.id === action.tabId)
+      if (idx < 0) return state
+      const nextTabs = state.tabs.filter((t) => t.id !== action.tabId)
+      if (nextTabs.length === 0) return initialState()
+      let active = state.activeTabId
+      if (action.tabId === state.activeTabId) {
+        const neighbor = nextTabs[idx] ?? nextTabs[idx - 1] ?? nextTabs[0]
+        active = neighbor?.id ?? ''
+      }
+      return { tabs: nextTabs, activeTabId: active }
+    }
+    case 'setTitle': {
+      return {
+        ...state,
+        tabs: state.tabs.map((t) =>
+          t.id === action.tabId ? { ...t, title: action.title } : t,
+        ),
+      }
+    }
+    case 'pruneShells': {
+      const keep = state.tabs.filter(
+        (t) => t.content.type !== 'shell' || action.liveShellIds.has(t.content.shellId),
+      )
+      if (keep.length === state.tabs.length) return state
+      if (keep.length === 0) return initialState()
+      const activeStillThere = keep.some((t) => t.id === state.activeTabId)
+      return {
+        tabs: keep,
+        activeTabId: activeStillThere ? state.activeTabId : (keep[0]?.id ?? ''),
+      }
+    }
+    default:
+      return state
+  }
+}
+
+const STORAGE_VERSION = 1
+interface StoredState {
+  v: number
+  state: RightPaneState
+}
+
+function storageKey(sandboxId: string): string {
+  return `sandbox.${sandboxId}.rightPane`
+}
+
+function loadStored(sandboxId: string): RightPaneState | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(storageKey(sandboxId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as StoredState
+    if (parsed.v !== STORAGE_VERSION) return null
+    if (!parsed.state || !Array.isArray(parsed.state.tabs)) return null
+    const tabs = parsed.state.tabs.filter((t: unknown): t is Tab => {
+      if (!t || typeof t !== 'object') return false
+      const tt = t as Tab
+      if (typeof tt.id !== 'string' || typeof tt.title !== 'string' || !tt.content) return false
+      const c = tt.content
+      if (c.type === 'newtab') return true
+      if (c.type === 'shell' && typeof c.shellId === 'string') return true
+      if (c.type === 'file' && typeof c.path === 'string') return true
+      if (c.type === 'preview' && typeof c.port === 'number') return true
+      return false
+    })
+    if (tabs.length === 0) return null
+    const activeTabId = tabs.some((t) => t.id === parsed.state.activeTabId)
+      ? parsed.state.activeTabId
+      : (tabs[0]?.id ?? '')
+    return { tabs, activeTabId }
+  } catch {
+    return null
+  }
+}
+
+function persist(sandboxId: string, state: RightPaneState): void {
+  if (typeof window === 'undefined') return
+  try {
+    const payload: StoredState = { v: STORAGE_VERSION, state }
+    window.localStorage.setItem(storageKey(sandboxId), JSON.stringify(payload))
+  } catch {
+    // Quota / disabled storage — silent; state still lives in memory.
+  }
+}
+
+export function useRightPaneState(sandboxId: string): [RightPaneState, React.Dispatch<RightPaneAction>] {
+  const [state, dispatch] = useReducer(rightPaneReducer, undefined as unknown as RightPaneState, () => {
+    const loaded = loadStored(sandboxId)
+    return loaded ?? initialState()
+  })
+  const lastSandboxId = useRef(sandboxId)
+
+  useEffect(() => {
+    if (lastSandboxId.current !== sandboxId) {
+      lastSandboxId.current = sandboxId
+      const loaded = loadStored(sandboxId) ?? initialState()
+      dispatch({ type: 'hydrate', state: loaded })
+    }
+  }, [sandboxId])
+
+  useEffect(() => {
+    persist(sandboxId, state)
+  }, [sandboxId, state])
+
+  return [state, dispatch]
+}

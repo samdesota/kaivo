@@ -1,8 +1,12 @@
+import path from 'node:path'
 import { defineConfig } from '@playwright/test'
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3100'
 const DATABASE_URL =
   process.env.PLAYWRIGHT_DATABASE_URL ?? 'postgres://cloudcode:cloudcode@localhost:5432/cloudcode'
+// Absolute path so Docker bind-mounts (for sandbox workspaces) resolve
+// correctly when the app under test is launched by the webServer.
+const DATA_DIR = path.resolve(process.cwd(), 'test-data')
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -25,7 +29,7 @@ export default defineConfig({
       NODE_ENV: 'production',
       PORT: new URL(BASE_URL).port,
       DATABASE_URL,
-      DATA_DIR: './test-data',
+      DATA_DIR,
       ADMIN_PASSWORD_BOOTSTRAP: 'e2e-password-123',
       COOKIE_SECURE: 'false',
     },

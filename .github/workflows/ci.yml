@@ -51,6 +51,8 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # Sandbox-creating tests (tab-shell.spec.ts) need the base image.
+      - run: docker build -t cloud-code-sandbox:dev docker/base-sandbox
       - run: npm run build
       - run: npm run test:e2e
 
