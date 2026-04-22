@@ -18,17 +18,20 @@ export function opencodeDir(sandboxId: string): string {
 /**
  * Translate a container-local path under DATA_DIR into the equivalent
  * host-side path, so it can be passed to the Docker daemon as a bind-mount
- * source. Returns the original path when HOST_DATA_DIR isn't configured.
+ * source. Docker rejects relative paths as volumes, so we always return an
+ * absolute path: HOST_DATA_DIR when configured (compose uses this to bridge
+ * the container's /data view to the host fs), otherwise an absolute version
+ * of DATA_DIR (used in local dev where the app itself runs on the host).
  */
 export function toHostPath(containerPath: string): string {
   const hostRoot = env.HOST_DATA_DIR
-  if (!hostRoot) return containerPath
+  if (!hostRoot) return path.resolve(containerPath)
   const dataDir = env.DATA_DIR
   if (containerPath === dataDir) return hostRoot
   if (containerPath.startsWith(dataDir + path.sep)) {
     return path.join(hostRoot, containerPath.slice(dataDir.length + 1))
   }
-  return containerPath
+  return path.resolve(containerPath)
 }
 
 export function workspaceHostDir(sandboxId: string): string {

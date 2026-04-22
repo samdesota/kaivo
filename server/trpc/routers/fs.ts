@@ -11,6 +11,7 @@ import {
   type FsEvent,
 } from '../../fs/service.js'
 import { sandboxManager } from '../../sandbox/manager.js'
+import { terminalService } from '../../terminal/service.js'
 
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof FsError) {
@@ -92,5 +93,48 @@ export const fsRouter = router({
           if (unsubscribe) unsubscribe()
         }
       })
+    }),
+
+  /**
+   * Unified git diff for one or more files. `cwd` is the repo root to run
+   * `git diff` in; defaults to /workspace. Compares the working tree against
+   * `ref` (default HEAD). Empty diff → empty string.
+   */
+  diff: protectedProcedure
+    .input(
+      z.object({
+        sandboxId: z.string().min(1),
+        cwd: z.string().min(1).max(4096).optional(),
+        ref: z.string().max(200).optional(),
+        paths: z.array(z.string().min(1).max(4096)).max(200).optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      await requireSandbox(input.sandboxId)
+      const cwd = input.cwd ?? '/workspace'
+      const ref = input.ref ?? 'HEAD'
+      // Build `git diff --no-color <ref> -- <paths>`. We shell-escape by
+      // single-quoting since git path args can contain spaces.
+      const pathArgs =
+        input.paths && input.paths.length > 0
+          ? ' -- ' + input.paths.map((p) => `'${p.replace(/'/g, `'\\''`)}'`).join(' ')
+          : ''
+      const cmd = `git diff --no-color ${JSON.stringify(ref)}${pathArgs}`
+      try {
+        const res = await terminalService.runOnce({
+          sandboxId: input.sandboxId,
+          cmd,
+          cwd,
+          timeoutMs: 15_000,
+        })
+        return {
+          diff: res.stdout,
+          stderr: res.stderr,
+          exitCode: res.exitCode,
+          truncated: res.truncated,
+        }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
     }),
 })

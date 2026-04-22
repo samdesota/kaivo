@@ -21,6 +21,10 @@ const schema = z.object({
   // DNS on the shared docker network, so `http://app:3000` is the default.
   // Override in dev when the app listens on the host (`host.docker.internal`).
   SANDBOX_APP_URL: z.string().default('http://app:3000'),
+  // Dev-only: bind-mount this host file into each sandbox at
+  // /opt/cloud-code-plugin/index.js so `npm run build:plugin` + a sandbox
+  // restart is enough to pick up plugin changes (no image rebuild).
+  DEV_PLUGIN_HOST_PATH: z.string().optional(),
   COOKIE_SECURE: z
     .union([z.literal('true'), z.literal('false')])
     .optional()

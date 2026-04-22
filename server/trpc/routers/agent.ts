@@ -131,6 +131,110 @@ export const agentRouter = router({
       }
     }),
 
+  sessionRename: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        title: z.string().min(1).max(200),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        return await agentService.sessionRename(input)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  listModels: protectedProcedure
+    .input(z.object({ sandboxId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await agentService.listModels(input.sandboxId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  sessionSetModel: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        providerID: z.string().min(1).max(100).nullable(),
+        modelID: z.string().min(1).max(200).nullable(),
+      }),
+    )
+    .mutation(({ input }) => {
+      if (input.providerID && input.modelID) {
+        agentService.setSessionModel(input.sessionId, {
+          providerID: input.providerID,
+          modelID: input.modelID,
+        })
+      } else {
+        agentService.setSessionModel(input.sessionId, null)
+      }
+      return { ok: true as const }
+    }),
+
+  sessionGetModel: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .query(({ input }) => {
+      return agentService.getSessionModel(input.sessionId)
+    }),
+
+  listCommands: protectedProcedure
+    .input(z.object({ sandboxId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await agentService.listCommands(input.sandboxId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  runCommand: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        command: z.string().min(1).max(200),
+        arguments: z.string().max(100_000).default(''),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        await agentService.runCommand(input)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  sessionClose: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await agentService.sessionSetStatus({
+          sessionId: input.sessionId,
+          status: 'archived',
+        })
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  sessionReopen: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await agentService.sessionSetStatus({
+          sessionId: input.sessionId,
+          status: 'active',
+        })
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionReject: protectedProcedure
     .input(
       z.object({

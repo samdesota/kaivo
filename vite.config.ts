@@ -12,12 +12,22 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    host: '127.0.0.1',
+    port: 5180,
+    strictPort: true,
+    // Allow the Tailscale Funnel / tailnet hostname to reach the dev server.
+    allowedHosts: ['samuels-macbook-pro.tailf71199.ts.net', 'localhost', '127.0.0.1'],
     proxy: {
       '/trpc': { target: 'http://localhost:3000', ws: true },
       '/ws': { target: 'http://localhost:3000', ws: true },
       '/api': 'http://localhost:3000',
       '/healthz': 'http://localhost:3000',
+      // Preview + agent proxies live on the API server, not vite — otherwise
+      // unknown `/preview/:id/:port/*` paths fall through to the SPA and look
+      // like "Not Found". `/sandbox/:id` itself is an SPA route, so only
+      // `/sandbox/:id/agent/*` goes to the backend.
+      '/preview': { target: 'http://localhost:3000', ws: true },
+      '^/sandbox/[^/]+/agent': { target: 'http://localhost:3000', ws: true },
     },
   },
   build: {

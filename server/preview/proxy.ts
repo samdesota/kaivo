@@ -68,6 +68,13 @@ export function parsePreviewUrl(
   if (!sandboxId || !portStr) return null
   const port = Number(portStr)
   if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
+  // Preserve the full path so base-aware dev servers (Vite with
+  // base=/preview/<id>/<port>/, Next.js with basePath, etc.) see the prefix
+  // they were configured with. Stripping would make vite redirect to its
+  // base, which our proxy would strip again → infinite 302 loop.
+  // Simple servers without a base (python -m http.server, static nginx)
+  // need to be started in a directory whose layout matches the prefix, or
+  // proxied with a URL-rewriter in front.
   return { sandboxId, port, rest: url }
 }
 

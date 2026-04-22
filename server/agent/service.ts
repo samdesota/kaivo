@@ -15,6 +15,29 @@ import {
   startOpenCode,
 } from './opencode.js'
 
+/**
+ * Force every prompt to route shell work through our plugin tools so the
+ * shells show up in the Shells panel and share scrollback with the human.
+ * Leaving OpenCode's builtin bash/pty enabled means the model will happily
+ * pick `bash` and silently open a one-shot shell the UI can't attach to.
+ */
+const CLOUD_TOOL_OVERRIDES = {
+  bash: false,
+  pty: false,
+  cloud_bash: true,
+  cloud_pty: true,
+  cloud_pty_write: true,
+  cloud_pty_read: true,
+  cloud_pty_close: true,
+} as const
+
+/** Turn a user prompt into a compact session title (≤60 chars, single line). */
+function truncatePromptForTitle(msg: string): string {
+  const flat = msg.replace(/\s+/g, ' ').trim()
+  if (flat.length <= 60) return flat
+  return flat.slice(0, 57).replace(/[\s.,;:!?-]+$/, '') + '…'
+}
+
 export class AgentError extends Error {
   constructor(
     public code:
@@ -66,11 +89,23 @@ interface SandboxSubscription {
   restartTimer: ReturnType<typeof setTimeout> | null
 }
 
+export interface ModelInfo {
+  providerID: string
+  modelID: string
+  label: string
+}
+
 class AgentService {
   private clients = new Map<string, OpencodeClient>()
   private subs = new Map<string, SandboxSubscription>()
   private pending = new Map<string, Map<string, PendingApproval>>() // opencodeSessionId -> permissionId -> req
   private seqCounters = new Map<string, number>() // sessionId (ours) -> next seq
+  /**
+   * Per-session model override. Kept in memory — on server restart, sessions
+   * fall back to OpenCode's default model until the user picks again. Good
+   * enough for v1; promote to a DB column if users complain.
+   */
+  private sessionModels = new Map<string, { providerID: string; modelID: string }>()
   private wired = false
 
   /**
@@ -197,15 +232,29 @@ class AgentService {
     model?: { providerID: string; modelID: string }
   }): Promise<AgentSessionSummary> {
     const client = await this.getClient(input.sandboxId)
+    // Intentionally do NOT pass `directory` on session.create — OpenCode
+    // routes events through a per-project bus when a session is bound to a
+    // non-default directory, and our global /event subscription stops
+    // receiving message.part.updated / permission.asked events for it. We
+    // instead inject the target directory into the first prompt so the agent
+    // starts work there without splitting the event stream.
     const create = await client.session.create({
       body: { title: input.title },
-      ...(input.directory ? { query: { directory: input.directory } } : {}),
       throwOnError: true,
     })
     const ocSession = create.data
     const id = ulid().toLowerCase()
     const now = new Date()
-    const resolvedTitle = input.title ?? ocSession.title ?? null
+    // If the caller provided an initial prompt but no explicit title, seed the
+    // title from a truncated prompt so the session tab is meaningful right
+    // away. OpenCode's default "New session - <timestamp>" is used only when
+    // we have nothing better.
+    const derivedTitle =
+      input.title ??
+      (input.prompt ? truncatePromptForTitle(input.prompt) : undefined) ??
+      ocSession.title ??
+      null
+    const resolvedTitle = derivedTitle
     await db.insert(agentSessions).values({
       id,
       sandboxId: input.sandboxId,
@@ -216,8 +265,13 @@ class AgentService {
       lastActivityAt: now,
     })
 
-    // Fire the initial prompt asynchronously if provided; users can also
-    // create an empty session and send the first message via the composer.
+    // Remember the caller-provided model so every subsequent send picks the
+    // same one without the UI having to thread it through each time.
+    if (input.model) this.sessionModels.set(id, input.model)
+
+    // Fire the initial prompt asynchronously if provided. The `directory`
+    // input is recorded for future cwd-aware features but NOT injected as a
+    // prompt — the agent figures out which repo from the user's own message.
     if (input.prompt) {
       const prompt = input.prompt
       void client.session
@@ -225,9 +279,9 @@ class AgentService {
           path: { id: ocSession.id },
           body: {
             parts: [{ type: 'text', text: prompt }],
+            tools: CLOUD_TOOL_OVERRIDES,
             ...(input.model ? { model: input.model } : {}),
           },
-          ...(input.directory ? { query: { directory: input.directory } } : {}),
         })
         .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
     }
@@ -245,18 +299,154 @@ class AgentService {
     }
   }
 
-  async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
+  /** Rename a session (used by the `/rename` slash command). */
+  async sessionRename(input: { sessionId: string; title: string }): Promise<AgentSessionSummary> {
+    const row = await this.requireSession(input.sessionId)
+    const title = input.title.trim().slice(0, 200)
+    if (!title) throw new AgentError('not_found', 'title cannot be empty')
+    const now = new Date()
+    await db
+      .update(agentSessions)
+      .set({ title, lastActivityAt: now })
+      .where(eq(agentSessions.id, row.id))
+    return {
+      id: row.id,
+      sandboxId: row.sandboxId,
+      opencodeSessionId: row.opencodeSessionId,
+      title,
+      status: row.status,
+      createdAt: row.createdAt,
+      lastActivityAt: now,
+    }
+  }
+
+  /**
+   * List model/provider pairs available inside this sandbox's opencode. UI
+   * uses this for the per-session model picker.
+   */
+  async listModels(sandboxId: string): Promise<{
+    models: ModelInfo[]
+    defaultProviderID: string | null
+    defaultModelID: string | null
+  }> {
+    const client = await this.getClient(sandboxId)
+    const res = await client.config.providers({ throwOnError: true })
+    const body = res.data as {
+      providers: Array<{ id: string; name?: string; models: Record<string, { id: string; name?: string }> }>
+      default: Record<string, string>
+    }
+    const models: ModelInfo[] = []
+    for (const p of body.providers) {
+      for (const m of Object.values(p.models ?? {})) {
+        models.push({
+          providerID: p.id,
+          modelID: m.id,
+          label: `${p.id}/${m.id}`,
+        })
+      }
+    }
+    models.sort((a, b) => a.label.localeCompare(b.label))
+    // OpenCode returns `default` as a map of providerID -> modelID; pick the
+    // first entry as "the" default for the UI.
+    const defEntry = Object.entries(body.default ?? {})[0]
+    return {
+      models,
+      defaultProviderID: defEntry?.[0] ?? null,
+      defaultModelID: defEntry?.[1] ?? null,
+    }
+  }
+
+  setSessionModel(sessionId: string, model: { providerID: string; modelID: string } | null): void {
+    if (model) this.sessionModels.set(sessionId, model)
+    else this.sessionModels.delete(sessionId)
+  }
+
+  getSessionModel(sessionId: string): { providerID: string; modelID: string } | null {
+    return this.sessionModels.get(sessionId) ?? null
+  }
+
+  /**
+   * List OpenCode template commands available in this sandbox. Drives the
+   * composer's slash-command autocomplete.
+   */
+  async listCommands(sandboxId: string): Promise<
+    Array<{ name: string; description?: string; template?: string; agent?: string; model?: string }>
+  > {
+    const client = await this.getClient(sandboxId)
+    const res = await client.command.list({ throwOnError: true })
+    return (res.data ?? []) as Array<{
+      name: string
+      description?: string
+      template?: string
+      agent?: string
+      model?: string
+    }>
+  }
+
+  /** Execute an OpenCode template command inside a session. */
+  async runCommand(input: {
+    sessionId: string
+    command: string
+    arguments: string
+  }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient(row.sandboxId)
-    await client.session.promptAsync({
+    await client.session.command({
       path: { id: row.opencodeSessionId },
-      body: { parts: [{ type: 'text', text: input.message }] },
+      body: {
+        command: input.command,
+        arguments: input.arguments,
+      },
       throwOnError: true,
     })
     await db
       .update(agentSessions)
       .set({ lastActivityAt: new Date() })
       .where(eq(agentSessions.id, row.id))
+  }
+
+  async sessionSetStatus(input: {
+    sessionId: string
+    status: 'active' | 'archived'
+  }): Promise<AgentSessionSummary> {
+    const row = await this.requireSession(input.sessionId)
+    const now = new Date()
+    await db
+      .update(agentSessions)
+      .set({ status: input.status, lastActivityAt: now })
+      .where(eq(agentSessions.id, row.id))
+    return {
+      id: row.id,
+      sandboxId: row.sandboxId,
+      opencodeSessionId: row.opencodeSessionId,
+      title: row.title,
+      status: input.status,
+      createdAt: row.createdAt,
+      lastActivityAt: now,
+    }
+  }
+
+  async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
+    const row = await this.requireSession(input.sessionId)
+    const client = await this.getClient(row.sandboxId)
+    const model = this.sessionModels.get(row.id)
+    await client.session.promptAsync({
+      path: { id: row.opencodeSessionId },
+      body: {
+        parts: [{ type: 'text', text: input.message }],
+        tools: CLOUD_TOOL_OVERRIDES,
+        ...(model ? { model } : {}),
+      },
+      throwOnError: true,
+    })
+    // If this is the session's first real user turn (title is still null or
+    // the placeholder OpenCode assigned), derive a short title from the
+    // message. Makes the session tab meaningful without a modal.
+    const next: { lastActivityAt: Date; title?: string } = { lastActivityAt: new Date() }
+    if (!row.title || /^New session - /.test(row.title)) {
+      next.title = truncatePromptForTitle(input.message)
+    }
+    await db.update(agentSessions).set(next).where(eq(agentSessions.id, row.id))
   }
 
   /**
@@ -420,9 +610,41 @@ class AgentService {
 
   private async handleEvent(sandboxId: string, raw: unknown): Promise<void> {
     const ev = raw as { type?: string; properties?: Record<string, unknown> }
-    const type = ev?.type
+    let type = ev?.type
     const props = ev?.properties ?? {}
     if (!type) return
+
+    // OpenCode 1.4.14 publishes `permission.asked` for new requests; the
+    // 1.4.17 SDK types call the same event `permission.updated`. Accept both
+    // and normalize so downstream code only deals with `permission.updated`.
+    if (type === 'permission.asked') type = 'permission.updated'
+
+    // Normalize 1.4.14's Permission payload to the 1.4.17 shape the SDK +
+    // frontend expect. OpenCode 1.4.14 nests `callID` under `tool`, names the
+    // array `patterns` (not `pattern`), and omits `title` / `time.created`.
+    if (type === 'permission.updated') {
+      const p = props as {
+        id?: string
+        callID?: string
+        tool?: { callID?: string; messageID?: string }
+        patterns?: string[]
+        pattern?: string | string[]
+        title?: string
+        permission?: string
+        metadata?: Record<string, unknown>
+        time?: { created?: number }
+      }
+      if (!p.callID && p.tool?.callID) p.callID = p.tool.callID
+      if (!p.pattern && Array.isArray(p.patterns)) {
+        p.pattern = p.patterns.length === 1 ? p.patterns[0]! : p.patterns
+      }
+      if (!p.title) {
+        const kind = p.permission ?? 'permission'
+        const pat = Array.isArray(p.pattern) ? p.pattern.join(', ') : p.pattern
+        p.title = pat ? `${kind}: ${pat}` : `${kind} requested`
+      }
+      if (!p.time) p.time = { created: Date.now() }
+    }
 
     // Extract the opencode session id where we can.
     let ocSessionId: string | undefined

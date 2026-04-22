@@ -13,7 +13,9 @@ import {
   type TranscriptState,
 } from './transcript-store'
 import { PartRenderer } from './parts'
-import { SessionSwitcher } from './session-switcher'
+import { SessionTabs } from './session-tabs'
+import { EmptySessionState } from './empty-session-state'
+import { ModelPicker } from './model-picker'
 
 type Action =
   | { type: 'reset' }
@@ -49,11 +51,16 @@ export function AgentSessionView({
   const start = trpc.agent.startAgent.useMutation()
   const [startError, setStartError] = useState<string | null>(null)
 
-  // Default to the most recent session when sessionList loads.
+  // Default to the most recent ACTIVE session when sessionList loads. If the
+  // currently-selected session gets archived, jump to another active one.
   useEffect(() => {
-    if (sessionId) return
-    const first = sessions.data?.[0]
-    if (first) setSessionId(first.id)
+    if (!sessions.data) return
+    const activeList = sessions.data.filter((s) => s.status !== 'archived')
+    const stillOpen = sessionId && activeList.some((s) => s.id === sessionId)
+    if (!stillOpen) {
+      const first = activeList[0]?.id ?? null
+      if (first !== sessionId) setSessionId(first)
+    }
   }, [sessionId, sessions.data])
 
   if (status.isLoading) {
@@ -101,20 +108,22 @@ export function AgentSessionView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-1.5">
-        <SessionSwitcher
+        <SessionTabs
           sandboxId={sandboxId}
           sessionId={sessionId}
           onSelect={(id) => setSessionId(id)}
         />
-        <span className="text-[10px] uppercase tracking-wide text-neutral-600">native</span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {sessionId ? (
-          <SessionPane key={sessionId} sessionId={sessionId} onOpenShell={onOpenShell} />
+          <SessionPane
+            key={sessionId}
+            sandboxId={sandboxId}
+            sessionId={sessionId}
+            onOpenShell={onOpenShell}
+          />
         ) : (
-          <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-neutral-500">
-            No session yet. Click the session dropdown and choose <span className="mx-1 font-semibold">+ New session</span>.
-          </div>
+          <EmptySessionState sandboxId={sandboxId} onCreated={(id) => setSessionId(id)} />
         )}
       </div>
     </div>
@@ -122,9 +131,11 @@ export function AgentSessionView({
 }
 
 function SessionPane({
+  sandboxId,
   sessionId,
   onOpenShell,
 }: {
+  sandboxId: string
   sessionId: string
   onOpenShell?: (content: PaneContent) => void
 }) {
@@ -214,6 +225,9 @@ function SessionPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-end border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
+        <ModelPicker sandboxId={sandboxId} sessionId={sessionId} />
+      </div>
       {reconnecting && (
         <div className="border-b border-amber-500/40 bg-amber-500/5 px-3 py-1 text-[11px] text-amber-200">
           Reconnecting…
@@ -254,6 +268,7 @@ function SessionPane({
                     state={state}
                     role={role}
                     sessionId={sessionId}
+                    sandboxId={sandboxId}
                     onOpenShell={onOpenShell}
                   />
                 </div>
@@ -263,6 +278,7 @@ function SessionPane({
         )}
       </div>
       <Composer
+        sandboxId={sandboxId}
         sessionId={sessionId}
         pendingApprovalReason={
           pendingCount > 0 ? `Waiting on ${pendingCount} permission approval${pendingCount === 1 ? '' : 's'}.` : null

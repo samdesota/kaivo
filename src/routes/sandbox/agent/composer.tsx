@@ -1,27 +1,108 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { trpc } from '../../../trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
 
+/**
+ * Composer with a slash-command palette. Typing `/` at the start of the
+ * input opens an autocomplete listing:
+ *   - `/rename <title>` — local UI command, renames the session.
+ *   - all OpenCode template commands exposed by `agent.listCommands`.
+ *
+ * Enter sends. If the first token is a recognized command, it's routed to
+ * the matching handler instead of being forwarded as a prompt.
+ */
 export function Composer({
+  sandboxId,
   sessionId,
   pendingApprovalReason,
 }: {
+  sandboxId: string
   sessionId: string
-  /** When set, the composer is disabled and this is shown as a banner. */
   pendingApprovalReason?: string | null
 }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [activeIdx, setActiveIdx] = useState(0)
+
   const send = trpc.agent.sessionSend.useMutation()
+  const rename = trpc.agent.sessionRename.useMutation()
+  const runCommand = trpc.agent.runCommand.useMutation()
+  const commands = trpc.agent.listCommands.useQuery(
+    { sandboxId },
+    { staleTime: 60_000, refetchOnWindowFocus: false },
+  )
+  const utils = trpc.useUtils()
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // Auto-grow.
+  const entries = useMemo(() => {
+    const list: SlashEntry[] = [
+      {
+        name: 'rename',
+        description: 'Rename this session',
+        argsHint: '<title>',
+        source: 'ui',
+      },
+    ]
+    for (const c of commands.data ?? []) {
+      list.push({
+        name: c.name,
+        description: c.description ?? '',
+        argsHint: '',
+        source: 'opencode',
+      })
+    }
+    return list
+  }, [commands.data])
+
+  const { isSlash, cmdName, filtered } = useMemo(() => {
+    const m = /^\/([\w-]*)/.exec(text)
+    if (!m) return { isSlash: false, cmdName: '', filtered: [] as SlashEntry[] }
+    const q = (m[1] ?? '').toLowerCase()
+    return {
+      isSlash: true,
+      cmdName: m[1] ?? '',
+      filtered: entries
+        .filter((e) => e.name.toLowerCase().startsWith(q))
+        .slice(0, 20),
+    }
+  }, [text, entries])
+
+  useEffect(() => {
+    setMenuOpen(isSlash && filtered.length > 0)
+    setActiveIdx(0)
+  }, [isSlash, filtered.length])
+
   useEffect(() => {
     const ta = taRef.current
     if (!ta) return
     ta.style.height = 'auto'
     ta.style.height = Math.min(ta.scrollHeight, 200) + 'px'
   }, [text])
+
+  function selectEntry(e: SlashEntry) {
+    // Complete the slash to the full name + space, leaving arguments to type.
+    setText(`/${e.name} `)
+    setMenuOpen(false)
+    taRef.current?.focus()
+  }
+
+  async function runSlashCommand(raw: string): Promise<void> {
+    const m = /^\/([\w-]+)\s*(.*)$/s.exec(raw)
+    if (!m) throw new Error('bad slash command')
+    const name = m[1]!
+    const args = (m[2] ?? '').trim()
+    if (name === 'rename') {
+      if (!args) throw new Error('usage: /rename <new title>')
+      await rename.mutateAsync({ sessionId, title: args })
+      await utils.agent.sessionList.invalidate({ sandboxId })
+      return
+    }
+    // Fall through to OpenCode template command.
+    const known = commands.data?.find((c) => c.name === name)
+    if (!known) throw new Error(`unknown command: /${name}`)
+    await runCommand.mutateAsync({ sessionId, command: name, arguments: args })
+  }
 
   async function onSend() {
     const msg = text.trim()
@@ -30,17 +111,21 @@ export function Composer({
     const snapshot = text
     setText('')
     try {
-      await send.mutateAsync({ sessionId, message: msg })
+      if (msg.startsWith('/')) {
+        await runSlashCommand(msg)
+      } else {
+        await send.mutateAsync({ sessionId, message: msg })
+      }
     } catch (e) {
       setErr(extractTrpcMessage(e))
       setText(snapshot)
     }
   }
 
-  const disabled = Boolean(pendingApprovalReason) || send.isPending
+  const disabled = Boolean(pendingApprovalReason) || send.isPending || rename.isPending || runCommand.isPending
 
   return (
-    <div className="border-t border-neutral-800 bg-neutral-950 p-2">
+    <div className="relative border-t border-neutral-800 bg-neutral-950 p-2">
       {pendingApprovalReason && (
         <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-200">
           {pendingApprovalReason}
@@ -51,6 +136,15 @@ export function Composer({
           {err}
         </div>
       )}
+      {menuOpen && (
+        <SlashMenu
+          entries={filtered}
+          activeIdx={activeIdx}
+          onHover={(i) => setActiveIdx(i)}
+          onPick={selectEntry}
+          query={cmdName}
+        />
+      )}
       <div className="flex items-end gap-2">
         <textarea
           ref={taRef}
@@ -58,6 +152,29 @@ export function Composer({
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
+            if (menuOpen) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setActiveIdx((i) => Math.min(filtered.length - 1, i + 1))
+                return
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setActiveIdx((i) => Math.max(0, i - 1))
+                return
+              }
+              if (e.key === 'Tab') {
+                e.preventDefault()
+                const chosen = filtered[activeIdx]
+                if (chosen) selectEntry(chosen)
+                return
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setMenuOpen(false)
+                return
+              }
+            }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
               void onSend()
@@ -66,7 +183,7 @@ export function Composer({
           placeholder={
             pendingApprovalReason
               ? 'Waiting on permission approval…'
-              : 'Message the agent. Enter to send, Shift+Enter for newline.'
+              : 'Message the agent. Enter to send, Shift+Enter for newline. Type / for commands.'
           }
           rows={1}
           className="min-h-[32px] flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none disabled:opacity-60"
@@ -76,9 +193,70 @@ export function Composer({
           disabled={disabled || !text.trim()}
           className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
         >
-          {send.isPending ? 'Sending…' : 'Send'}
+          {send.isPending || rename.isPending || runCommand.isPending ? '…' : 'Send'}
         </button>
       </div>
+    </div>
+  )
+}
+
+interface SlashEntry {
+  name: string
+  description: string
+  argsHint: string
+  source: 'ui' | 'opencode'
+}
+
+function SlashMenu({
+  entries,
+  activeIdx,
+  onHover,
+  onPick,
+  query,
+}: {
+  entries: SlashEntry[]
+  activeIdx: number
+  onHover: (i: number) => void
+  onPick: (e: SlashEntry) => void
+  query: string
+}) {
+  if (entries.length === 0) {
+    return (
+      <div className="absolute bottom-full left-2 right-2 mb-1 rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-500 shadow-lg">
+        No commands match <span className="font-mono">/{query}</span>
+      </div>
+    )
+  }
+  return (
+    <div className="absolute bottom-full left-2 right-2 mb-1 max-h-64 overflow-auto rounded border border-neutral-800 bg-neutral-950 shadow-lg">
+      {entries.map((e, i) => {
+        const active = i === activeIdx
+        return (
+          <button
+            key={`${e.source}:${e.name}`}
+            onMouseEnter={() => onHover(i)}
+            onMouseDown={(ev) => {
+              ev.preventDefault() // don't blur the textarea
+              onPick(e)
+            }}
+            className={
+              'flex w-full items-start gap-3 px-3 py-1.5 text-left text-xs transition-colors ' +
+              (active ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-300 hover:bg-neutral-900')
+            }
+          >
+            <span className="shrink-0 font-mono text-neutral-100">/{e.name}</span>
+            {e.argsHint && (
+              <span className="shrink-0 font-mono text-[11px] text-neutral-500">{e.argsHint}</span>
+            )}
+            {e.description && (
+              <span className="min-w-0 flex-1 truncate text-neutral-500">{e.description}</span>
+            )}
+            <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-600">
+              {e.source === 'ui' ? 'ui' : 'opencode'}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

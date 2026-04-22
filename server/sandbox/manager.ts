@@ -105,6 +105,13 @@ class SandboxManager {
 
   private async createContainer(id: string) {
     const d = getDocker()
+    // In dev mode, bind-mount the freshly-built plugin bundle dir over the
+    // copy baked into the base image. Bind the DIRECTORY (not the file) so
+    // that when tsup atomically replaces dist/index.js, the new inode is
+    // visible inside the container. That way `npm run build:plugin` + a
+    // sandbox restart is all you need to iterate — no image rebuild.
+    const pluginHost = env.DEV_PLUGIN_HOST_PATH
+    const devBinds = pluginHost ? [`${pluginHost}:/opt/cloud-code-plugin:ro`] : []
     return d.createContainer({
       Image: env.SANDBOX_BASE_IMAGE,
       name: `coding-env-sandbox-${id}`,
@@ -118,6 +125,7 @@ class SandboxManager {
         Binds: [
           `${workspaceHostDir(id)}:/workspace`,
           `${opencodeHostDir(id)}:/home/coder/.opencode`,
+          ...devBinds,
         ],
         NetworkMode: env.DOCKER_NETWORK,
         ReadonlyRootfs: true,

@@ -31,10 +31,11 @@ export class OpenCodeError extends Error {
 }
 
 const DEFAULT_PORT = 4096
-// Raised from 5s: `opencode serve` now installs the `@opencode-ai/plugin`
-// peer package into `~/.config/opencode/node_modules` on first boot and
-// loads our bundled plugin, which pushes cold-start over the old limit.
-const READY_TIMEOUT_MS = 20_000
+// /config blocks until the plugin is loaded, which includes loading our
+// bundled cloud-code plugin (reads ruleset, imports SDK, etc.). Observed
+// cold-boot is ~18s on a freshly-created sandbox; 45s gives slack for
+// slower hosts without letting hangs go forever.
+const READY_TIMEOUT_MS = 45_000
 const READY_POLL_MS = 200
 
 function passwordSecretName(sandboxId: string): string {
@@ -171,7 +172,10 @@ export async function startOpenCode(sandboxId: string): Promise<OpenCodeEndpoint
     }
     await sleep(READY_POLL_MS)
   }
-  throw new OpenCodeError('not_ready', 'opencode did not become ready in 5s')
+  throw new OpenCodeError(
+    'not_ready',
+    `opencode did not become ready in ${Math.round(READY_TIMEOUT_MS / 1000)}s`,
+  )
 }
 
 /**
@@ -254,8 +258,12 @@ async function probeReady(ip: string, port: number, password: string): Promise<b
     const res = await undiciRequest(`http://${ip}:${port}/config`, {
       method: 'GET',
       headers: { authorization: opencodeBasicAuthHeader(password) },
-      headersTimeout: 1_500,
-      bodyTimeout: 1_500,
+      // /config blocks until the plugin finishes loading, which can take
+      // 15-20s on cold boot. Match READY_TIMEOUT_MS so a single probe can
+      // actually succeed once the plugin is up, instead of getting killed at
+      // 1.5s and re-probing into a loop that never sees the 2xx.
+      headersTimeout: READY_TIMEOUT_MS,
+      bodyTimeout: READY_TIMEOUT_MS,
     })
     // Any 2xx means it's alive and auth works. 401 means alive but our
     // creds don't match — treat as not-ready so we retry with fresh env.

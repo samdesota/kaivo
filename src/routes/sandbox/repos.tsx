@@ -243,7 +243,7 @@ function JobProgress({ jobId, onDone }: { jobId: string; onDone: () => void }) {
 
 const MAX_VISIBLE = 30
 
-function RepoCombobox({
+export function RepoCombobox({
   repos,
   value,
   onChange,

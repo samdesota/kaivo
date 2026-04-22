@@ -51,7 +51,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     return {}
   }
   console.error(
-    `[cloud-code-plugin] registering cloud_bash + cloud_pty (appUrl=${creds.appUrl})`,
+    `[cloud-code-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close (appUrl=${creds.appUrl})`,
   )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
@@ -64,7 +64,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     tool: {
       cloud_bash: tool({
         description:
-          'Run a shell command inside the cloud-code sandbox. Streams stdout+stderr to the UI and returns combined output plus exit code.',
+          'Run a finite shell command inside the cloud-code sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `cloud_pty` instead so the human can see and interact with them.',
         args: {
           command: z
             .string()
@@ -77,14 +77,57 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       cloud_pty: tool({
         description:
-          'Open a persistent PTY shell inside the cloud-code sandbox that the human user can also attach to. Returns the shell id.',
+          'Open a persistent interactive PTY shell inside the cloud-code sandbox. Prefer this for dev servers, watch commands, REPLs, or anything that runs indefinitely — the shell appears in the human user\'s Shells panel so they can watch output and type into it. Returns a shellId you can then use with `cloud_pty_write` to send commands or `cloud_pty_read` to check output. Once a PTY is open, DO NOT run the same long-running command via cloud_bash.',
         args: {
           cwd: z.string().optional().describe('Starting cwd for the shell. Defaults to /workspace.'),
+          label: z.string().optional().describe('Short human-readable label shown in the Shells panel.'),
           cols: z.number().int().optional(),
           rows: z.number().int().optional(),
         },
         async execute(args, context) {
           return runCloudPty(client, args, context as unknown as ToolCtxLike)
+        },
+      }),
+      cloud_pty_write: tool({
+        description:
+          'Send text input to an already-opened PTY shell (created with `cloud_pty`). Use this to run commands inside a persistent shell instead of spawning new ones. By default a trailing newline is appended so the shell executes the line.',
+        args: {
+          shellId: z.string().describe('Shell id returned by cloud_pty.'),
+          input: z
+            .string()
+            .describe('Text to send. Control characters like "\\x03" for Ctrl-C are allowed.'),
+          appendNewline: z
+            .boolean()
+            .optional()
+            .describe('Append "\\n" after input to execute the line. Defaults to true.'),
+        },
+        async execute(args, context) {
+          return runCloudPtyWrite(client, args, context as unknown as ToolCtxLike)
+        },
+      }),
+      cloud_pty_read: tool({
+        description:
+          'Read the most recent output from a PTY shell. Returns the last `maxBytes` of scrollback, whether the shell is still alive, and the exit code if it exited. Use after `cloud_pty_write` or to poll progress of a long-running process.',
+        args: {
+          shellId: z.string().describe('Shell id returned by cloud_pty.'),
+          maxBytes: z
+            .number()
+            .int()
+            .optional()
+            .describe('Max bytes of tail output to return. Defaults to 8192.'),
+        },
+        async execute(args, context) {
+          return runCloudPtyRead(client, args, context as unknown as ToolCtxLike)
+        },
+      }),
+      cloud_pty_close: tool({
+        description:
+          'Terminate a PTY shell created with `cloud_pty` and dispose it. Call when the process is no longer needed so the Shells panel stays tidy.',
+        args: {
+          shellId: z.string().describe('Shell id returned by cloud_pty.'),
+        },
+        async execute(args, context) {
+          return runCloudPtyClose(client, args, context as unknown as ToolCtxLike)
         },
       }),
     },
@@ -207,6 +250,95 @@ async function runCloudPty(
         stderr: (err as Error).message,
       },
     }
+  }
+}
+
+async function runCloudPtyWrite(
+  client: AgentShellClient,
+  args: { shellId: string; input: string; appendNewline?: boolean },
+  _ctx: ToolCtxLike,
+): Promise<{ output: string; metadata: Record<string, unknown> }> {
+  try {
+    const line = args.appendNewline === false ? args.input : `${args.input}\n`
+    const b64 = Buffer.from(line, 'utf8').toString('base64')
+    await client.mutate<{ ok: true }>('agentShell.write', {
+      shellId: args.shellId,
+      b64,
+    })
+    return {
+      output: `Wrote ${line.length} bytes to shell ${args.shellId}.`,
+      metadata: { cloudcode_shell_id: args.shellId, status: 'ok' },
+    }
+  } catch (err) {
+    return ptyError(args.shellId, err)
+  }
+}
+
+async function runCloudPtyRead(
+  client: AgentShellClient,
+  args: { shellId: string; maxBytes?: number },
+  _ctx: ToolCtxLike,
+): Promise<{ output: string; metadata: Record<string, unknown> }> {
+  try {
+    const res = await client.query<{
+      b64: string
+      truncated: boolean
+      exitCode: number | null
+      alive: boolean
+    }>('agentShell.tail', {
+      shellId: args.shellId,
+      maxBytes: args.maxBytes ?? 8192,
+    })
+    const text = Buffer.from(res.b64, 'base64').toString('utf8')
+    return {
+      output: text,
+      metadata: {
+        cloudcode_shell_id: args.shellId,
+        alive: res.alive,
+        exit_code: res.exitCode,
+        truncated: res.truncated,
+      },
+    }
+  } catch (err) {
+    return ptyError(args.shellId, err)
+  }
+}
+
+async function runCloudPtyClose(
+  client: AgentShellClient,
+  args: { shellId: string },
+  _ctx: ToolCtxLike,
+): Promise<{ output: string; metadata: Record<string, unknown> }> {
+  try {
+    await client.mutate<{ ok: true }>('agentShell.close', { shellId: args.shellId })
+    return {
+      output: `Shell ${args.shellId} closed.`,
+      metadata: { cloudcode_shell_id: args.shellId, status: 'closed' },
+    }
+  } catch (err) {
+    return ptyError(args.shellId, err)
+  }
+}
+
+function ptyError(shellId: string, err: unknown): { output: string; metadata: Record<string, unknown> } {
+  if (err instanceof AppUnreachableError) {
+    return {
+      output: '',
+      metadata: {
+        cloudcode_shell_id: shellId,
+        status: 'error',
+        stderr: 'cloud-code app unreachable',
+        error: err.message,
+      },
+    }
+  }
+  return {
+    output: '',
+    metadata: {
+      cloudcode_shell_id: shellId,
+      status: 'error',
+      stderr: (err as Error).message,
+    },
   }
 }
 

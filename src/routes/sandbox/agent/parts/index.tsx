@@ -16,12 +16,14 @@ export function PartRenderer({
   state,
   role,
   sessionId,
+  sandboxId,
   onOpenShell,
 }: {
   part: Part
   state: TranscriptState
   role: string
   sessionId: string
+  sandboxId: string
   onOpenShell?: (content: PaneContent) => void
 }) {
   if (HIDDEN.has(part.type)) return null
@@ -46,7 +48,7 @@ export function PartRenderer({
     case 'file':
       return <FilePart part={part} />
     case 'patch':
-      return <PatchPart part={part} />
+      return <PatchPart part={part} sandboxId={sandboxId} />
     case 'step-finish':
       return <StepFinishPart part={part} />
     default:

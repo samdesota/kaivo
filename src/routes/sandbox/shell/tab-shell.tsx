@@ -4,6 +4,7 @@ import { AgentSessionView } from '../agent/session-view'
 import { useAgentUiPreference } from '../agent/agent-ui-preference'
 import { ShellsDropdown, PreviewsDropdown } from './dropdowns'
 import { RightPane } from './right-pane'
+import { SplitPane } from './split-pane'
 import { type PaneContent, useRightPaneState } from './tab-state'
 
 interface TabShellProps {
@@ -52,26 +53,24 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <section
-          className="flex min-h-0 min-w-0 shrink-0 basis-[70%] border-r border-neutral-800"
-          aria-label="Agents"
-        >
-          <div className="flex min-h-0 w-full flex-col">
+      <SplitPane
+        storageKey={`sandbox.${sandboxId}.splitRatio`}
+        initialRatio={0.7}
+        left={
+          <section className="flex min-h-0 w-full flex-col" aria-label="Agents">
             {agentUi === 'native' ? (
               <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
             ) : (
               <AgentPanel sandboxId={sandboxId} />
             )}
-          </div>
-        </section>
-        <section
-          className="flex min-h-0 min-w-0 basis-[30%]"
-          aria-label="Tabs"
-        >
-          <RightPane sandboxId={sandboxId} state={state} dispatch={dispatch} />
-        </section>
-      </div>
+          </section>
+        }
+        right={
+          <section className="flex min-h-0 w-full flex-col" aria-label="Tabs">
+            <RightPane sandboxId={sandboxId} state={state} dispatch={dispatch} />
+          </section>
+        }
+      />
     </div>
   )
 }

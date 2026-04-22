@@ -95,7 +95,18 @@ function BashToolPart({
   permission?: PermissionRequest
   sessionId: string
 }) {
-  const [open, setOpen] = useState(false)
+  const running = state.status === 'running' || state.status === 'pending'
+  // Auto-expand while the command is running so the user can watch output
+  // stream in without having to click. Once complete the user's manual
+  // toggle state (if any) takes over.
+  const [manual, setManual] = useState<boolean | null>(null)
+  const open = manual ?? running
+  const setOpen = (v: boolean | ((prev: boolean) => boolean)) => {
+    setManual((prev) => {
+      const curr = prev ?? running
+      return typeof v === 'function' ? (v as (x: boolean) => boolean)(curr) : v
+    })
+  }
   const cmd = String((state.input as { command?: string } | undefined)?.command ?? '')
   const shellId = state.metadata?.cloudcode_shell_id
   const exitCode =

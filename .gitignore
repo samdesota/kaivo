@@ -13,3 +13,4 @@ playwright-report
 *.tsbuildinfo
 .DS_Store
 .claude/
+test-data
