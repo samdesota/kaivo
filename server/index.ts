@@ -60,6 +60,24 @@ async function buildServer() {
 
   server.get('/healthz', async () => ({ ok: true }))
 
+  // Caddy on-demand TLS gate: returns 200 only for hostnames that parse as
+  // a valid preview subdomain (existing or otherwise — we don't hit the DB
+  // since the sandbox might not be running yet, and we want certs ready).
+  server.get<{ Querystring: { domain?: string } }>('/internal/ask-tls', async (req, reply) => {
+    const domain = (req.query?.domain ?? '').toLowerCase()
+    if (!domain) return reply.code(400).send('missing domain')
+    if (domain === env.PUBLIC_URL.replace(/^https?:\/\//, '').replace(/\/.*$/, '')) {
+      return reply.code(200).send('ok')
+    }
+    const apex = env.PREVIEW_HOSTNAME?.toLowerCase()
+    if (!apex || !domain.endsWith('.' + apex)) {
+      return reply.code(404).send('unknown')
+    }
+    const sub = domain.slice(0, -('.' + apex).length)
+    if (!/^[a-z0-9]+-\d+$/.test(sub)) return reply.code(404).send('invalid')
+    return reply.code(200).send('ok')
+  })
+
   await server.register(fastifyTRPCPlugin, {
     prefix: '/trpc',
     useWSS: true,

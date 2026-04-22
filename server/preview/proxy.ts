@@ -5,6 +5,7 @@ import { resolveSession } from '../auth/service.js'
 import { SESSION_COOKIE } from '../auth/cookie.js'
 import { previewService } from './service.js'
 import { sandboxManager } from '../sandbox/manager.js'
+import { env } from '../env.js'
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -54,6 +55,35 @@ async function isAuthed(cookieHeader: string | undefined): Promise<boolean> {
  * http.server` need the prefix stripped or symlinked instead; that is a
  * known v1 limitation of path-based previews.
  */
+/**
+ * Parse a Host header like `<sandboxId>-<port>.preview.438d.xyz` into parts.
+ * Returns null when PREVIEW_HOSTNAME is unset or the host doesn't match.
+ * The split point is the LAST hyphen, since sandbox IDs are ULIDs and port
+ * is purely numeric. The `rest` is the request URL forwarded as-is — unlike
+ * path-based previews, the upstream sees a clean root URL and can use its
+ * default base.
+ */
+export function parsePreviewHost(
+  hostHeader: string | undefined,
+  url: string,
+): { sandboxId: string; port: number; rest: string } | null {
+  if (!env.PREVIEW_HOSTNAME) return null
+  if (!hostHeader) return null
+  const apex = env.PREVIEW_HOSTNAME.toLowerCase()
+  // Strip any port from the Host header.
+  const host = hostHeader.split(':')[0]?.toLowerCase() ?? ''
+  if (!host.endsWith('.' + apex)) return null
+  const sub = host.slice(0, -('.' + apex).length)
+  if (!sub || sub.includes('.')) return null
+  const dash = sub.lastIndexOf('-')
+  if (dash <= 0) return null
+  const sandboxId = sub.slice(0, dash)
+  const portStr = sub.slice(dash + 1)
+  const port = Number(portStr)
+  if (!sandboxId || !Number.isFinite(port) || port <= 0 || port > 65535) return null
+  return { sandboxId, port, rest: url || '/' }
+}
+
 export function parsePreviewUrl(
   url: string,
 ): { sandboxId: string; port: number; rest: string } | null {
@@ -118,9 +148,25 @@ function filterResponseHeaders(headers: http.IncomingHttpHeaders): http.Outgoing
 export function registerPreviewProxy(server: any): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   server.addHook('onRequest', async (req: any, reply: any) => {
+    const isUpgrade =
+      (req.headers.upgrade ?? '').toString().toLowerCase() === 'websocket'
+    // Subdomain-based previews intercept the request before any other route.
+    // The fastify router would otherwise return 404 since no route matches
+    // `/anything` on the preview hostname. WS subdomain upgrades are also
+    // handled here directly because there's no path pattern to register.
+    const fromHost = parsePreviewHost(req.headers.host as string | undefined, req.url)
+    if (fromHost) {
+      if (isUpgrade) {
+        // Defer to the global upgrade handler installed below; reply nothing
+        // here so fastify doesn't try to satisfy the upgrade itself.
+        return
+      }
+      await handleHttp(req, reply, fromHost)
+      return
+    }
     if (!req.url.startsWith('/preview/')) return
-    // Skip upgrades — fastify-websocket route below handles them.
-    if ((req.headers.upgrade ?? '').toString().toLowerCase() === 'websocket') return
+    // Path-based: skip upgrades — fastify-websocket route below handles them.
+    if (isUpgrade) return
     await handleHttp(req, reply)
   })
 
@@ -131,6 +177,99 @@ export function registerPreviewProxy(server: any): void {
       await handleWsRoute(clientSocket, req)
     })
   }
+
+  // Subdomain WS upgrades. Intercept on the raw http server BEFORE
+  // fastify-websocket rejects them. The listener returns without consuming
+  // the socket when the host doesn't match a preview, letting fastify-ws
+  // continue handling /preview/* path-based upgrades.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  server.ready(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const httpServer: any = server.server
+    // Capture and re-emit: we need to run BEFORE fastify-websocket's listener.
+    const existing = httpServer.listeners('upgrade').slice()
+    httpServer.removeAllListeners('upgrade')
+    httpServer.on('upgrade', (req: http.IncomingMessage, socket: any, head: Buffer) => {
+      const fromHost = parsePreviewHost(req.headers.host, req.url ?? '/')
+      if (!fromHost) {
+        for (const l of existing) (l as (...a: unknown[]) => void)(req, socket, head)
+        return
+      }
+      void handleSubdomainWsUpgrade(req, socket, head, fromHost)
+    })
+  })
+}
+
+async function handleSubdomainWsUpgrade(
+  req: http.IncomingMessage,
+  socket: import('node:stream').Duplex,
+  _head: Buffer,
+  parsed: { sandboxId: string; port: number; rest: string },
+): Promise<void> {
+  const writeAndDestroy = (line: string) => {
+    try {
+      socket.write(`HTTP/1.1 ${line}\r\nConnection: close\r\n\r\n`)
+    } catch {
+      /* ignore */
+    }
+    try {
+      socket.destroy()
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!(await isAuthed(req.headers.cookie))) {
+    writeAndDestroy('401 Unauthorized')
+    return
+  }
+  const sb = await sandboxManager.get(parsed.sandboxId)
+  if (!sb || !sb.running || !sb.containerId) {
+    writeAndDestroy('503 Service Unavailable')
+    return
+  }
+  const ip = await previewService.getContainerIp(parsed.sandboxId)
+  if (!ip) {
+    writeAndDestroy('502 Bad Gateway')
+    return
+  }
+  // Open a server-side WS to upstream and bridge raw frames via a per-side
+  // ws server. Easiest path: spin up a local ws.Server in noServer mode and
+  // hand it the upgrade.
+  const { WebSocketServer } = await import('ws')
+  const wss = new WebSocketServer({ noServer: true })
+  wss.handleUpgrade(req, socket as never, _head, (clientSocket) => {
+    const subprotocolHeader = req.headers['sec-websocket-protocol']
+    const subprotocols =
+      typeof subprotocolHeader === 'string'
+        ? subprotocolHeader.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined
+    const upstream = new WebSocket(
+      `ws://${ip}:${parsed.port}${parsed.rest}`,
+      subprotocols,
+      { headers: copyForwardableHeaders(req.headers) },
+    )
+    let opened = false
+    upstream.on('open', () => {
+      opened = true
+      bridge(clientSocket, upstream)
+    })
+    upstream.on('error', (err) => {
+      logger.warn({ err, host: `${ip}:${parsed.port}` }, 'preview ws (host) upstream error')
+      if (!opened) safeClose(clientSocket, 4502, 'upstream connection failed')
+    })
+    upstream.on('unexpected-response', (_r, upRes) => {
+      safeClose(clientSocket, 4502, `upstream ${upRes.statusCode ?? 'error'}`)
+    })
+    clientSocket.once('close', () => {
+      if (!opened) {
+        try {
+          upstream.terminate()
+        } catch {
+          /* ignore */
+        }
+      }
+    })
+  })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -244,7 +383,11 @@ function safeClose(ws: WebSocket, code: number, reason: string): void {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleHttp(req: any, reply: any): Promise<void> {
+async function handleHttp(
+  req: any,
+  reply: any,
+  preParsed?: { sandboxId: string; port: number; rest: string },
+): Promise<void> {
   if (!(await isAuthed(req.headers.cookie as string | undefined))) {
     // Top-level browser navigations land on the SPA's login page; XHR/iframe
     // fetches keep the JSON 401 so they can surface a proper error to code.
@@ -256,7 +399,7 @@ async function handleHttp(req: any, reply: any): Promise<void> {
     reply.code(401).send({ error: 'unauthorized' })
     return
   }
-  const parsed = parsePreviewUrl(req.url)
+  const parsed = preParsed ?? parsePreviewUrl(req.url)
   if (!parsed) {
     reply.code(400).send({ error: 'invalid preview url' })
     return

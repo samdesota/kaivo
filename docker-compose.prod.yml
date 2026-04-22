@@ -1,0 +1,19 @@
+# Production overrides. Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Differences from dev:
+#   - Postgres is not published to the host (only the app container reaches it
+#     on the compose network).
+#   - The app binds to 127.0.0.1:3000 so only the host-local Caddy reverse
+#     proxy can reach it. Public TLS is terminated by Caddy on :443.
+#   - The app reads its env from /etc/cloud-code/app.env on the host.
+
+services:
+  postgres:
+    ports: !reset []
+
+  app:
+    env_file:
+      - /etc/cloud-code/app.env
+    ports: !override
+      - "127.0.0.1:3000:3000"

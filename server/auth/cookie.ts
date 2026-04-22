@@ -15,9 +15,13 @@ export function setSessionCookie(reply: FastifyReply, sessionId: string, expires
     path: '/',
     expires: expiresAt,
     maxAge: Math.floor(ABSOLUTE_TTL_MS / 1000),
+    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
   })
 }
 
 export function clearSessionCookie(reply: FastifyReply): void {
-  reply.clearCookie(SESSION_COOKIE, { path: '/' })
+  reply.clearCookie(SESSION_COOKIE, {
+    path: '/',
+    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+  })
 }

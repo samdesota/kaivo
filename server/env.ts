@@ -12,6 +12,9 @@ const schema = z.object({
   // running the server directly on the host).
   HOST_DATA_DIR: z.string().optional(),
   PUBLIC_URL: z.string().default('http://localhost:3000'),
+  // When set, enables host-header-based preview routing. Preview URLs become
+  // https://<sandboxId>-<port>.{PREVIEW_HOSTNAME}/. Unset => path-based only.
+  PREVIEW_HOSTNAME: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
   ADMIN_PASSWORD_BOOTSTRAP: z.string().optional(),
@@ -29,6 +32,10 @@ const schema = z.object({
     .union([z.literal('true'), z.literal('false')])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  // Apex domain to scope the session cookie to. Set this when previews live
+  // on subdomains so the iframe (different host) sends the session cookie.
+  // Example: `438d.xyz` covers `code.438d.xyz` + `*.preview.438d.xyz`.
+  COOKIE_DOMAIN: z.string().optional(),
   // Phase 4 bootstrap knobs. Keys here are only consulted on first start
   // (or when the corresponding DB row is absent) — see AgentService.
   ANTHROPIC_API_KEY_BOOTSTRAP: z.string().optional(),

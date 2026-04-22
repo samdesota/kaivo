@@ -2,8 +2,13 @@ import { observable } from '@trpc/server/observable'
 import { z } from 'zod'
 import { protectedProcedure, router } from '../trpc.js'
 import { previewService, type PreviewPort } from '../../preview/service.js'
+import { env } from '../../env.js'
 
 export const previewRouter = router({
+  config: protectedProcedure.query(() => ({
+    hostname: env.PREVIEW_HOSTNAME ?? null,
+  })),
+
   ports: protectedProcedure
     .input(z.object({ sandboxId: z.string().min(1) }))
     .subscription(({ input }) => {

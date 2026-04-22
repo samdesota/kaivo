@@ -1,0 +1,26 @@
+# Place this on the host at /etc/caddy/Caddyfile.
+# Reload with: systemctl reload caddy
+
+{
+    email admin@438d.xyz
+
+    # On-demand TLS issues a cert the first time a host is requested.
+    # Ask the app whether the hostname is a legit sandbox preview before
+    # we burn a Let's Encrypt issuance on it.
+    on_demand_tls {
+        ask http://127.0.0.1:3000/internal/ask-tls
+    }
+}
+
+code.438d.xyz {
+    encode gzip
+    reverse_proxy 127.0.0.1:3000
+}
+
+*.preview.438d.xyz {
+    encode gzip
+    tls {
+        on_demand
+    }
+    reverse_proxy 127.0.0.1:3000
+}
