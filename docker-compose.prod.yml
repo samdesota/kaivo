@@ -17,3 +17,7 @@ services:
       - /etc/cloud-code/app.env
     ports: !override
       - "127.0.0.1:3000:3000"
+    # Linux host: docker socket is gid 988 (group `docker`). Override the
+    # dev-default of 0 (root) which is what Docker Desktop expects.
+    group_add: !override
+      - "988"

@@ -4,9 +4,10 @@
 {
     email admin@438d.xyz
 
-    # On-demand TLS issues a cert the first time a host is requested.
-    # Ask the app whether the hostname is a legit sandbox preview before
-    # we burn a Let's Encrypt issuance on it.
+    # Tailscale binds a specific IPv6 address on :443; binding [::]:443
+    # collides. Pin Caddy to the public IPv4 only.
+    default_bind 161.35.136.150
+
     on_demand_tls {
         ask http://127.0.0.1:3000/internal/ask-tls
     }

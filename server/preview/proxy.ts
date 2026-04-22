@@ -179,14 +179,12 @@ export function registerPreviewProxy(server: any): void {
   }
 
   // Subdomain WS upgrades. Intercept on the raw http server BEFORE
-  // fastify-websocket rejects them. The listener returns without consuming
-  // the socket when the host doesn't match a preview, letting fastify-ws
-  // continue handling /preview/* path-based upgrades.
+  // fastify-websocket rejects them. We use the onReady hook (NOT
+  // server.ready()) so we don't boot Fastify before subsequent registers.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  server.ready(() => {
+  server.addHook('onReady', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const httpServer: any = server.server
-    // Capture and re-emit: we need to run BEFORE fastify-websocket's listener.
     const existing = httpServer.listeners('upgrade').slice()
     httpServer.removeAllListeners('upgrade')
     httpServer.on('upgrade', (req: http.IncomingMessage, socket: any, head: Buffer) => {
