@@ -21,6 +21,7 @@
     "db:migrate": "tsx server/db/migrate-cli.ts",
     "test:live-llm": "tsx scripts/live-llm-plugin.ts",
     "test:e2e:live": "tsx scripts/live-e2e.ts",
+    "test:e2e:stack": "scripts/e2e-stack.sh",
     "build:plugin": "cd packages/opencode-plugin && npm install --no-audit --no-fund --silent && npm run build",
     "prepare:sandbox-image": "npm run build:plugin && mkdir -p docker/base-sandbox/plugin && cp packages/opencode-plugin/dist/index.js docker/base-sandbox/plugin/index.js",
     "docker:sandbox": "npm run prepare:sandbox-image && docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox"

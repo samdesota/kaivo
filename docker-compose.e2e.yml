@@ -1,0 +1,35 @@
+# E2E override: hermetic, ephemeral, port-isolated copy of the dev stack.
+# Combine with docker-compose.yml via:
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p cc-e2e …
+# The e2e runner script (`scripts/e2e-stack.sh`) drives this — most users
+# should not invoke compose directly.
+
+name: cc-e2e
+
+services:
+  postgres:
+    # No host port, no persistent volume. Tests should never depend on
+    # leftover state from a previous run.
+    ports: !reset []
+    volumes: !reset []
+
+  app:
+    environment:
+      # Override the conflicting bits the parent compose set. Bootstrap
+      # values come from the host environment (the runner script enforces
+      # the required ones).
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:13000}
+      DOCKER_NETWORK: cc-e2e-net
+      # Different sandbox image tag is fine — we still build the same one.
+      SANDBOX_BASE_IMAGE: cloud-code-sandbox:dev
+    ports: !override
+      # Map to a non-default host port so this stack can coexist with a
+      # running dev server.
+      - "13000:3000"
+    networks: !override
+      - default
+      - sandbox-net
+
+networks:
+  sandbox-net:
+    name: cc-e2e-net
