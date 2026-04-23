@@ -284,6 +284,8 @@ class AgentService {
       opencodeSessionId: ocSession.id,
       title: resolvedTitle,
       status: 'active',
+      selectedProviderId: input.model?.providerID ?? null,
+      selectedModelId: input.model?.modelID ?? null,
       createdAt: now,
       lastActivityAt: now,
     })
@@ -379,13 +381,39 @@ class AgentService {
     }
   }
 
-  setSessionModel(sessionId: string, model: { providerID: string; modelID: string } | null): void {
+  async setSessionModel(
+    sessionId: string,
+    model: { providerID: string; modelID: string } | null,
+  ): Promise<void> {
     if (model) this.sessionModels.set(sessionId, model)
     else this.sessionModels.delete(sessionId)
+    await db
+      .update(agentSessions)
+      .set({
+        selectedProviderId: model?.providerID ?? null,
+        selectedModelId: model?.modelID ?? null,
+      })
+      .where(eq(agentSessions.id, sessionId))
   }
 
-  getSessionModel(sessionId: string): { providerID: string; modelID: string } | null {
-    return this.sessionModels.get(sessionId) ?? null
+  async getSessionModel(
+    sessionId: string,
+  ): Promise<{ providerID: string; modelID: string } | null> {
+    const cached = this.sessionModels.get(sessionId)
+    if (cached) return cached
+    const rows = await db
+      .select({
+        providerID: agentSessions.selectedProviderId,
+        modelID: agentSessions.selectedModelId,
+      })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .limit(1)
+    const r = rows[0]
+    if (!r || !r.providerID || !r.modelID) return null
+    const hydrated = { providerID: r.providerID, modelID: r.modelID }
+    this.sessionModels.set(sessionId, hydrated)
+    return hydrated
   }
 
   /**
@@ -452,7 +480,7 @@ class AgentService {
   async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient(row.sandboxId)
-    const model = this.sessionModels.get(row.id)
+    const model = await this.getSessionModel(row.id)
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
       body: {

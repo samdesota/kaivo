@@ -162,6 +162,8 @@ export const agentSessions = pgTable('agent_sessions', {
   opencodeSessionId: text('opencode_session_id').notNull(),
   title: text('title'),
   status: text('status').$type<AgentSessionStatus>().notNull().default('active'),
+  selectedProviderId: text('selected_provider_id'),
+  selectedModelId: text('selected_model_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true })
     .notNull()

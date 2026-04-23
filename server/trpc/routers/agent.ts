@@ -185,21 +185,21 @@ export const agentRouter = router({
         modelID: z.string().min(1).max(200).nullable(),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       if (input.providerID && input.modelID) {
-        agentService.setSessionModel(input.sessionId, {
+        await agentService.setSessionModel(input.sessionId, {
           providerID: input.providerID,
           modelID: input.modelID,
         })
       } else {
-        agentService.setSessionModel(input.sessionId, null)
+        await agentService.setSessionModel(input.sessionId, null)
       }
       return { ok: true as const }
     }),
 
   sessionGetModel: protectedProcedure
     .input(z.object({ sessionId: z.string().min(1) }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       return agentService.getSessionModel(input.sessionId)
     }),
 

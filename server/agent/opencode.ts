@@ -322,7 +322,15 @@ const CONFIG_CONTAINER_PATH = '/home/coder/.config/opencode/opencode.json'
 async function ensurePluginConfig(sandboxId: string): Promise<void> {
   const sb = await sandboxManager.get(sandboxId)
   if (!sb?.containerId) return
-  const cfg = { plugin: [PLUGIN_CONTAINER_PATH] }
+  const cfg = {
+    plugin: [PLUGIN_CONTAINER_PATH],
+    agent: {
+      plan: { mode: 'primary', model: 'anthropic/claude-opus-4-7' },
+      build: { mode: 'primary', model: 'anthropic/claude-opus-4-6' },
+      general: { mode: 'subagent', model: 'anthropic/claude-sonnet-4-6' },
+      explore: { mode: 'subagent', model: 'anthropic/claude-sonnet-4-6' },
+    },
+  }
   const json = JSON.stringify(cfg)
   // Use `tee` so we don't have to worry about shell-escaping the payload;
   // docker exec streams stdin through.
