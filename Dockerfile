@@ -12,6 +12,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm install --no-audit --no-fund
 
 COPY tsconfig*.json vite.config.ts tsup.config.ts index.html ./
+COPY public ./public
 COPY src ./src
 COPY server ./server
 COPY migrations ./migrations
