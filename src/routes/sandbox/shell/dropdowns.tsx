@@ -6,6 +6,7 @@ import type { AppRouter } from '../../../../server/trpc/router'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { Popover } from './popover'
 import type { PaneContent } from './tab-state'
+import { RepoCloneModal } from '../repo-clone-modal'
 
 type RouterOutput = inferRouterOutputs<AppRouter>
 type ShellRow = RouterOutput['shell']['list'][number]
@@ -155,6 +156,80 @@ export function PreviewsDropdown({ sandboxId, onOpen }: PreviewsDropdownProps) {
         </div>
       )}
     </Popover>
+  )
+}
+
+export function ReposDropdown({ sandboxId }: { sandboxId: string }) {
+  const utils = trpc.useUtils()
+  const repos = trpc.repo.list.useQuery({ sandboxId }, { refetchInterval: 5_000 })
+  const remove = trpc.repo.remove.useMutation()
+  const [error, setError] = useState<string | null>(null)
+  const [cloneOpen, setCloneOpen] = useState(false)
+  const list = repos.data ?? []
+
+  async function onRemove(repoId: string, slug: string) {
+    setError(null)
+    if (!confirm(`Remove repo "${slug}"? Workspace files will be deleted.`)) return
+    try {
+      await remove.mutateAsync({ sandboxId, repoId })
+      await utils.repo.list.invalidate({ sandboxId })
+    } catch (err) {
+      setError(extractTrpcMessage(err))
+    }
+  }
+
+  return (
+    <>
+      <Popover label="Repos" count={list.length}>
+        {(close) => (
+          <div className="p-1">
+            {list.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-neutral-500">No repos cloned.</div>
+            ) : (
+              <ul className="space-y-1">
+                {list.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-900"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-neutral-200">{r.slug}</div>
+                      <div className="truncate text-[10px] text-neutral-500">
+                        {r.source === 'github' ? r.githubFullName : r.originUrl} · {r.ref}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => void onRemove(r.id, r.slug)}
+                      disabled={remove.isPending}
+                      className="rounded border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400 hover:border-red-900 hover:text-red-400 disabled:opacity-60"
+                    >
+                      remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="border-t border-neutral-800 px-2 py-2">
+              <button
+                onClick={() => {
+                  setCloneOpen(true)
+                  close()
+                }}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+              >
+                + Clone repo
+              </button>
+            </div>
+            {error && <div className="px-3 py-2 text-[10px] text-red-400">{error}</div>}
+          </div>
+        )}
+      </Popover>
+      <RepoCloneModal
+        sandboxId={sandboxId}
+        open={cloneOpen}
+        onClose={() => setCloneOpen(false)}
+      />
+    </>
   )
 }
 

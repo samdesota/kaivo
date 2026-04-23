@@ -6,7 +6,7 @@ import { RepoError, repoService } from '../../repo/service.js'
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof RepoError) {
     const code: TRPCError['code'] =
-      err.code === 'not_found'
+      err.code === 'not_found' || err.code === 'config_not_found'
         ? 'NOT_FOUND'
         : err.code === 'sandbox_unavailable'
           ? 'PRECONDITION_FAILED'
@@ -23,46 +23,26 @@ function toTrpcError(err: unknown): TRPCError {
   })
 }
 
-const addInput = z.discriminatedUnion('source', [
-  z.object({
-    source: z.literal('url'),
-    sandboxId: z.string().min(1),
-    url: z.string().min(1).max(2048),
-    ref: z.string().max(256).optional(),
-  }),
-  z.object({
-    source: z.literal('github'),
-    sandboxId: z.string().min(1),
-    repoFullName: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'must be owner/name'),
-    ref: z.string().max(256).optional(),
-  }),
-])
-
 export const repoRouter = router({
   list: protectedProcedure
     .input(z.object({ sandboxId: z.string().min(1) }))
     .query(async ({ input }) => repoService.list(input.sandboxId)),
 
-  add: protectedProcedure.input(addInput).mutation(async ({ input }) => {
-    try {
-      if (input.source === 'url') {
-        return await repoService.add({
-          sandboxId: input.sandboxId,
-          source: 'url',
-          url: input.url,
-          ref: input.ref,
-        })
+  add: protectedProcedure
+    .input(
+      z.object({
+        sandboxId: z.string().min(1),
+        configId: z.string().min(1),
+        refOverride: z.string().max(256).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        return await repoService.add(input)
+      } catch (err) {
+        throw toTrpcError(err)
       }
-      return await repoService.add({
-        sandboxId: input.sandboxId,
-        source: 'github',
-        repoFullName: input.repoFullName,
-        ref: input.ref,
-      })
-    } catch (err) {
-      throw toTrpcError(err)
-    }
-  }),
+    }),
 
   remove: protectedProcedure
     .input(z.object({ sandboxId: z.string().min(1), repoId: z.string().min(1) }))

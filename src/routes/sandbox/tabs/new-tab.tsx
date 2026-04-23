@@ -3,7 +3,6 @@ import { trpc } from '../../../trpc'
 import { usePreviewUrl } from '../../../lib/preview-url'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { FileTree } from '../file-tree'
-import { ReposPanel } from '../repos'
 import type { PaneContent } from '../shell/tab-state'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { AppRouter } from '../../../../server/trpc/router'
@@ -32,10 +31,6 @@ export function NewTabContent({
 
       <Section title="Running previews">
         <PreviewsList sandboxId={sandboxId} onOpen={onOpen} />
-      </Section>
-
-      <Section title="Repos">
-        <ReposPanel sandboxId={sandboxId} />
       </Section>
 
       <Section title="Files">

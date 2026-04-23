@@ -1,14 +1,13 @@
 import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
 import { trpc } from '../../../trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
-import { RepoCombobox } from '../repos'
+import { RepoCloneModal } from '../repo-clone-modal'
 
 /**
  * Shown in the Agents pane when a sandbox has no active sessions. Lists
- * any repos in the sandbox as clickable cards ("Start session in …") and
- * exposes an Add-repo form for when the sandbox is fresh. Clicking a repo
- * creates the session in one shot — no modal, no prompt up front.
+ * any repos already cloned into the sandbox as clickable cards. The
+ * "Clone a repo" CTA opens the global clone modal — there is no longer
+ * an inline add-repo form here.
  */
 export function EmptySessionState({
   sandboxId,
@@ -17,9 +16,11 @@ export function EmptySessionState({
   sandboxId: string
   onCreated: (sessionId: string) => void
 }) {
+  const utils = trpc.useUtils()
   const repos = trpc.repo.list.useQuery({ sandboxId }, { refetchInterval: 5_000 })
   const start = trpc.agent.sessionStart.useMutation()
   const [err, setErr] = useState<string | null>(null)
+  const [cloneOpen, setCloneOpen] = useState(false)
 
   async function createIn(directory?: string) {
     setErr(null)
@@ -37,18 +38,16 @@ export function EmptySessionState({
         <div>
           <h2 className="text-lg font-semibold text-neutral-100">No sessions yet</h2>
           <p className="mt-1 text-sm text-neutral-400">
-            Pick a repo to start a new agent session in, or add one below.
+            Pick a repo to start a new agent session in, or clone one.
           </p>
         </div>
 
         <section className="space-y-2">
           <div className="text-[10px] uppercase tracking-wide text-neutral-500">Repos</div>
-          {repos.isLoading && (
-            <div className="text-xs text-neutral-500">Loading repos…</div>
-          )}
+          {repos.isLoading && <div className="text-xs text-neutral-500">Loading repos…</div>}
           {repos.data && repos.data.length === 0 && (
             <div className="rounded border border-neutral-800 bg-neutral-900/40 p-3 text-xs text-neutral-500">
-              This sandbox has no repos yet. Add one below.
+              This sandbox has no repos yet.
             </div>
           )}
           {repos.data?.map((r) => (
@@ -69,18 +68,21 @@ export function EmptySessionState({
               </span>
             </button>
           ))}
-          <button
-            onClick={() => void createIn(undefined)}
-            disabled={start.isPending}
-            className="mt-1 w-full rounded border border-dashed border-neutral-800 px-3 py-2 text-left text-xs text-neutral-500 hover:border-neutral-700 hover:text-neutral-300 disabled:opacity-60"
-          >
-            Start without a repo — work in <span className="font-mono">/workspace</span>
-          </button>
-        </section>
-
-        <section className="space-y-2">
-          <div className="text-[10px] uppercase tracking-wide text-neutral-500">Add a repo</div>
-          <AddRepoForm sandboxId={sandboxId} />
+          <div className="flex flex-col gap-1 pt-1">
+            <button
+              onClick={() => setCloneOpen(true)}
+              className="rounded border border-dashed border-neutral-700 px-3 py-2 text-left text-xs text-neutral-300 hover:border-brand-500/60 hover:text-neutral-100"
+            >
+              + Clone a repo
+            </button>
+            <button
+              onClick={() => void createIn(undefined)}
+              disabled={start.isPending}
+              className="rounded border border-dashed border-neutral-800 px-3 py-2 text-left text-xs text-neutral-500 hover:border-neutral-700 hover:text-neutral-300 disabled:opacity-60"
+            >
+              Start without a repo — work in <span className="font-mono">/workspace</span>
+            </button>
+          </div>
         </section>
 
         {err && (
@@ -89,127 +91,15 @@ export function EmptySessionState({
           </div>
         )}
       </div>
+
+      <RepoCloneModal
+        sandboxId={sandboxId}
+        open={cloneOpen}
+        onClose={() => setCloneOpen(false)}
+        onCloned={() => {
+          void utils.repo.list.invalidate({ sandboxId })
+        }}
+      />
     </div>
-  )
-}
-
-type AddMode = 'url' | 'github'
-
-function AddRepoForm({ sandboxId }: { sandboxId: string }) {
-  const utils = trpc.useUtils()
-  const add = trpc.repo.add.useMutation()
-  const ghStatus = trpc.github.status.useQuery()
-  const ghRepos = trpc.github.listOrgRepos.useQuery(undefined, {
-    enabled: Boolean(ghStatus.data?.installed),
-  })
-
-  const [mode, setMode] = useState<AddMode>('url')
-  const [url, setUrl] = useState('')
-  const [ref, setRef] = useState('')
-  const [selectedGh, setSelectedGh] = useState<string>('')
-  const [err, setErr] = useState<string | null>(null)
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setErr(null)
-    try {
-      if (mode === 'url') {
-        const u = url.trim()
-        if (!u) return
-        await add.mutateAsync({
-          source: 'url',
-          sandboxId,
-          url: u,
-          ref: ref.trim() || undefined,
-        })
-        setUrl('')
-      } else {
-        if (!selectedGh) return
-        await add.mutateAsync({
-          source: 'github',
-          sandboxId,
-          repoFullName: selectedGh,
-          ref: ref.trim() || undefined,
-        })
-        setSelectedGh('')
-      }
-      setRef('')
-      await utils.repo.list.invalidate({ sandboxId })
-    } catch (e2) {
-      setErr(extractTrpcMessage(e2))
-    }
-  }
-
-  const selectedGhRepo = ghRepos.data?.find((r) => r.fullName === selectedGh)
-  const defaultRefHint = selectedGhRepo?.defaultBranch ?? 'main'
-
-  return (
-    <form onSubmit={onSubmit} className="space-y-2 rounded border border-neutral-800 bg-neutral-900/40 p-3">
-      <div className="flex gap-2 text-xs">
-        <button
-          type="button"
-          onClick={() => setMode('url')}
-          className={
-            'rounded px-2 py-1 ' +
-            (mode === 'url' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900')
-          }
-        >
-          URL
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('github')}
-          className={
-            'rounded px-2 py-1 ' +
-            (mode === 'github' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900')
-          }
-        >
-          GitHub
-        </button>
-      </div>
-
-      {mode === 'url' ? (
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://github.com/user/repo.git"
-          className="block w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 focus:border-brand-500/60 focus:outline-none"
-        />
-      ) : !ghStatus.data?.connected ? (
-        <p className="text-xs text-neutral-500">
-          GitHub App not connected.{' '}
-          <Link to="/settings" className="text-brand-500 hover:underline">
-            Set up
-          </Link>
-        </p>
-      ) : !ghStatus.data.installed ? (
-        <p className="text-xs text-amber-300">GitHub App created but not installed.</p>
-      ) : ghRepos.isLoading ? (
-        <p className="text-xs text-neutral-500">Loading repos…</p>
-      ) : ghRepos.error ? (
-        <p className="text-xs text-red-400">{extractTrpcMessage(ghRepos.error)}</p>
-      ) : ghRepos.data && ghRepos.data.length > 0 ? (
-        <RepoCombobox repos={ghRepos.data} value={selectedGh} onChange={setSelectedGh} />
-      ) : (
-        <p className="text-xs text-neutral-500">No repos accessible by this installation.</p>
-      )}
-
-      <div className="flex gap-2">
-        <input
-          value={ref}
-          onChange={(e) => setRef(e.target.value)}
-          placeholder={mode === 'github' ? `ref (default: ${defaultRefHint})` : 'branch / ref (optional)'}
-          className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-200 focus:border-brand-500/60 focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={add.isPending || (mode === 'url' ? !url.trim() : !selectedGh)}
-          className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {add.isPending ? 'Cloning…' : 'Add repo'}
-        </button>
-      </div>
-      {err && <div className="text-xs text-red-400">{err}</div>}
-    </form>
   )
 }

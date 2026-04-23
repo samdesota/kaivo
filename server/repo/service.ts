@@ -2,12 +2,13 @@ import { spawn } from 'node:child_process'
 import { ulid } from 'ulid'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { repos, type RepoSource } from '../db/schema.js'
+import { repoConfigs, repos, type RepoSource } from '../db/schema.js'
 import { logger } from '../logger.js'
 import { sandboxManager } from '../sandbox/manager.js'
 import { jobManager, type Job } from '../jobs/manager.js'
 import { githubService, GitHubError } from '../github/service.js'
 import { registerProject } from '../agent/opencode.js'
+import { repoConfigService } from './configs.js'
 
 export class RepoError extends Error {
   constructor(
@@ -17,6 +18,7 @@ export class RepoError extends Error {
       | 'invalid_url'
       | 'slug_conflict'
       | 'github_not_connected'
+      | 'config_not_found'
       | 'clone_failed',
     message: string,
   ) {
@@ -28,6 +30,7 @@ export class RepoError extends Error {
 export interface RepoSummary {
   id: string
   sandboxId: string
+  configId: string | null
   name: string
   slug: string
   originUrl: string
@@ -40,24 +43,6 @@ export interface RepoSummary {
 
 const REPO_ROOT = '/workspace/repos'
 
-// scp-style git URL: `git@host:path` (no scheme). Conservative match.
-const SCP_SSH_URL_RE = /^[a-z_][a-z0-9_-]*@[a-z0-9.-]+:[^\s]+$/i
-
-function isValidUrl(url: string): boolean {
-  if (SCP_SSH_URL_RE.test(url)) return true
-  try {
-    const u = new URL(url)
-    return (
-      u.protocol === 'https:' ||
-      u.protocol === 'http:' ||
-      u.protocol === 'git:' ||
-      u.protocol === 'ssh:'
-    )
-  } catch {
-    return false
-  }
-}
-
 function deriveSlug(name: string): string {
   const base = name
     .toLowerCase()
@@ -66,26 +51,11 @@ function deriveSlug(name: string): string {
   return base || 'repo'
 }
 
-function deriveNameFromUrl(url: string): string {
-  // scp-style: take the part after the last `/` (or after `:` if no `/`).
-  if (SCP_SSH_URL_RE.test(url)) {
-    const after = url.split(':').slice(1).join(':')
-    const last = after.split('/').filter(Boolean).pop() || 'repo'
-    return last.replace(/\.git$/, '')
-  }
-  try {
-    const u = new URL(url)
-    const last = u.pathname.split('/').filter(Boolean).pop() || 'repo'
-    return last.replace(/\.git$/, '')
-  } catch {
-    return 'repo'
-  }
-}
-
 function toSummary(row: typeof repos.$inferSelect): RepoSummary {
   return {
     id: row.id,
     sandboxId: row.sandboxId,
+    configId: row.configId,
     name: row.name,
     slug: row.slug,
     originUrl: row.originUrl,
@@ -135,13 +105,11 @@ class RepoService {
     await db.delete(repos).where(eq(repos.id, repoId))
   }
 
-  /** Kick off a clone job. Returns the job id immediately; subscribers tail progress. */
+  /** Kick off a clone job from a global repo config. */
   async add(opts: {
     sandboxId: string
-    source: RepoSource
-    url?: string
-    repoFullName?: string
-    ref?: string
+    configId: string
+    refOverride?: string
   }): Promise<{ jobId: string; repoId: string }> {
     const sb = await sandboxManager.get(opts.sandboxId)
     if (!sb) throw new RepoError('not_found', 'sandbox not found')
@@ -149,38 +117,30 @@ class RepoService {
       throw new RepoError('sandbox_unavailable', 'sandbox is not running')
     }
 
-    let originUrl: string
-    let displayName: string
-    const githubRepoId: string | null = null
-    let githubFullName: string | null = null
-    let cloneUrlPromise: Promise<string>
-    const ref: string = opts.ref ?? ''
+    const cfgRows = await db
+      .select()
+      .from(repoConfigs)
+      .where(eq(repoConfigs.id, opts.configId))
+      .limit(1)
+    const cfg = cfgRows[0]
+    if (!cfg) throw new RepoError('config_not_found', 'repo config not found')
 
-    if (opts.source === 'github') {
-      if (!opts.repoFullName || !/^[^/]+\/[^/]+$/.test(opts.repoFullName)) {
-        throw new RepoError('invalid_url', 'repoFullName must be "owner/name"')
-      }
-      // Verify github is connected
+    let cloneUrlPromise: Promise<string>
+    if (cfg.source === 'github') {
+      if (!cfg.githubFullName) throw new RepoError('invalid_url', 'config missing github full name')
       const status = await githubService.status()
       if (!status.connected || !status.installed) {
         throw new RepoError('github_not_connected', 'GitHub App not connected')
       }
-      githubFullName = opts.repoFullName
-      displayName = opts.repoFullName.split('/')[1]!
-      originUrl = `https://github.com/${opts.repoFullName}.git`
-      cloneUrlPromise = githubService.buildAuthedCloneUrl(opts.repoFullName)
+      cloneUrlPromise = githubService.buildAuthedCloneUrl(cfg.githubFullName)
     } else {
-      if (!opts.url || !isValidUrl(opts.url)) {
-        throw new RepoError('invalid_url', 'url must be a valid http(s), git, ssh, or git@host:path URL')
-      }
-      originUrl = opts.url
-      displayName = deriveNameFromUrl(opts.url)
-      cloneUrlPromise = Promise.resolve(opts.url)
+      cloneUrlPromise = Promise.resolve(cfg.originUrl)
     }
 
+    const ref = opts.refOverride?.trim() || cfg.ref || ''
+    const displayName = cfg.name
     const slug = deriveSlug(displayName)
 
-    // Ensure no slug conflict inside this sandbox.
     const conflict = await db
       .select({ id: repos.id })
       .from(repos)
@@ -195,23 +155,22 @@ class RepoService {
       kind: 'repo.clone',
       sandboxId: opts.sandboxId,
       message: `cloning ${displayName}…`,
-      metadata: { repoId, slug, source: opts.source, originUrl },
+      metadata: { repoId, slug, source: cfg.source, originUrl: cfg.originUrl, configId: cfg.id },
     })
 
-    // Run the clone asynchronously.
     void this.runClone({
       job,
       containerId: sb.containerId,
       repoId,
       sandboxId: opts.sandboxId,
+      configId: cfg.id,
       slug,
       name: displayName,
-      originUrl,
+      originUrl: cfg.originUrl,
       workspacePath,
       ref,
-      source: opts.source,
-      githubRepoId,
-      githubFullName,
+      source: cfg.source,
+      githubFullName: cfg.githubFullName,
       cloneUrlPromise,
     })
 
@@ -223,13 +182,13 @@ class RepoService {
     containerId: string
     repoId: string
     sandboxId: string
+    configId: string
     slug: string
     name: string
     originUrl: string
     workspacePath: string
     ref: string
     source: RepoSource
-    githubRepoId: string | null
     githubFullName: string | null
     cloneUrlPromise: Promise<string>
   }): Promise<void> {
@@ -241,16 +200,9 @@ class RepoService {
       const safeDisplayUrl = redactUrl(cloneUrl)
       jobManager.log(ctx.job.id, 'info', `starting: git clone ${safeDisplayUrl}`)
 
-      // Ensure repos dir exists inside the container, then clone.
       await this.dockerExec(ctx.containerId, ['mkdir', '-p', REPO_ROOT], ctx.job.id)
 
-      const args = [
-        'exec',
-        ctx.containerId,
-        'git',
-        'clone',
-        '--progress',
-      ]
+      const args = ['exec', ctx.containerId, 'git', 'clone', '--progress']
       if (ctx.ref) args.push('--branch', ctx.ref)
       args.push(cloneUrl, ctx.workspacePath)
 
@@ -261,7 +213,6 @@ class RepoService {
             const trimmed = line.trim()
             if (!trimmed) continue
             jobManager.log(ctx.job.id, 'info', redactString(trimmed))
-            // crude progress: look for "Receiving objects:  42%"
             const m = trimmed.match(/:\s+(\d{1,3})%/)
             if (m) {
               const pct = Math.min(99, Math.max(0, parseInt(m[1]!, 10)))
@@ -282,7 +233,6 @@ class RepoService {
         throw new RepoError('clone_failed', `git clone exited ${exitCode}`)
       }
 
-      // Resolve ref (if none was provided) by asking git what HEAD points at.
       let resolvedRef = ctx.ref
       if (!resolvedRef) {
         const { stdout } = await this.dockerExecCapture(
@@ -292,21 +242,33 @@ class RepoService {
         resolvedRef = stdout.trim() || 'HEAD'
       }
 
+      // Materialize associated config files into the workspace.
+      const files = await repoConfigService.readAllFiles(ctx.configId)
+      for (const f of files) {
+        const abs = `${ctx.workspacePath}/${f.path}`
+        try {
+          await this.dockerWriteFile(ctx.containerId, abs, f.contents)
+          jobManager.log(ctx.job.id, 'info', `wrote ${f.path} (${f.contents.length} bytes)`)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          jobManager.log(ctx.job.id, 'warn', `failed to write ${f.path}: ${msg}`)
+        }
+      }
+
       await db.insert(repos).values({
         id: ctx.repoId,
         sandboxId: ctx.sandboxId,
+        configId: ctx.configId,
         name: ctx.name,
         slug: ctx.slug,
         originUrl: ctx.originUrl,
         ref: resolvedRef,
         workspacePath: ctx.workspacePath,
         source: ctx.source,
-        githubRepoId: ctx.githubRepoId,
+        githubRepoId: null,
         githubFullName: ctx.githubFullName,
       })
 
-      // Tell OpenCode about the new repo so it shows up in the agent's
-      // folder picker. Non-fatal — the clone succeeded either way.
       void registerProject(ctx.sandboxId, ctx.workspacePath).catch(() => {})
 
       await jobManager.update(ctx.job.id, {
@@ -333,7 +295,6 @@ class RepoService {
         error: redactString(String(code)),
         message: 'clone failed',
       })
-      // Best-effort cleanup of partial checkout.
       await this.dockerExec(ctx.containerId, ['rm', '-rf', ctx.workspacePath], ctx.job.id).catch(
         () => {},
       )
@@ -382,6 +343,43 @@ class RepoService {
       child.on('error', reject)
     })
   }
+
+  /**
+   * Stream `contents` into a file inside the container. We invoke a shell
+   * that mkdir -p's the parent directory then `cat`s stdin into the file.
+   * Pass the absolute target as a literal arg ($1) to keep it out of the
+   * shell command string.
+   */
+  private dockerWriteFile(containerId: string, absPath: string, contents: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(
+        'docker',
+        [
+          'exec',
+          '-i',
+          containerId,
+          'sh',
+          '-c',
+          'mkdir -p "$(dirname "$1")" && cat > "$1"',
+          'sh',
+          absPath,
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      )
+      const errParts: Buffer[] = []
+      child.stderr.on('data', (b) => errParts.push(Buffer.from(b)))
+      child.on('error', reject)
+      child.on('exit', (code) => {
+        if (code === 0) resolve()
+        else {
+          const msg = Buffer.concat(errParts).toString('utf8').slice(0, 500)
+          reject(new Error(`write failed (${code}): ${msg}`))
+        }
+      })
+      child.stdin.write(contents)
+      child.stdin.end()
+    })
+  }
 }
 
 function redactUrl(url: string): string {
@@ -398,7 +396,6 @@ function redactUrl(url: string): string {
 }
 
 function redactString(s: string): string {
-  // Redact bearer/basic tokens that might sneak into git's stderr.
   return s
     .replace(/https:\/\/x-access-token:[^@\s]+@/g, 'https://x-access-token:***@')
     .replace(/https:\/\/[^:@\s]+:[^@\s]+@/g, 'https://***:***@')

@@ -193,6 +193,44 @@ interface CaseDef {
   run: (ctx: CaseCtx) => Promise<void>
 }
 
+// ---------- repo config helpers -------------------------------------------
+
+interface RepoConfigSummary {
+  id: string
+  name: string
+  source: 'url' | 'github'
+  originUrl: string
+  ref: string | null
+  fileCount: number
+}
+interface RepoSummary {
+  id: string
+  sandboxId: string
+  configId: string | null
+  slug: string
+  workspacePath: string
+  source: 'url' | 'github'
+  ref: string
+}
+interface JobSummary {
+  id: string
+  state: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  progressPct: number
+  error: string | null
+}
+
+async function waitForJob(jobId: string, timeoutMs = 90_000): Promise<JobSummary> {
+  return waitFor(
+    `job ${jobId}`,
+    async () => {
+      const j = await tQuery<JobSummary>('job.get', { id: jobId })
+      if (j.state === 'succeeded' || j.state === 'failed' || j.state === 'cancelled') return j
+      return null
+    },
+    timeoutMs,
+  )
+}
+
 const cases: CaseDef[] = [
   {
     name: 'chat: trivial arithmetic round-trip',
@@ -241,6 +279,115 @@ const cases: CaseDef[] = [
       }
       if (r.childSessionIds.length === 0) {
         throw new Error('task tool fired but no child session.created event observed')
+      }
+    },
+  },
+
+  {
+    name: 'repo config: clone places encrypted files into workspace',
+    async run(ctx) {
+      const stamp = Date.now().toString(36)
+      const cfgName = `e2e-cfg-${stamp}`
+      const marker = `MARKER_${stamp.toUpperCase()}`
+      const filePath = '.env-e2e'
+
+      // 1. Create a global repo config pointing at a tiny public repo.
+      const cfg = await tMutate<RepoConfigSummary>('repoConfig.create', {
+        source: 'url',
+        url: 'https://github.com/octocat/Hello-World.git',
+        name: cfgName,
+      })
+      try {
+        // 2. Attach an encrypted file to the config.
+        await tMutate('repoConfig.putFile', {
+          configId: cfg.id,
+          path: filePath,
+          contents: `${marker}=hello\n`,
+        })
+        const files = await tQuery<Array<{ path: string }>>('repoConfig.listFiles', {
+          configId: cfg.id,
+        })
+        if (!files.some((f) => f.path === filePath)) {
+          throw new Error(`config file ${filePath} not in listFiles`)
+        }
+
+        // 3. Clone into the sandbox.
+        const { jobId, repoId } = await tMutate<{ jobId: string; repoId: string }>('repo.add', {
+          sandboxId: ctx.sandboxId,
+          configId: cfg.id,
+        })
+        const job = await waitForJob(jobId, 120_000)
+        if (job.state !== 'succeeded') {
+          throw new Error(`clone job ${job.state}: ${job.error ?? 'no error msg'}`)
+        }
+
+        // 4. Verify the repo row exists and is linked to the config.
+        const list = await tQuery<RepoSummary[]>('repo.list', { sandboxId: ctx.sandboxId })
+        const row = list.find((r) => r.id === repoId)
+        if (!row) throw new Error('repo not in repo.list after clone')
+        if (row.configId !== cfg.id) throw new Error(`repo.configId mismatch: ${row.configId}`)
+
+        // 5. Read the placed file out of the workspace and verify contents.
+        const workspaceRel = row.workspacePath.replace(/^\/workspace\//, '')
+        const placed = await tQuery<{ content: string | null }>('fs.read', {
+          sandboxId: ctx.sandboxId,
+          path: `${workspaceRel}/${filePath}`,
+        })
+        if (!placed.content || !placed.content.includes(marker)) {
+          throw new Error(
+            `placed file missing marker ${marker}; got: ${(placed.content ?? '').slice(0, 200)}`,
+          )
+        }
+
+        // 6. README from the upstream repo should also be present (sanity).
+        const readme = await tQuery<{ content: string | null }>('fs.read', {
+          sandboxId: ctx.sandboxId,
+          path: `${workspaceRel}/README`,
+        })
+        if (!readme.content) throw new Error('README missing — clone did not actually run?')
+
+        // 7. Tear the repo down so the config can be deleted cleanly.
+        await tMutate('repo.remove', { sandboxId: ctx.sandboxId, repoId })
+      } finally {
+        await tMutate('repoConfig.remove', { id: cfg.id }).catch(() => undefined)
+      }
+    },
+  },
+
+  {
+    name: 'repo config: file path validation rejects traversal and .git',
+    async run() {
+      const cfg = await tMutate<RepoConfigSummary>('repoConfig.create', {
+        source: 'url',
+        url: 'https://github.com/octocat/Hello-World.git',
+        name: `e2e-cfg-validate-${Date.now().toString(36)}`,
+      })
+      try {
+        const reject = async (path: string) => {
+          let threw = false
+          try {
+            await tMutate('repoConfig.putFile', {
+              configId: cfg.id,
+              path,
+              contents: 'x',
+            })
+          } catch {
+            threw = true
+          }
+          if (!threw) throw new Error(`expected putFile to reject path ${JSON.stringify(path)}`)
+        }
+        await reject('../escape')
+        await reject('.git/config')
+        await reject('a/../b')
+
+        // Sanity: a benign nested path is accepted.
+        await tMutate('repoConfig.putFile', {
+          configId: cfg.id,
+          path: 'config/local.env',
+          contents: 'OK=1',
+        })
+      } finally {
+        await tMutate('repoConfig.remove', { id: cfg.id }).catch(() => undefined)
       }
     },
   },

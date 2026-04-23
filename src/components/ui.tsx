@@ -1,5 +1,55 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
+import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
 import { cn } from '../lib/utils'
+
+interface ModalProps {
+  open: boolean
+  onClose: () => void
+  title: ReactNode
+  children: ReactNode
+  widthClass?: string
+}
+
+export function Modal({ open, onClose, title, children, widthClass = 'max-w-xl' }: ModalProps) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  if (!open) return null
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className={cn(
+          'mt-12 w-full rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl',
+          widthClass,
+        )}
+      >
+        <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+          <h2 className="text-sm font-semibold text-neutral-100">{title}</h2>
+          <button
+            onClick={onClose}
+            className="rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  )
+}
 
 export function Button({ className, ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (

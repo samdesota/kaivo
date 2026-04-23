@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { AgentPanel } from '../agent-panel'
 import { AgentSessionView } from '../agent/session-view'
 import { useAgentUiPreference } from '../agent/agent-ui-preference'
-import { ShellsDropdown, PreviewsDropdown } from './dropdowns'
+import { ShellsDropdown, PreviewsDropdown, ReposDropdown } from './dropdowns'
 import { RightPane } from './right-pane'
 import { SplitPane } from './split-pane'
 import { type PaneContent, useRightPaneState } from './tab-state'
@@ -42,6 +42,7 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
           >
             Agent UI: {agentUi}
           </button>
+          <ReposDropdown sandboxId={sandboxId} />
           <ShellsDropdown sandboxId={sandboxId} onOpen={openContent} />
           <PreviewsDropdown sandboxId={sandboxId} onOpen={openContent} />
           <Link

@@ -67,11 +67,37 @@ export const githubInstall = pgTable(
   }),
 )
 
+export const repoConfigs = pgTable('repo_configs', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  source: text('source').$type<RepoSource>().notNull(),
+  originUrl: text('origin_url').notNull(),
+  ref: text('ref'),
+  githubRepoId: text('github_repo_id'),
+  githubFullName: text('github_full_name'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const repoConfigFiles = pgTable('repo_config_files', {
+  id: text('id').primaryKey(),
+  configId: text('config_id')
+    .notNull()
+    .references(() => repoConfigs.id, { onDelete: 'cascade' }),
+  path: text('path').notNull(),
+  ciphertext: text('ciphertext').notNull(),
+  iv: text('iv').notNull(),
+  authTag: text('auth_tag').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const repos = pgTable('repos', {
   id: text('id').primaryKey(),
   sandboxId: text('sandbox_id')
     .notNull()
     .references(() => sandboxes.id, { onDelete: 'cascade' }),
+  configId: text('config_id').references(() => repoConfigs.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   slug: text('slug').notNull(),
   originUrl: text('origin_url').notNull(),

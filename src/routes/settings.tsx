@@ -5,6 +5,7 @@ import { Button, Card, FormError, Input } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
 import { ProvidersSection } from './settings/providers'
 import { FONT_SIZE_BOUNDS, useFontSize } from '../lib/ui-prefs'
+import { RepoConfigsManager } from './sandbox/repo-config-manager'
 
 export function SettingsPage() {
   const search = useSearch({ strict: false }) as { github?: string }
@@ -59,6 +60,17 @@ export function SettingsPage() {
         <AppearanceSection />
 
         <ProvidersSection />
+
+        <Card className="max-w-none">
+          <h2 className="mb-1 text-lg font-medium">Repo configs</h2>
+          <p className="mb-4 text-sm text-neutral-400">
+            Reusable templates for cloning a repo into any sandbox. Attach
+            files (typically <span className="font-mono">.env</span>) that
+            should be placed into the workspace after the clone completes.
+            File contents are encrypted at rest.
+          </p>
+          <RepoConfigsManager />
+        </Card>
 
         <Card className="max-w-none">
           <h2 className="mb-1 text-lg font-medium">GitHub integration</h2>
