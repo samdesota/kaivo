@@ -21,17 +21,36 @@ function toTrpcError(err: unknown): TRPCError {
     return new TRPCError({ code, message: err.message, cause: err })
   }
   // Non-AgentError: OpenCode SDK 1.4.17's `throwOnError: true` throws
-  // whatever the upstream body was, which is often a bare string (e.g.
-  // "Unauthorized"). Coerce to a string message so clients see something.
-  const msg =
-    typeof err === 'string'
-      ? err
-      : (err as { message?: string })?.message ?? String(err ?? 'agent error')
+  // whatever the upstream body was — often a bare string, sometimes a
+  // plain object like `{ message: "..." }`, sometimes a Response-shaped
+  // thing. Drill through the obvious shapes and fall back to JSON so we
+  // never surface "[object Object]" to the client.
+  const msg = stringifyError(err)
   return new TRPCError({
     code: 'INTERNAL_SERVER_ERROR',
     message: msg,
     cause: err,
   })
+}
+
+function stringifyError(err: unknown): string {
+  if (err == null) return 'agent error'
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message || err.name || 'agent error'
+  if (typeof err === 'object') {
+    const o = err as Record<string, unknown>
+    if (typeof o.message === 'string') return o.message
+    if (typeof o.error === 'string') return o.error
+    if (o.error && typeof (o.error as { message?: unknown }).message === 'string') {
+      return (o.error as { message: string }).message
+    }
+    try {
+      return JSON.stringify(err)
+    } catch {
+      // fall through
+    }
+  }
+  return String(err)
 }
 
 export const agentRouter = router({
