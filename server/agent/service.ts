@@ -600,15 +600,6 @@ class AgentService {
       const state = this.subs.get(row.sandboxId)!
       const wrapper: TranscriptListener = (evt) => {
         if (evt.sessionId === row.opencodeSessionId) {
-          if (evt.type === 'message.part.updated') {
-            const part = (evt.payload as { part?: { tool?: string; type?: string } }).part
-            if (part?.type === 'tool' && part.tool === 'task') {
-              logger.info(
-                { parent: row.opencodeSessionId, knownChildren: this.childrenByParent.get(row.opencodeSessionId) ?? [] },
-                'subagent: task tool part on parent session',
-              )
-            }
-          }
           fn(evt)
           return
         }
@@ -616,16 +607,7 @@ class AgentService {
         // via the task tool). Annotate with parentSessionId so the UI can
         // route them into the matching child sub-transcript.
         if (this.parentByChild.get(evt.sessionId) === row.opencodeSessionId) {
-          logger.info(
-            { parent: row.opencodeSessionId, child: evt.sessionId, type: evt.type },
-            'subagent: forwarding child event to parent listener',
-          )
           fn({ ...evt, parentSessionId: row.opencodeSessionId })
-        } else {
-          logger.warn(
-            { parent: row.opencodeSessionId, evtSessionId: evt.sessionId, type: evt.type, knownChildren: this.childrenByParent.get(row.opencodeSessionId) ?? [] },
-            'subagent: event for unknown session; dropping',
-          )
         }
       }
       state.listeners.add(wrapper)
@@ -770,10 +752,6 @@ class AgentService {
             list.push(childId)
             this.childrenByParent.set(parentId, list)
           }
-          logger.info(
-            { sandboxId, childId, parentId, type, totalChildren: list.length },
-            'subagent: registered child session',
-          )
           // Notify parent's listeners that a new child has appeared. UI uses
           // this (in arrival order) to match the Nth task tool call to the
           // Nth child session.
