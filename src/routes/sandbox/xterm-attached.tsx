@@ -33,11 +33,16 @@ export function XTermAttached({ shellId }: { shellId: string }) {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    try {
-      fit.fit()
-    } catch {
-      // element not measured yet
-    }
+    // First fit needs the parent to have a measured size; defer one frame
+    // so flex/grid layout settles. ResizeObserver below catches subsequent
+    // changes (parent resizes, panel splits, etc).
+    requestAnimationFrame(() => {
+      try {
+        fit.fit()
+      } catch {
+        // ignore — observer will retry on next layout
+      }
+    })
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${proto}//${window.location.host}/ws/shell/${encodeURIComponent(shellId)}`
@@ -116,5 +121,5 @@ export function XTermAttached({ shellId }: { shellId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shellId])
 
-  return <div ref={containerRef} className="h-full w-full" />
+  return <div ref={containerRef} className="relative h-full w-full overflow-hidden" />
 }

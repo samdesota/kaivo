@@ -147,7 +147,7 @@ function BashToolPart({
       {open && (
         <div className="border-t border-neutral-800 bg-black">
           {shellId ? (
-            <div className="h-64">
+            <div className="h-[32rem] resize-y overflow-hidden" style={{ minHeight: '12rem' }}>
               <XTermAttached key={shellId} shellId={shellId} />
             </div>
           ) : state.output ? (
@@ -232,7 +232,22 @@ function GenericToolPart({
   permission?: PermissionRequest
   sessionId: string
 }) {
-  const [open, setOpen] = useState(false)
+  const running = state.status === 'running' || state.status === 'pending'
+  // Auto-expand while running so the user can watch state stream in. After
+  // completion, manual toggle takes over (stays open if user opened, closes
+  // otherwise).
+  const [manual, setManual] = useState<boolean | null>(null)
+  const open = manual ?? running
+  const setOpen = (v: boolean | ((prev: boolean) => boolean)) => {
+    setManual((prev) => {
+      const curr = prev ?? running
+      return typeof v === 'function' ? (v as (x: boolean) => boolean)(curr) : v
+    })
+  }
+  const isTask = tool === 'task'
+  const taskDescription = isTask
+    ? String((state.input as { description?: string } | undefined)?.description ?? '')
+    : ''
   return (
     <div className="rounded border border-neutral-800 bg-neutral-900/40 text-xs">
       <button
@@ -242,6 +257,9 @@ function GenericToolPart({
         <span className="font-mono text-neutral-500">{open ? '▾' : '▸'}</span>
         <StatusDot status={state.status} />
         <span className="font-mono text-neutral-300">{tool}</span>
+        {isTask && taskDescription && (
+          <span className="truncate text-[11px] text-neutral-400">— {taskDescription}</span>
+        )}
         <span className="ml-auto text-[10px] text-neutral-500">{state.status ?? 'idle'}</span>
       </button>
       {open && (

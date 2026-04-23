@@ -50,7 +50,7 @@ export function PartRenderer({
     case 'patch':
       return <PatchPart part={part} sandboxId={sandboxId} />
     case 'step-finish':
-      return <StepFinishPart part={part} />
+      return <StepFinishPart />
     default:
       return (
         <div className="text-[10px] italic text-neutral-600">
