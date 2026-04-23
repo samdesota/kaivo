@@ -21,3 +21,7 @@ services:
     # dev-default of 0 (root) which is what Docker Desktop expects.
     group_add: !override
       - "988"
+    environment:
+      # Sandboxes also mount the host docker socket; match the host gid so
+      # the non-root coder user can read it.
+      SANDBOX_DOCKER_SOCK_GID: "988"

@@ -115,6 +115,12 @@ class SandboxManager {
     const sshBinds = env.SANDBOX_SSH_DIR
       ? [`${env.SANDBOX_SSH_DIR}:/home/coder/.ssh:ro`]
       : []
+    const dockerSockBinds = env.SANDBOX_DOCKER_SOCK
+      ? ['/var/run/docker.sock:/var/run/docker.sock']
+      : []
+    const dockerSockGroups = env.SANDBOX_DOCKER_SOCK
+      ? [String(env.SANDBOX_DOCKER_SOCK_GID)]
+      : []
     return d.createContainer({
       Image: env.SANDBOX_BASE_IMAGE,
       name: `coding-env-sandbox-${id}`,
@@ -130,7 +136,9 @@ class SandboxManager {
           `${opencodeHostDir(id)}:/home/coder/.opencode`,
           ...devBinds,
           ...sshBinds,
+          ...dockerSockBinds,
         ],
+        GroupAdd: dockerSockGroups,
         NetworkMode: env.DOCKER_NETWORK,
         ReadonlyRootfs: true,
         Tmpfs: {

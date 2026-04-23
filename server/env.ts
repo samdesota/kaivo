@@ -34,6 +34,20 @@ const schema = z.object({
   // remotes. Files must be readable by uid 1000 (the `coder` user inside
   // the sandbox).
   SANDBOX_SSH_DIR: z.string().optional(),
+  // Mount the host docker socket into each sandbox so agents can run
+  // `docker` commands (build images, start sibling containers, etc).
+  // Note: this gives the sandbox effective root on the host docker daemon —
+  // the per-container sandboxing (caps drop, readonly rootfs) does not apply
+  // to anything launched through the socket.
+  SANDBOX_DOCKER_SOCK: z
+    .union([z.literal('true'), z.literal('false')])
+    .default('true')
+    .transform((v) => v === 'true'),
+  // GID of the host docker socket. Added to each sandbox container so the
+  // non-root `coder` user can read /var/run/docker.sock. Default 0 matches
+  // Docker Desktop on macOS; on Linux set to the host `docker` group gid
+  // (commonly 988 or 999).
+  SANDBOX_DOCKER_SOCK_GID: z.coerce.number().int().nonnegative().default(0),
   COOKIE_SECURE: z
     .union([z.literal('true'), z.literal('false')])
     .optional()

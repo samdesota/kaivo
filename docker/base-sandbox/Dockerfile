@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pip \
       build-essential \
       gnupg \
+      docker.io \
  && rm -rf /var/lib/apt/lists/*
 
 # Node.js via NodeSource
