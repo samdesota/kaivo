@@ -20,6 +20,30 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Load .env if present so the script can run with no inline env vars. The
+# existing dev .env already carries the proxy creds — we just need to map
+# its *_BOOTSTRAP variants below.
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
+# Accept either runtime-style or bootstrap-style names so the same .env
+# works for dev and e2e.
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY_BOOTSTRAP:-}}"
+ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-${ANTHROPIC_BASE_URL_BOOTSTRAP:-}}"
+
+# The BASE_URL is consumed by opencode running INSIDE the sandbox container,
+# so a `localhost` value would resolve to the sandbox's own loopback. Rewrite
+# to host.docker.internal so the sandbox can reach a proxy running on the
+# host (Docker Desktop / OrbStack inject that DNS name).
+if [[ -n "$ANTHROPIC_BASE_URL" ]]; then
+  ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL//localhost/host.docker.internal}"
+  ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL//127.0.0.1/host.docker.internal}"
+fi
+
 PROJECT="cc-e2e"
 APP_PORT="${APP_PORT:-13000}"
 APP_URL="http://127.0.0.1:${APP_PORT}"
@@ -27,7 +51,7 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-e2e-$(openssl rand -hex 8)}"
 DATA_DIR="$(mktemp -d -t cc-e2e-data-XXXXXX)"
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "fatal: ANTHROPIC_API_KEY is required (Haiku call costs pennies)" >&2
+  echo "fatal: ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY_BOOTSTRAP) is required" >&2
   exit 2
 fi
 
