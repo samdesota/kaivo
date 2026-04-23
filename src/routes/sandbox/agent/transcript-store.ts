@@ -54,6 +54,13 @@ export interface QuestionRequest {
   createdAt?: number
 }
 
+export interface TodoItem {
+  id: string
+  content: string
+  status: string
+  priority: string
+}
+
 export interface TranscriptState {
   /** Message id → info. */
   messages: Map<string, MessageInfo>
@@ -67,6 +74,8 @@ export interface TranscriptState {
   permissions: Map<string, PermissionRequest>
   /** Pending question requests from the agent, keyed by request id. */
   questions: Map<string, QuestionRequest>
+  /** Current todo list for the session, in opencode-emitted order. */
+  todos: TodoItem[]
   /**
    * Subagent (child) opencode session IDs in creation order. Used to map the
    * Nth `task` tool call in this transcript to the Nth child session.
@@ -84,6 +93,7 @@ export function emptyTranscript(): TranscriptState {
     partsByMessage: new Map(),
     permissions: new Map(),
     questions: new Map(),
+    todos: [],
     childOrder: [],
     childTranscripts: new Map(),
   }
@@ -270,6 +280,11 @@ export function applyEvent(
       questions.delete(q.requestID)
       return { ...state, questions }
     }
+    case 'todo.updated': {
+      const t = evt.payload as { todos?: TodoItem[] }
+      if (!Array.isArray(t.todos)) return state
+      return { ...state, todos: t.todos }
+    }
     default:
       return state
   }
@@ -304,6 +319,7 @@ function extractEventSessionId(evt: {
     case 'question.asked':
     case 'question.replied':
     case 'question.rejected':
+    case 'todo.updated':
       return (evt.payload as { sessionID?: string }).sessionID
     default:
       return undefined

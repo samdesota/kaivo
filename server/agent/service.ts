@@ -94,6 +94,13 @@ export interface PendingQuestion {
   createdAt: number
 }
 
+export interface TodoItem {
+  id: string
+  content: string
+  status: string
+  priority: string
+}
+
 export interface TranscriptEvent {
   type:
     | 'message.updated'
@@ -106,6 +113,7 @@ export interface TranscriptEvent {
     | 'question.asked'
     | 'question.replied'
     | 'question.rejected'
+    | 'todo.updated'
   /** OpenCode session ID the event came from (parent or child). */
   sessionId: string
   /**
@@ -609,6 +617,7 @@ class AgentService {
     session: AgentSessionSummary
     pendingApprovals: PendingApproval[]
     pendingQuestions: PendingQuestion[]
+    todos: TodoItem[]
     /** True when the most recent assistant message has not yet completed. */
     running: boolean
   }> {
@@ -634,6 +643,25 @@ class AgentService {
       } catch {
         // sandbox unreachable — leave empty.
       }
+    }
+    // Cold-load the session's current todo list. The reducer-driven `todos`
+    // map in the UI converges to this on first poll then live-updates via
+    // `todo.updated` events.
+    let todos: TodoItem[] = []
+    try {
+      const client = await this.getClient(row.sandboxId)
+      const res = await client.session.todo({
+        path: { id: row.opencodeSessionId },
+        throwOnError: true,
+      })
+      todos = ((res.data ?? []) as TodoItem[]).map((t) => ({
+        id: t.id,
+        content: t.content,
+        status: t.status,
+        priority: t.priority,
+      }))
+    } catch {
+      // empty todos
     }
     let running = false
     try {
@@ -667,6 +695,7 @@ class AgentService {
       },
       pendingApprovals: pending,
       pendingQuestions: questions,
+      todos,
       running,
     }
   }
@@ -959,6 +988,8 @@ class AgentService {
       type === 'question.replied' ||
       type === 'question.rejected'
     ) {
+      ocSessionId = (props as { sessionID?: string }).sessionID
+    } else if (type === 'todo.updated') {
       ocSessionId = (props as { sessionID?: string }).sessionID
     } else {
       return

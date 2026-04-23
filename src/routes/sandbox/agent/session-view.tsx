@@ -6,6 +6,7 @@ import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
 import { QuestionBanner } from './parts/question-banner'
+import { TodosPanel } from './todos-panel'
 import {
   applyEvent,
   emptyTranscript,
@@ -278,6 +279,19 @@ function SessionPane({
 
   const activeQuestions = Array.from(state.questions.values())
 
+  // Hydrate todos from sessionStatus on first load. Live updates flow via
+  // todo.updated events; the reducer always replaces the whole list.
+  useEffect(() => {
+    if (!status.data) return
+    if (state.todos.length === 0 && status.data.todos.length > 0) {
+      dispatch({
+        type: 'event',
+        evt: { type: 'todo.updated', payload: { todos: status.data.todos } },
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.data])
+
   const parts = useMemo(() => flattenParts(state), [state])
   const renderables = useMemo(() => {
     let taskIdx = 0
@@ -314,7 +328,8 @@ function SessionPane({
   }, [renderables.length])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center justify-end border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
         <ModelPicker sandboxId={sandboxId} sessionId={sessionId} />
       </div>
@@ -395,6 +410,8 @@ function SessionPane({
         running={running}
         onSent={() => setRunning(true)}
       />
+      </div>
+      <TodosPanel todos={state.todos} />
     </div>
   )
 }
