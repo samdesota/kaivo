@@ -371,10 +371,10 @@ function SessionPane({
               const isTool = part.type === 'tool'
               const prevIsTool = prev?.part.type === 'tool'
               const isLast = v.index === renderables.length - 1
-              // Tighter spacing for tool calls; tool-adjacent-to-tool gets
-              // the least so a chain of tool calls reads as one block.
-              const padTop =
-                v.index === 0 ? 12 : isTool && prevIsTool ? 1 : isTool ? 2 : prevIsTool ? 2 : 6
+              // Tools no longer have a bordered box, so they need real vertical
+              // breathing room from each other (and from text rows). Bump the
+              // first row a bit further.
+              const padTop = v.index === 0 ? 12 : isTool && prevIsTool ? 6 : 8
               const padBottom = isLast ? 12 : 0
               return (
                 <div
