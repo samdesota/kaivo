@@ -141,6 +141,17 @@ export const agentRouter = router({
       }
     }),
 
+  sessionAbort: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        await agentService.sessionAbort(input)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionRename: protectedProcedure
     .input(
       z.object({

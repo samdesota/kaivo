@@ -15,10 +15,16 @@ export function Composer({
   sandboxId,
   sessionId,
   pendingApprovalReason,
+  running = false,
+  onSent,
 }: {
   sandboxId: string
   sessionId: string
   pendingApprovalReason?: string | null
+  /** True while the agent is actively responding. Disables sending and surfaces a Stop affordance. */
+  running?: boolean
+  /** Fired the instant a send mutation resolves so the parent can flip its own running state without waiting on the next sessionStatus poll. */
+  onSent?: () => void
 }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -28,6 +34,7 @@ export function Composer({
   const send = trpc.agent.sessionSend.useMutation()
   const rename = trpc.agent.sessionRename.useMutation()
   const runCommand = trpc.agent.runCommand.useMutation()
+  const abort = trpc.agent.sessionAbort.useMutation()
   const commands = trpc.agent.listCommands.useQuery(
     { sandboxId },
     { staleTime: 60_000, refetchOnWindowFocus: false },
@@ -106,7 +113,7 @@ export function Composer({
 
   async function onSend() {
     const msg = text.trim()
-    if (!msg || send.isPending || pendingApprovalReason) return
+    if (!msg || send.isPending || pendingApprovalReason || running) return
     setErr(null)
     const snapshot = text
     setText('')
@@ -116,16 +123,42 @@ export function Composer({
       } else {
         await send.mutateAsync({ sessionId, message: msg })
       }
+      onSent?.()
     } catch (e) {
       setErr(extractTrpcMessage(e))
       setText(snapshot)
     }
   }
 
-  const disabled = Boolean(pendingApprovalReason) || send.isPending || rename.isPending || runCommand.isPending
+  async function onStop() {
+    if (!running || abort.isPending) return
+    setErr(null)
+    try {
+      await abort.mutateAsync({ sessionId })
+    } catch (e) {
+      setErr(extractTrpcMessage(e))
+    }
+  }
+
+  const disabled =
+    Boolean(pendingApprovalReason) ||
+    send.isPending ||
+    rename.isPending ||
+    runCommand.isPending ||
+    running
 
   return (
     <div className="relative border-t border-neutral-800 bg-neutral-950 p-2">
+      {running && (
+        <div className="mb-2 flex items-center gap-2 rounded border border-brand-500/40 bg-brand-500/5 px-2 py-1 text-[11px] text-brand-300">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-400" />
+          </span>
+          <span>Agent is responding…</span>
+          <span className="ml-auto text-[10px] text-neutral-500">esc to stop</span>
+        </div>
+      )}
       {pendingApprovalReason && (
         <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-200">
           {pendingApprovalReason}
@@ -175,6 +208,11 @@ export function Composer({
                 return
               }
             }
+            if (e.key === 'Escape' && running) {
+              e.preventDefault()
+              void onStop()
+              return
+            }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
               void onSend()
@@ -183,18 +221,31 @@ export function Composer({
           placeholder={
             pendingApprovalReason
               ? 'Waiting on permission approval…'
-              : 'Message the agent. Enter to send, Shift+Enter for newline. Type / for commands.'
+              : running
+                ? 'Agent is responding — esc to stop.'
+                : 'Message the agent. Enter to send, Shift+Enter for newline. Type / for commands.'
           }
           rows={1}
           className="min-h-[32px] flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none disabled:opacity-60"
         />
-        <button
-          onClick={() => void onSend()}
-          disabled={disabled || !text.trim()}
-          className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-        >
-          {send.isPending || rename.isPending || runCommand.isPending ? '…' : 'Send'}
-        </button>
+        {running ? (
+          <button
+            onClick={() => void onStop()}
+            disabled={abort.isPending}
+            title="Stop the agent (Esc)"
+            className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-50"
+          >
+            {abort.isPending ? 'Stopping…' : 'Stop'}
+          </button>
+        ) : (
+          <button
+            onClick={() => void onSend()}
+            disabled={disabled || !text.trim()}
+            className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          >
+            {send.isPending || rename.isPending || runCommand.isPending ? '…' : 'Send'}
+          </button>
+        )}
       </div>
     </div>
   )

@@ -555,10 +555,32 @@ class AgentService {
   async sessionStatus(input: { sessionId: string }): Promise<{
     session: AgentSessionSummary
     pendingApprovals: PendingApproval[]
+    /** True when the most recent assistant message has not yet completed. */
+    running: boolean
   }> {
     const row = await this.requireSession(input.sessionId)
     const pendingMap = this.pending.get(row.opencodeSessionId)
     const pending = pendingMap ? [...pendingMap.values()] : []
+    let running = false
+    try {
+      const client = await this.getClient(row.sandboxId)
+      const res = await client.session.messages({
+        path: { id: row.opencodeSessionId },
+        throwOnError: true,
+      })
+      const msgs = (res.data ?? []) as Array<{
+        info?: { role?: string; time?: { completed?: number } }
+      }>
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const info = msgs[i]?.info
+        if (info?.role === 'assistant') {
+          running = !info.time?.completed
+          break
+        }
+      }
+    } catch {
+      // sandbox / opencode not reachable — leave running=false rather than throw.
+    }
     return {
       session: {
         id: row.id,
@@ -570,7 +592,17 @@ class AgentService {
         lastActivityAt: row.lastActivityAt,
       },
       pendingApprovals: pending,
+      running,
     }
+  }
+
+  async sessionAbort(input: { sessionId: string }): Promise<void> {
+    const row = await this.requireSession(input.sessionId)
+    const client = await this.getClient(row.sandboxId)
+    await client.session.abort({
+      path: { id: row.opencodeSessionId },
+      throwOnError: true,
+    })
   }
 
   async sessionRespond(input: {

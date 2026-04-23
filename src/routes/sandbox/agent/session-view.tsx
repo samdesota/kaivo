@@ -192,11 +192,23 @@ function SessionPane({
 
   // Live-merge events. `onError` flips the reconnect banner; tRPC's ws client
   // auto-reconnects under the hood, so the banner clears on the next `onData`.
+  // Mirror server-derived "running" so the UI shows loading immediately on
+  // hydrate. Live events flip this off on idle/error and on the first send
+  // we set it on optimistically (the next status poll confirms).
+  const [running, setRunning] = useState(false)
+
   trpc.agent.transcript.useSubscription(
     { sessionId },
     {
       onData(evt) {
         setReconnecting(false)
+        if (evt.type === 'session.idle' || evt.type === 'session.error') {
+          if ((evt.payload as { sessionID?: string })?.sessionID && !evt.parentSessionId) {
+            setRunning(false)
+          }
+        } else if (evt.type === 'message.part.updated' && !evt.parentSessionId) {
+          setRunning(true)
+        }
         dispatch({
           type: 'event',
           evt: evt as {
@@ -217,6 +229,11 @@ function SessionPane({
     { refetchInterval: 3_000 },
   )
   const pendingFromStatus = status.data?.pendingApprovals ?? []
+  // Reconcile with server's authoritative running state on each poll. Avoids
+  // a stale "running" if we miss the idle event due to a brief disconnect.
+  useEffect(() => {
+    if (status.data) setRunning(status.data.running)
+  }, [status.data])
   // Merge with in-memory permission events so we catch requests that arrive
   // between sessionStatus poll ticks.
   const pendingCount = state.permissions.size > 0 ? state.permissions.size : pendingFromStatus.length
@@ -324,6 +341,8 @@ function SessionPane({
         pendingApprovalReason={
           pendingCount > 0 ? `Waiting on ${pendingCount} permission approval${pendingCount === 1 ? '' : 's'}.` : null
         }
+        running={running}
+        onSent={() => setRunning(true)}
       />
     </div>
   )
