@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import CodeMirror from '@uiw/react-codemirror'
+import { EditorView } from '@codemirror/view'
+import { oneDark } from '@codemirror/theme-one-dark'
 import { trpc } from '../../trpc'
 import { extractTrpcMessage } from '../../lib/utils'
+import { languageForPath } from '../../lib/cm-language'
 
 export function FileViewer({ sandboxId, path }: { sandboxId: string; path: string }) {
   const read = trpc.fs.read.useQuery({ sandboxId, path })
@@ -65,11 +69,40 @@ export function FileViewer({ sandboxId, path }: { sandboxId: string; path: strin
           )}
         </div>
       </div>
-      <textarea
+      <CodeMirrorPane value={value} path={path} onChange={setDraft} />
+    </div>
+  )
+}
+
+function CodeMirrorPane({
+  value,
+  path,
+  onChange,
+}: {
+  value: string
+  path: string
+  onChange: (v: string) => void
+}) {
+  const lang = useMemo(() => languageForPath(path), [path])
+  const extensions = useMemo(
+    () => [EditorView.lineWrapping, ...(lang ? [lang] : [])],
+    [lang],
+  )
+  return (
+    <div className="min-h-0 flex-1 overflow-hidden bg-[#282c34]">
+      <CodeMirror
         value={value}
-        onChange={(e) => setDraft(e.target.value)}
-        spellCheck={false}
-        className="flex-1 resize-none bg-black p-3 font-mono text-sm leading-5 text-neutral-200 focus:outline-none"
+        height="100%"
+        theme={oneDark}
+        extensions={extensions}
+        onChange={onChange}
+        basicSetup={{
+          lineNumbers: true,
+          highlightActiveLine: true,
+          foldGutter: true,
+          indentOnInput: true,
+        }}
+        style={{ height: '100%' }}
       />
     </div>
   )

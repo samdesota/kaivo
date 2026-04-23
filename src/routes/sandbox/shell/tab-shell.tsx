@@ -57,7 +57,7 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
         storageKey={`sandbox.${sandboxId}.splitRatio`}
         initialRatio={0.7}
         left={
-          <section className="flex min-h-0 w-full flex-col" aria-label="Agents">
+          <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agents">
             {agentUi === 'native' ? (
               <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
             ) : (
@@ -66,7 +66,7 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
           </section>
         }
         right={
-          <section className="flex min-h-0 w-full flex-col" aria-label="Tabs">
+          <section className="flex h-full min-h-0 w-full flex-col" aria-label="Tabs">
             <RightPane sandboxId={sandboxId} state={state} dispatch={dispatch} />
           </section>
         }

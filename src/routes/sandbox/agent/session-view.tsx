@@ -251,6 +251,13 @@ function SessionPane({
           >
             {rowVirtualizer.getVirtualItems().map((v) => {
               const { part, role } = renderables[v.index]!
+              const prev = v.index > 0 ? renderables[v.index - 1] : null
+              const isTool = part.type === 'tool'
+              const prevIsTool = prev?.part.type === 'tool'
+              // Tighter spacing for tool calls; tool-adjacent-to-tool gets
+              // the least so a chain of tool calls reads as one block.
+              const padTop =
+                v.index === 0 ? 12 : isTool && prevIsTool ? 1 : isTool ? 2 : prevIsTool ? 2 : 6
               return (
                 <div
                   key={v.key}
@@ -259,8 +266,8 @@ function SessionPane({
                   className="absolute left-0 right-0 px-4"
                   style={{
                     transform: `translateY(${v.start}px)`,
-                    paddingTop: v.index === 0 ? 12 : 4,
-                    paddingBottom: 4,
+                    paddingTop: padTop,
+                    paddingBottom: 0,
                   }}
                 >
                   <PartRenderer
