@@ -156,7 +156,10 @@ function BashToolPart({
       )}
       {open && (
         <ToolBody>
-          {shellId ? (
+          {shellId && running ? (
+            // Live: attach to the streaming PTY so the user can watch output
+            // arrive in real time. Once the command finishes the PTY shows
+            // "[disconnected]" and the captured stdout is more useful.
             <div className="h-[32rem] resize-y overflow-hidden rounded border border-neutral-800 bg-black" style={{ minHeight: '12rem' }}>
               <XTermAttached key={shellId} shellId={shellId} />
             </div>
