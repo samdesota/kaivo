@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { AgentPanel } from '../agent-panel'
 import { AgentSessionView } from '../agent/session-view'
-import { useAgentUiPreference } from '../agent/agent-ui-preference'
 import { CommandPalette } from './command-palette'
 import { ShellsDropdown, PreviewsDropdown, ReposDropdown } from './dropdowns'
 import { RightPane } from './right-pane'
@@ -18,7 +16,6 @@ interface TabShellProps {
 
 export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: TabShellProps) {
   const [state, dispatch] = useRightPaneState(sandboxId)
-  const [agentUi, setAgentUi] = useAgentUiPreference()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   const openContent = (content: PaneContent) => {
@@ -41,11 +38,7 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
   const hasTabs = state.tabs.length > 0
   const agentSection = (
     <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agents">
-      {agentUi === 'native' ? (
-        <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
-      ) : (
-        <AgentPanel sandboxId={sandboxId} />
-      )}
+      <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
     </section>
   )
 
@@ -68,13 +61,6 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
             title="Open command palette (⌘K)"
           >
             ⌘K
-          </button>
-          <button
-            onClick={() => setAgentUi(agentUi === 'native' ? 'iframe' : 'native')}
-            className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
-            title="Toggle native ↔ iframe agent UI"
-          >
-            Agent UI: {agentUi}
           </button>
           <ReposDropdown sandboxId={sandboxId} />
           <ShellsDropdown sandboxId={sandboxId} onOpen={openContent} />
