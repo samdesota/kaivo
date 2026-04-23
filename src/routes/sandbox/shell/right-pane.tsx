@@ -1,7 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { trpc } from '../../../trpc'
 import { FileTabContent } from '../tabs/file-tab'
-import { NewTabContent } from '../tabs/new-tab'
 import { PreviewTabContent } from '../tabs/preview-tab'
 import { ShellTabContent } from '../tabs/shell-tab'
 import {
@@ -32,10 +31,6 @@ export function RightPane({ sandboxId, state, dispatch }: RightPaneProps) {
 
   const activeTab = state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0]
 
-  function open(content: PaneContent): void {
-    dispatch({ type: 'open', content, activate: true })
-  }
-
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-neutral-950">
       <div
@@ -63,30 +58,20 @@ export function RightPane({ sandboxId, state, dispatch }: RightPaneProps) {
               >
                 {t.title || defaultTitle(t.content)}
               </button>
-              {state.tabs.length > 1 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    dispatch({ type: 'close', tabId: t.id })
-                  }}
-                  className="rounded px-1 text-neutral-500 hover:bg-neutral-700 hover:text-neutral-100"
-                  aria-label="Close tab"
-                  title="Close tab"
-                >
-                  ×
-                </button>
-              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  dispatch({ type: 'close', tabId: t.id })
+                }}
+                className="rounded px-1 text-neutral-500 hover:bg-neutral-700 hover:text-neutral-100"
+                aria-label="Close tab"
+                title="Close tab"
+              >
+                ×
+              </button>
             </div>
           )
         })}
-        <button
-          onClick={() => open({ type: 'newtab' })}
-          className="ml-1 rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
-          aria-label="New tab"
-          title="New tab"
-        >
-          +
-        </button>
       </div>
 
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -100,7 +85,7 @@ export function RightPane({ sandboxId, state, dispatch }: RightPaneProps) {
               aria-hidden={!active}
               className={'h-full min-h-0 ' + (active ? 'block' : 'hidden')}
             >
-              <TabContent sandboxId={sandboxId} content={t.content} onOpen={open} />
+              <TabContent sandboxId={sandboxId} content={t.content} />
             </div>
           )
         })}
@@ -112,13 +97,10 @@ export function RightPane({ sandboxId, state, dispatch }: RightPaneProps) {
 function TabContent({
   sandboxId,
   content,
-  onOpen,
 }: {
   sandboxId: string
   content: PaneContent
-  onOpen: (c: PaneContent) => void
 }) {
-  if (content.type === 'newtab') return <NewTabContent sandboxId={sandboxId} onOpen={onOpen} />
   if (content.type === 'shell') return <ShellTabContent sandboxId={sandboxId} shellId={content.shellId} />
   if (content.type === 'file') return <FileTabContent sandboxId={sandboxId} path={content.path} />
   if (content.type === 'preview') return <PreviewTabContent sandboxId={sandboxId} port={content.port} />
@@ -129,5 +111,5 @@ function tabTitleDetail(c: PaneContent): string {
   if (c.type === 'shell') return c.shellId
   if (c.type === 'file') return c.path
   if (c.type === 'preview') return `port ${c.port}`
-  return 'New tab'
+  return ''
 }

@@ -96,6 +96,41 @@ export const fsRouter = router({
     }),
 
   /**
+   * Flat list of every regular file under /workspace, excluding heavy
+   * directories (node_modules, .git, dist, build). Used by the command
+   * palette to fuzzy-search for files. Capped at 5000 entries.
+   */
+  find: protectedProcedure
+    .input(z.object({ sandboxId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      await requireSandbox(input.sandboxId)
+      const cmd = [
+        'find /workspace -type f',
+        "-not -path '*/node_modules/*'",
+        "-not -path '*/.git/*'",
+        "-not -path '*/dist/*'",
+        "-not -path '*/build/*'",
+        "-not -path '*/.next/*'",
+        '| head -5000',
+      ].join(' ')
+      try {
+        const res = await terminalService.runOnce({
+          sandboxId: input.sandboxId,
+          cmd,
+          cwd: '/workspace',
+          timeoutMs: 15_000,
+        })
+        const paths = res.stdout
+          .split('\n')
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0)
+        return { paths, truncated: res.truncated }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  /**
    * Unified git diff for one or more files. `cwd` is the repo root to run
    * `git diff` in; defaults to /workspace. Compares the working tree against
    * `ref` (default HEAD). Empty diff → empty string.

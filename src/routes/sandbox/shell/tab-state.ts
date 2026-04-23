@@ -1,7 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react'
 
 export type PaneContent =
-  | { type: 'newtab' }
   | { type: 'shell'; shellId: string }
   | { type: 'file'; path: string }
   | { type: 'preview'; port: number }
@@ -30,7 +29,6 @@ function makeTabId(): string {
 }
 
 export function defaultTitle(c: PaneContent): string {
-  if (c.type === 'newtab') return 'New'
   if (c.type === 'shell') return `shell ${c.shellId.slice(-6)}`
   if (c.type === 'file') {
     const parts = c.path.split('/').filter(Boolean)
@@ -45,12 +43,11 @@ function sameContent(a: PaneContent, b: PaneContent): boolean {
   if (a.type === 'shell' && b.type === 'shell') return a.shellId === b.shellId
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'preview' && b.type === 'preview') return a.port === b.port
-  return a.type === 'newtab' && b.type === 'newtab'
+  return false
 }
 
 export function initialState(): RightPaneState {
-  const newtab: Tab = { id: makeTabId(), title: 'New', content: { type: 'newtab' } }
-  return { tabs: [newtab], activeTabId: newtab.id }
+  return { tabs: [], activeTabId: '' }
 }
 
 export function rightPaneReducer(state: RightPaneState, action: RightPaneAction): RightPaneState {
@@ -61,7 +58,7 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
       const activeTabId = ids.has(action.state.activeTabId)
         ? action.state.activeTabId
         : (action.state.tabs[0]?.id ?? '')
-      return { tabs: action.state.tabs, activeTabId }
+      return { tabs: action.state.tabs, activeTabId: activeTabId ?? '' }
     }
     case 'open': {
       const existing = state.tabs.find((t) => sameContent(t.content, action.content))
@@ -87,7 +84,7 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
       const idx = state.tabs.findIndex((t) => t.id === action.tabId)
       if (idx < 0) return state
       const nextTabs = state.tabs.filter((t) => t.id !== action.tabId)
-      if (nextTabs.length === 0) return initialState()
+      if (nextTabs.length === 0) return { tabs: [], activeTabId: '' }
       let active = state.activeTabId
       if (action.tabId === state.activeTabId) {
         const neighbor = nextTabs[idx] ?? nextTabs[idx - 1] ?? nextTabs[0]
@@ -108,7 +105,7 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
         (t) => t.content.type !== 'shell' || action.liveShellIds.has(t.content.shellId),
       )
       if (keep.length === state.tabs.length) return state
-      if (keep.length === 0) return initialState()
+      if (keep.length === 0) return { tabs: [], activeTabId: '' }
       const activeStillThere = keep.some((t) => t.id === state.activeTabId)
       return {
         tabs: keep,
@@ -143,13 +140,12 @@ function loadStored(sandboxId: string): RightPaneState | null {
       const tt = t as Tab
       if (typeof tt.id !== 'string' || typeof tt.title !== 'string' || !tt.content) return false
       const c = tt.content
-      if (c.type === 'newtab') return true
       if (c.type === 'shell' && typeof c.shellId === 'string') return true
       if (c.type === 'file' && typeof c.path === 'string') return true
       if (c.type === 'preview' && typeof c.port === 'number') return true
       return false
     })
-    if (tabs.length === 0) return null
+    if (tabs.length === 0) return { tabs: [], activeTabId: '' }
     const activeTabId = tabs.some((t) => t.id === parsed.state.activeTabId)
       ? parsed.state.activeTabId
       : (tabs[0]?.id ?? '')

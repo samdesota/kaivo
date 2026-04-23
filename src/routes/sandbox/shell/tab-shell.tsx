@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AgentPanel } from '../agent-panel'
 import { AgentSessionView } from '../agent/session-view'
 import { useAgentUiPreference } from '../agent/agent-ui-preference'
+import { CommandPalette } from './command-palette'
 import { ShellsDropdown, PreviewsDropdown, ReposDropdown } from './dropdowns'
 import { RightPane } from './right-pane'
 import { SplitPane } from './split-pane'
@@ -17,10 +19,35 @@ interface TabShellProps {
 export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: TabShellProps) {
   const [state, dispatch] = useRightPaneState(sandboxId)
   const [agentUi, setAgentUi] = useAgentUiPreference()
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   const openContent = (content: PaneContent) => {
     dispatch({ type: 'open', content, activate: true })
   }
+
+  // Cmd-K (or Ctrl-K) toggles the command palette globally. Bound at the
+  // shell level so it works whether focus is in the agent, a tab, or nowhere.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const hasTabs = state.tabs.length > 0
+  const agentSection = (
+    <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agents">
+      {agentUi === 'native' ? (
+        <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
+      ) : (
+        <AgentPanel sandboxId={sandboxId} />
+      )}
+    </section>
+  )
 
   return (
     <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
@@ -35,6 +62,13 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
+            title="Open command palette (⌘K)"
+          >
+            ⌘K
+          </button>
           <button
             onClick={() => setAgentUi(agentUi === 'native' ? 'iframe' : 'native')}
             className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
@@ -54,23 +88,30 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
         </div>
       </header>
 
-      <SplitPane
-        storageKey={`sandbox.${sandboxId}.splitRatio`}
-        initialRatio={0.7}
-        left={
-          <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agents">
-            {agentUi === 'native' ? (
-              <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
-            ) : (
-              <AgentPanel sandboxId={sandboxId} />
-            )}
-          </section>
-        }
-        right={
-          <section className="flex h-full min-h-0 w-full flex-col" aria-label="Tabs">
-            <RightPane sandboxId={sandboxId} state={state} dispatch={dispatch} />
-          </section>
-        }
+      {hasTabs ? (
+        <SplitPane
+          storageKey={`sandbox.${sandboxId}.splitRatio`}
+          initialRatio={0.7}
+          left={agentSection}
+          right={
+            <section className="flex h-full min-h-0 w-full flex-col" aria-label="Tabs">
+              <RightPane sandboxId={sandboxId} state={state} dispatch={dispatch} />
+            </section>
+          }
+        />
+      ) : (
+        <div className="flex min-h-0 min-w-0 flex-1">{agentSection}</div>
+      )}
+
+      <CommandPalette
+        sandboxId={sandboxId}
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onOpenContent={openContent}
+        onCloseTab={() => {
+          if (state.activeTabId) dispatch({ type: 'close', tabId: state.activeTabId })
+        }}
+        hasActiveTab={hasTabs}
       />
     </div>
   )
