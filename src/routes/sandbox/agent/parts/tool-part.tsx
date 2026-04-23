@@ -298,15 +298,6 @@ function GenericToolPart({
           onOpenShell={onOpenShell}
         />
       )}
-      {isTask && state.status === 'completed' && state.output && (
-        // Surface the subagent's final answer in the parent chat — without
-        // it, the only way to read the conclusion is to expand the pane,
-        // which kills scan-ability when there are several task calls.
-        <div className="border-t border-neutral-800 px-2 py-1.5 text-[12px] text-neutral-200">
-          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-neutral-500">answer</div>
-          <div className="whitespace-pre-wrap">{state.output}</div>
-        </div>
-      )}
       {open && !isTask && (
         <div className="border-t border-neutral-800 p-2 font-mono text-[11px]">
           {state.input && (
