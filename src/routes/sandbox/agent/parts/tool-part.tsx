@@ -276,6 +276,16 @@ function GenericToolPart({
   const taskDescription = isTask
     ? String((state.input as { description?: string } | undefined)?.description ?? '')
     : ''
+  // Surface the target path on file-touching tools so the tool list stays
+  // scannable without expanding each row. Truncated from the left (rtl)
+  // so the basename always wins for visibility.
+  const filePath = (() => {
+    if (!state.input) return ''
+    const inp = state.input as { filePath?: unknown; path?: unknown; file_path?: unknown }
+    const v = inp.filePath ?? inp.path ?? inp.file_path
+    return typeof v === 'string' ? v : ''
+  })()
+  const showPath = filePath && /^(read|edit|write|patch|view|multiedit)$/i.test(tool)
   return (
     <div className="rounded border border-neutral-800 bg-neutral-900/40 text-xs">
       <button
@@ -287,6 +297,18 @@ function GenericToolPart({
         <span className="font-mono text-neutral-300">{tool}</span>
         {isTask && taskDescription && (
           <span className="truncate text-[11px] text-neutral-400">— {taskDescription}</span>
+        )}
+        {showPath && (
+          <span
+            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left font-mono text-[11px] text-neutral-400"
+            // direction: rtl + plaintext keeps the path readable left-to-right
+            // while the ellipsis falls on the start, so the filename stays in
+            // view even when the dirname overflows.
+            style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
+            title={filePath}
+          >
+            {filePath}
+          </span>
         )}
         <span className="ml-auto text-[10px] text-neutral-500">{state.status ?? 'idle'}</span>
       </button>
