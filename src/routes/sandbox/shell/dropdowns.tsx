@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { trpc } from '../../../trpc'
+import { usePreviewUrl } from '../../../lib/preview-url'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { AppRouter } from '../../../../server/trpc/router'
 import { extractTrpcMessage } from '../../../lib/utils'
@@ -100,6 +101,8 @@ interface PreviewsDropdownProps {
 }
 
 export function PreviewsDropdown({ sandboxId, onOpen }: PreviewsDropdownProps) {
+  const previewUrl = usePreviewUrl()
+  void onOpen
   const [ports, setPorts] = useState<PortRow[]>([])
   const snapshot = trpc.preview.portsSnapshot.useQuery({ sandboxId })
 
@@ -136,15 +139,15 @@ export function PreviewsDropdown({ sandboxId, onOpen }: PreviewsDropdownProps) {
                       {p.process ?? 'unknown'} · {p.address}
                     </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      onOpen({ type: 'preview', port: p.port })
-                      close()
-                    }}
+                  <a
+                    href={previewUrl(sandboxId, p.port)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => close()}
                     className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
                   >
                     open
-                  </button>
+                  </a>
                 </li>
               ))}
             </ul>

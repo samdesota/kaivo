@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { trpc } from '../../../trpc'
+import { usePreviewUrl } from '../../../lib/preview-url'
 
 export function PreviewTabContent({
   sandboxId,
@@ -9,12 +9,8 @@ export function PreviewTabContent({
   port: number
 }) {
   const [key, setKey] = useState(0)
-  const config = trpc.preview.config.useQuery(undefined, {
-    staleTime: Infinity,
-  })
-  const src = config.data?.hostname
-    ? `${window.location.protocol}//${sandboxId}-${port}.${config.data.hostname}/`
-    : `/preview/${sandboxId}/${port}/`
+  const previewUrl = usePreviewUrl()
+  const src = previewUrl(sandboxId, port)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
