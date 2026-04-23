@@ -316,16 +316,27 @@ function SessionPane({
     getItemKey: (i) => renderables[i]!.part.id,
   })
 
-  const lastCount = useRef(0)
+  // Auto-stick to bottom while the user hasn't scrolled away. Tracks intent
+  // separately from row count so streaming text (which mutates the *same*
+  // part rather than appending one) still keeps the view pinned.
+  const stickToBottom = useRef(true)
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (renderables.length > lastCount.current && atBottom) {
-      el.scrollTop = el.scrollHeight
+    function onScroll() {
+      const atBottom = el!.scrollHeight - el!.scrollTop - el!.clientHeight < 80
+      stickToBottom.current = atBottom
     }
-    lastCount.current = renderables.length
-  }, [renderables.length])
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  const totalSize = rowVirtualizer.getTotalSize()
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !stickToBottom.current) return
+    el.scrollTop = el.scrollHeight
+  }, [totalSize, renderables.length])
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -359,10 +370,12 @@ function SessionPane({
               const prev = v.index > 0 ? renderables[v.index - 1] : null
               const isTool = part.type === 'tool'
               const prevIsTool = prev?.part.type === 'tool'
+              const isLast = v.index === renderables.length - 1
               // Tighter spacing for tool calls; tool-adjacent-to-tool gets
               // the least so a chain of tool calls reads as one block.
               const padTop =
                 v.index === 0 ? 12 : isTool && prevIsTool ? 1 : isTool ? 2 : prevIsTool ? 2 : 6
+              const padBottom = isLast ? 12 : 0
               return (
                 <div
                   key={v.key}
@@ -372,7 +385,7 @@ function SessionPane({
                   style={{
                     transform: `translateY(${v.start}px)`,
                     paddingTop: padTop,
-                    paddingBottom: 0,
+                    paddingBottom: padBottom,
                   }}
                 >
                   <PartRenderer
