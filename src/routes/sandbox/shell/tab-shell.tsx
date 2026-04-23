@@ -22,6 +22,16 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
     dispatch({ type: 'open', content, activate: true })
   }
 
+  // Reflect the active sandbox in the document title so browser tabs are
+  // distinguishable. Restore the bare app title when leaving the sandbox.
+  useEffect(() => {
+    const prev = document.title
+    document.title = `${sandboxName} - cc`
+    return () => {
+      document.title = prev
+    }
+  }, [sandboxName])
+
   // Cmd-K (or Ctrl-K) toggles the command palette globally. Bound at the
   // shell level so it works whether focus is in the agent, a tab, or nowhere.
   useEffect(() => {
