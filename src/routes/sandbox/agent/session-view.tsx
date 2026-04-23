@@ -16,6 +16,7 @@ import {
   type TranscriptState,
 } from './transcript-store'
 import { PartRenderer } from './parts'
+import { OpenStateProvider } from './parts/open-state'
 import { SessionTabs } from './session-tabs'
 import { EmptySessionState } from './empty-session-state'
 import { ModelPicker } from './model-picker'
@@ -357,6 +358,7 @@ function SessionPane({
           Reconnecting…
         </div>
       )}
+      <OpenStateProvider>
       <div ref={scrollRef} className="flex-1 overflow-auto">
         {messages.isLoading ? (
           <div className="flex h-full items-center justify-center text-xs text-neutral-500">Loading…</div>
@@ -411,6 +413,7 @@ function SessionPane({
           </div>
         )}
       </div>
+      </OpenStateProvider>
       {activeQuestions.length > 0 && (
         <div className="shrink-0 space-y-2 border-t border-neutral-800 bg-neutral-950 p-3">
           {activeQuestions.map((q) => (

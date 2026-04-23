@@ -1,11 +1,11 @@
-import { useState } from 'react'
 import { trpc } from '../../../../trpc'
 import { extractTrpcMessage } from '../../../../lib/utils'
 import type { Part } from '../transcript-store'
 import { DiffView } from './diff-view'
+import { useOpenState } from './open-state'
 
 export function PatchPart({ part, sandboxId }: { part: Part; sandboxId: string }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useOpenState(`patch:${part.id}`, false)
   const p = part as { files?: string[]; hash?: string }
   const files = p.files ?? []
   const diff = trpc.fs.diff.useQuery(

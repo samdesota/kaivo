@@ -1,6 +1,6 @@
-import { useState } from 'react'
 import type { PaneContent } from '../../shell/tab-state'
 import { XTermAttached } from '../../xterm-attached'
+import { useOpenState } from './open-state'
 import { PermissionBanner } from './permission-banner'
 import {
   flattenParts,
@@ -49,6 +49,7 @@ export function ToolPart({
   if (tool === 'bash') {
     return (
       <BashToolPart
+        partId={part.id}
         callID={callID}
         state={state}
         permission={permission}
@@ -68,6 +69,7 @@ export function ToolPart({
   }
   return (
     <GenericToolPart
+      partId={part.id}
       tool={tool}
       state={state}
       permission={permission}
@@ -106,11 +108,13 @@ function lastLine(s: string | undefined): string {
 }
 
 function BashToolPart({
+  partId,
   callID,
   state,
   permission,
   sessionId,
 }: {
+  partId: string
   callID: string
   state: ToolState
   permission?: PermissionRequest
@@ -118,16 +122,9 @@ function BashToolPart({
 }) {
   const running = state.status === 'running' || state.status === 'pending'
   // Auto-expand while the command is running so the user can watch output
-  // stream in without having to click. Once complete the user's manual
-  // toggle state (if any) takes over.
-  const [manual, setManual] = useState<boolean | null>(null)
-  const open = manual ?? running
-  const setOpen = (v: boolean | ((prev: boolean) => boolean)) => {
-    setManual((prev) => {
-      const curr = prev ?? running
-      return typeof v === 'function' ? (v as (x: boolean) => boolean)(curr) : v
-    })
-  }
+  // stream in without having to click. State is held above the virtualizer
+  // so heights stay stable when the row scrolls out of view and back.
+  const [open, setOpen] = useOpenState(`tool:${partId}`, running)
   const cmd = String((state.input as { command?: string } | undefined)?.command ?? '')
   const shellId = state.metadata?.cloudcode_shell_id
   const exitCode =
@@ -276,6 +273,7 @@ function PtyToolPart({
 }
 
 function GenericToolPart({
+  partId,
   tool,
   state,
   permission,
@@ -284,6 +282,7 @@ function GenericToolPart({
   childTranscript,
   onOpenShell,
 }: {
+  partId: string
   tool: string
   state: ToolState
   permission?: PermissionRequest
@@ -293,17 +292,9 @@ function GenericToolPart({
   onOpenShell?: (content: PaneContent) => void
 }) {
   const running = state.status === 'running' || state.status === 'pending'
-  // Auto-expand while running so the user can watch state stream in. After
-  // completion, manual toggle takes over (stays open if user opened, closes
-  // otherwise).
-  const [manual, setManual] = useState<boolean | null>(null)
-  const open = manual ?? running
-  const setOpen = (v: boolean | ((prev: boolean) => boolean)) => {
-    setManual((prev) => {
-      const curr = prev ?? running
-      return typeof v === 'function' ? (v as (x: boolean) => boolean)(curr) : v
-    })
-  }
+  // Auto-expand while running. Lifted above the virtualizer so the row's
+  // height doesn't change when it scrolls out of view and remounts.
+  const [open, setOpen] = useOpenState(`tool:${partId}`, running)
   const isTask = tool === 'task'
   const taskDescription = isTask
     ? String((state.input as { description?: string } | undefined)?.description ?? '')
