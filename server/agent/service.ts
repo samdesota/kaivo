@@ -73,6 +73,27 @@ export interface PendingApproval {
   createdAt: number
 }
 
+export interface QuestionOptionInfo {
+  label: string
+  description?: string
+}
+
+export interface QuestionInfo {
+  question: string
+  header?: string
+  options: QuestionOptionInfo[]
+  multiple?: boolean
+  custom?: boolean
+}
+
+export interface PendingQuestion {
+  id: string
+  sessionId: string
+  questions: QuestionInfo[]
+  tool?: { messageID: string; callID: string }
+  createdAt: number
+}
+
 export interface TranscriptEvent {
   type:
     | 'message.updated'
@@ -82,6 +103,9 @@ export interface TranscriptEvent {
     | 'session.idle'
     | 'session.error'
     | 'child.session.created'
+    | 'question.asked'
+    | 'question.replied'
+    | 'question.rejected'
   /** OpenCode session ID the event came from (parent or child). */
   sessionId: string
   /**
@@ -113,6 +137,7 @@ class AgentService {
   private clients = new Map<string, OpencodeClient>()
   private subs = new Map<string, SandboxSubscription>()
   private pending = new Map<string, Map<string, PendingApproval>>() // opencodeSessionId -> permissionId -> req
+  private pendingQuestions = new Map<string, Map<string, PendingQuestion>>() // opencodeSessionId -> requestId -> question
   private seqCounters = new Map<string, number>() // sessionId (ours) -> next seq
   /**
    * Reverse-index: child opencode sessionID → parent opencode sessionID.
@@ -583,12 +608,33 @@ class AgentService {
   async sessionStatus(input: { sessionId: string }): Promise<{
     session: AgentSessionSummary
     pendingApprovals: PendingApproval[]
+    pendingQuestions: PendingQuestion[]
     /** True when the most recent assistant message has not yet completed. */
     running: boolean
   }> {
     const row = await this.requireSession(input.sessionId)
     const pendingMap = this.pending.get(row.opencodeSessionId)
     const pending = pendingMap ? [...pendingMap.values()] : []
+    const questionMap = this.pendingQuestions.get(row.opencodeSessionId)
+    let questions = questionMap ? [...questionMap.values()] : []
+    // Cold-load: ask opencode directly so a page reload sees questions even if
+    // we never observed the original question.asked event (server restart, etc.)
+    if (questions.length === 0) {
+      try {
+        const fresh = await this.questionList(row.sandboxId)
+        questions = fresh.filter((q) => q.sessionId === row.opencodeSessionId)
+        if (questions.length > 0) {
+          let byReq = this.pendingQuestions.get(row.opencodeSessionId)
+          if (!byReq) {
+            byReq = new Map()
+            this.pendingQuestions.set(row.opencodeSessionId, byReq)
+          }
+          for (const q of questions) byReq.set(q.id, q)
+        }
+      } catch {
+        // sandbox unreachable — leave empty.
+      }
+    }
     let running = false
     try {
       const client = await this.getClient(row.sandboxId)
@@ -620,8 +666,66 @@ class AgentService {
         lastActivityAt: row.lastActivityAt,
       },
       pendingApprovals: pending,
+      pendingQuestions: questions,
       running,
     }
+  }
+
+  async sessionAnswerQuestion(input: {
+    sessionId: string
+    requestId: string
+    answers: string[][]
+  }): Promise<void> {
+    const row = await this.requireSession(input.sessionId)
+    await this.opencodeFetch(row.sandboxId, `/question/${encodeURIComponent(input.requestId)}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ answers: input.answers }),
+    })
+    this.pendingQuestions.get(row.opencodeSessionId)?.delete(input.requestId)
+  }
+
+  async sessionRejectQuestion(input: {
+    sessionId: string
+    requestId: string
+  }): Promise<void> {
+    const row = await this.requireSession(input.sessionId)
+    await this.opencodeFetch(row.sandboxId, `/question/${encodeURIComponent(input.requestId)}/reject`, {
+      method: 'POST',
+    })
+    this.pendingQuestions.get(row.opencodeSessionId)?.delete(input.requestId)
+  }
+
+  /** Fetch the current set of pending questions (opencode-wide, all sessions). */
+  private async questionList(sandboxId: string): Promise<PendingQuestion[]> {
+    const res = await this.opencodeFetch(sandboxId, '/question', { method: 'GET' })
+    const data = (await res.json()) as Array<{
+      id: string
+      sessionID: string
+      questions?: QuestionInfo[]
+      tool?: { messageID: string; callID: string }
+    }>
+    return data.map((q) => ({
+      id: q.id,
+      sessionId: q.sessionID,
+      questions: Array.isArray(q.questions) ? q.questions : [],
+      tool: q.tool,
+      createdAt: Date.now(),
+    }))
+  }
+
+  /** Raw fetch against this sandbox's opencode server. Caller handles JSON. */
+  private async opencodeFetch(sandboxId: string, path: string, init: RequestInit): Promise<Response> {
+    const ep = await resolveEndpoint(sandboxId)
+    if (!ep) throw new AgentError('sandbox_unavailable', 'sandbox is not running')
+    const headers = new Headers(init.headers)
+    headers.set('Authorization', opencodeBasicAuthHeader(ep.password))
+    if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+    const res = await fetch(`http://${ep.ip}:${ep.port}${path}`, { ...init, headers })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new AgentError('unavailable', `opencode ${init.method ?? 'GET'} ${path} → ${res.status}: ${body.slice(0, 200)}`)
+    }
+    return res
   }
 
   async sessionAbort(input: { sessionId: string }): Promise<void> {
@@ -850,6 +954,12 @@ class AgentService {
       ocSessionId = (props as { sessionID?: string }).sessionID
     } else if (type === 'session.error') {
       ocSessionId = (props as { sessionID?: string }).sessionID
+    } else if (
+      type === 'question.asked' ||
+      type === 'question.replied' ||
+      type === 'question.rejected'
+    ) {
+      ocSessionId = (props as { sessionID?: string }).sessionID
     } else {
       return
     }
@@ -882,6 +992,30 @@ class AgentService {
     } else if (type === 'permission.replied') {
       const p = props as { permissionID?: string }
       if (p.permissionID) this.pending.get(ocSessionId)?.delete(p.permissionID)
+    } else if (type === 'question.asked') {
+      const q = props as unknown as {
+        id?: string
+        sessionID: string
+        questions?: QuestionInfo[]
+        tool?: { messageID: string; callID: string }
+      }
+      if (q.id) {
+        let byReq = this.pendingQuestions.get(ocSessionId)
+        if (!byReq) {
+          byReq = new Map()
+          this.pendingQuestions.set(ocSessionId, byReq)
+        }
+        byReq.set(q.id, {
+          id: q.id,
+          sessionId: q.sessionID,
+          questions: Array.isArray(q.questions) ? q.questions : [],
+          tool: q.tool,
+          createdAt: Date.now(),
+        })
+      }
+    } else if (type === 'question.replied' || type === 'question.rejected') {
+      const q = props as { requestID?: string }
+      if (q.requestID) this.pendingQuestions.get(ocSessionId)?.delete(q.requestID)
     }
 
     // Mirror message-updated to agent_transcripts so a later UI reload has

@@ -5,6 +5,7 @@ import { trpc } from '../../../trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
+import { QuestionBanner } from './parts/question-banner'
 import {
   applyEvent,
   emptyTranscript,
@@ -229,6 +230,7 @@ function SessionPane({
     { refetchInterval: 3_000 },
   )
   const pendingFromStatus = status.data?.pendingApprovals ?? []
+  const questionsFromStatus = status.data?.pendingQuestions ?? []
   // Reconcile with server's authoritative running state on each poll. Avoids
   // a stale "running" if we miss the idle event due to a brief disconnect.
   useEffect(() => {
@@ -237,6 +239,44 @@ function SessionPane({
   // Merge with in-memory permission events so we catch requests that arrive
   // between sessionStatus poll ticks.
   const pendingCount = state.permissions.size > 0 ? state.permissions.size : pendingFromStatus.length
+
+  // Hydrate questions from sessionStatus into the transcript reducer so a
+  // page reload (which misses the original question.asked event) still
+  // surfaces the pending question. Handles diffs both ways.
+  useEffect(() => {
+    if (!status.data) return
+    const live = state.questions
+    for (const q of questionsFromStatus) {
+      if (!live.has(q.id)) {
+        dispatch({
+          type: 'event',
+          evt: {
+            type: 'question.asked',
+            payload: {
+              id: q.id,
+              sessionID: q.sessionId,
+              questions: q.questions,
+              tool: q.tool,
+            },
+          },
+        })
+      }
+    }
+    for (const id of live.keys()) {
+      if (!questionsFromStatus.some((q) => q.id === id)) {
+        dispatch({
+          type: 'event',
+          evt: {
+            type: 'question.replied',
+            payload: { requestID: id },
+          },
+        })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.data])
+
+  const activeQuestions = Array.from(state.questions.values())
 
   const parts = useMemo(() => flattenParts(state), [state])
   const renderables = useMemo(() => {
@@ -335,11 +375,22 @@ function SessionPane({
           </div>
         )}
       </div>
+      {activeQuestions.length > 0 && (
+        <div className="shrink-0 space-y-2 border-t border-neutral-800 bg-neutral-950 p-3">
+          {activeQuestions.map((q) => (
+            <QuestionBanner key={q.id} req={q} sessionId={sessionId} />
+          ))}
+        </div>
+      )}
       <Composer
         sandboxId={sandboxId}
         sessionId={sessionId}
         pendingApprovalReason={
-          pendingCount > 0 ? `Waiting on ${pendingCount} permission approval${pendingCount === 1 ? '' : 's'}.` : null
+          pendingCount > 0
+            ? `Waiting on ${pendingCount} permission approval${pendingCount === 1 ? '' : 's'}.`
+            : activeQuestions.length > 0
+              ? `Agent is asking ${activeQuestions.length} question${activeQuestions.length === 1 ? '' : 's'}.`
+              : null
         }
         running={running}
         onSent={() => setRunning(true)}

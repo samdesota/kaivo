@@ -141,6 +141,34 @@ export const agentRouter = router({
       }
     }),
 
+  sessionAnswerQuestion: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        requestId: z.string().min(1),
+        answers: z.array(z.array(z.string().max(10_000))).min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        await agentService.sessionAnswerQuestion(input)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  sessionRejectQuestion: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1), requestId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        await agentService.sessionRejectQuestion(input)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionAbort: protectedProcedure
     .input(z.object({ sessionId: z.string().min(1) }))
     .mutation(async ({ input }) => {

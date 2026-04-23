@@ -33,6 +33,27 @@ export interface PermissionRequest {
   createdAt?: number
 }
 
+export interface QuestionOption {
+  label: string
+  description?: string
+}
+
+export interface QuestionItem {
+  question: string
+  header?: string
+  options: QuestionOption[]
+  multiple?: boolean
+  custom?: boolean
+}
+
+export interface QuestionRequest {
+  id: string
+  questions: QuestionItem[]
+  /** When set, the question came from a tool call — render attached to it. */
+  callID?: string
+  createdAt?: number
+}
+
 export interface TranscriptState {
   /** Message id → info. */
   messages: Map<string, MessageInfo>
@@ -44,6 +65,8 @@ export interface TranscriptState {
   partsByMessage: Map<string, string[]>
   /** Pending permission requests, keyed by permission id. */
   permissions: Map<string, PermissionRequest>
+  /** Pending question requests from the agent, keyed by request id. */
+  questions: Map<string, QuestionRequest>
   /**
    * Subagent (child) opencode session IDs in creation order. Used to map the
    * Nth `task` tool call in this transcript to the Nth child session.
@@ -60,6 +83,7 @@ export function emptyTranscript(): TranscriptState {
     parts: new Map(),
     partsByMessage: new Map(),
     permissions: new Map(),
+    questions: new Map(),
     childOrder: [],
     childTranscripts: new Map(),
   }
@@ -222,6 +246,30 @@ export function applyEvent(
       permissions.delete(p.permissionID)
       return { ...state, permissions }
     }
+    case 'question.asked': {
+      const q = evt.payload as {
+        id?: string
+        questions?: QuestionItem[]
+        tool?: { callID?: string }
+      }
+      if (!q.id) return state
+      const questions = new Map(state.questions)
+      questions.set(q.id, {
+        id: q.id,
+        questions: Array.isArray(q.questions) ? q.questions : [],
+        callID: q.tool?.callID,
+        createdAt: Date.now(),
+      })
+      return { ...state, questions }
+    }
+    case 'question.replied':
+    case 'question.rejected': {
+      const q = evt.payload as { requestID?: string }
+      if (!q.requestID) return state
+      const questions = new Map(state.questions)
+      questions.delete(q.requestID)
+      return { ...state, questions }
+    }
     default:
       return state
   }
@@ -253,6 +301,9 @@ function extractEventSessionId(evt: {
     case 'permission.replied':
     case 'session.idle':
     case 'session.error':
+    case 'question.asked':
+    case 'question.replied':
+    case 'question.rejected':
       return (evt.payload as { sessionID?: string }).sessionID
     default:
       return undefined
@@ -266,6 +317,17 @@ export function permissionForCall(
 ): PermissionRequest | undefined {
   for (const req of state.permissions.values()) {
     if (req.callID === callID) return req
+  }
+  return undefined
+}
+
+/** Lookup: find a pending question that was raised by a specific tool call. */
+export function questionForCall(
+  state: TranscriptState,
+  callID: string,
+): QuestionRequest | undefined {
+  for (const q of state.questions.values()) {
+    if (q.callID === callID) return q
   }
   return undefined
 }
