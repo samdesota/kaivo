@@ -8,6 +8,8 @@ import { logger } from '../logger.js'
 import { ensureNetwork, getDocker } from '../docker/client.js'
 import {
   SANDBOX_LABEL,
+  opencodeDataDir,
+  opencodeDataHostDir,
   opencodeDir,
   opencodeHostDir,
   sandboxRootDir,
@@ -74,6 +76,15 @@ class SandboxManager {
     const root = sandboxRootDir(id)
     await fs.mkdir(workspaceDir(id), { recursive: true })
     await fs.mkdir(opencodeDir(id), { recursive: true })
+    await fs.mkdir(opencodeDataDir(id), { recursive: true })
+    // The container runs as uid 1000 (coder); the freshly-created dir above
+    // is owned by the app container's user. Chown so opencode can write its
+    // sqlite DB without EACCES.
+    try {
+      await fs.chown(opencodeDataDir(id), 1000, 1000)
+    } catch {
+      // Best-effort; most setups run the app as root and this will succeed.
+    }
 
     await db.insert(sandboxes).values({ id, name, status: 'active' })
 
@@ -134,6 +145,7 @@ class SandboxManager {
         Binds: [
           `${workspaceHostDir(id)}:/workspace`,
           `${opencodeHostDir(id)}:/home/coder/.opencode`,
+          `${opencodeDataHostDir(id)}:/home/coder/.local/share/opencode`,
           ...devBinds,
           ...sshBinds,
           ...dockerSockBinds,
@@ -234,6 +246,13 @@ class SandboxManager {
     }
     // Remove any crashed container, start a new one.
     await this.removeByLabel(id)
+    // Pre-existing sandboxes may not have the opencode-data dir yet.
+    await fs.mkdir(opencodeDataDir(id), { recursive: true })
+    try {
+      await fs.chown(opencodeDataDir(id), 1000, 1000)
+    } catch {
+      // best-effort
+    }
     const container = await this.createContainer(id)
     await container.start()
     await db

@@ -16,6 +16,16 @@ export function opencodeDir(sandboxId: string): string {
 }
 
 /**
+ * Host-side persistent dir for opencode's own state (its SQLite DB and
+ * session storage, normally at ~/.local/share/opencode). /home/coder is a
+ * tmpfs inside the sandbox, so without this bind-mount all sessions
+ * disappear every time the container is recreated.
+ */
+export function opencodeDataDir(sandboxId: string): string {
+  return path.join(sandboxRootDir(sandboxId), 'opencode-data')
+}
+
+/**
  * Translate a container-local path under DATA_DIR into the equivalent
  * host-side path, so it can be passed to the Docker daemon as a bind-mount
  * source. Docker rejects relative paths as volumes, so we always return an
@@ -40,4 +50,8 @@ export function workspaceHostDir(sandboxId: string): string {
 
 export function opencodeHostDir(sandboxId: string): string {
   return toHostPath(opencodeDir(sandboxId))
+}
+
+export function opencodeDataHostDir(sandboxId: string): string {
+  return toHostPath(opencodeDataDir(sandboxId))
 }
