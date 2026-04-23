@@ -112,6 +112,9 @@ class SandboxManager {
     // sandbox restart is all you need to iterate — no image rebuild.
     const pluginHost = env.DEV_PLUGIN_HOST_PATH
     const devBinds = pluginHost ? [`${pluginHost}:/opt/cloud-code-plugin:ro`] : []
+    const sshBinds = env.SANDBOX_SSH_DIR
+      ? [`${env.SANDBOX_SSH_DIR}:/home/coder/.ssh:ro`]
+      : []
     return d.createContainer({
       Image: env.SANDBOX_BASE_IMAGE,
       name: `coding-env-sandbox-${id}`,
@@ -126,6 +129,7 @@ class SandboxManager {
           `${workspaceHostDir(id)}:/workspace`,
           `${opencodeHostDir(id)}:/home/coder/.opencode`,
           ...devBinds,
+          ...sshBinds,
         ],
         NetworkMode: env.DOCKER_NETWORK,
         ReadonlyRootfs: true,

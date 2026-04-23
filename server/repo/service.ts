@@ -40,10 +40,19 @@ export interface RepoSummary {
 
 const REPO_ROOT = '/workspace/repos'
 
+// scp-style git URL: `git@host:path` (no scheme). Conservative match.
+const SCP_SSH_URL_RE = /^[a-z_][a-z0-9_-]*@[a-z0-9.-]+:[^\s]+$/i
+
 function isValidUrl(url: string): boolean {
+  if (SCP_SSH_URL_RE.test(url)) return true
   try {
     const u = new URL(url)
-    return u.protocol === 'https:' || u.protocol === 'http:' || u.protocol === 'git:'
+    return (
+      u.protocol === 'https:' ||
+      u.protocol === 'http:' ||
+      u.protocol === 'git:' ||
+      u.protocol === 'ssh:'
+    )
   } catch {
     return false
   }
@@ -58,6 +67,12 @@ function deriveSlug(name: string): string {
 }
 
 function deriveNameFromUrl(url: string): string {
+  // scp-style: take the part after the last `/` (or after `:` if no `/`).
+  if (SCP_SSH_URL_RE.test(url)) {
+    const after = url.split(':').slice(1).join(':')
+    const last = after.split('/').filter(Boolean).pop() || 'repo'
+    return last.replace(/\.git$/, '')
+  }
   try {
     const u = new URL(url)
     const last = u.pathname.split('/').filter(Boolean).pop() || 'repo'
@@ -156,7 +171,7 @@ class RepoService {
       cloneUrlPromise = githubService.buildAuthedCloneUrl(opts.repoFullName)
     } else {
       if (!opts.url || !isValidUrl(opts.url)) {
-        throw new RepoError('invalid_url', 'url must be a valid http(s)/git URL')
+        throw new RepoError('invalid_url', 'url must be a valid http(s), git, ssh, or git@host:path URL')
       }
       originUrl = opts.url
       displayName = deriveNameFromUrl(opts.url)

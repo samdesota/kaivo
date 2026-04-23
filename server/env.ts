@@ -28,6 +28,12 @@ const schema = z.object({
   // /opt/cloud-code-plugin/index.js so `npm run build:plugin` + a sandbox
   // restart is enough to pick up plugin changes (no image rebuild).
   DEV_PLUGIN_HOST_PATH: z.string().optional(),
+  // Optional host directory containing an SSH private key (`id_ed25519` or
+  // similar) and `known_hosts`. Bind-mounted RO into each sandbox at
+  // /home/coder/.ssh, enabling `git clone` against ssh:// or git@host:path
+  // remotes. Files must be readable by uid 1000 (the `coder` user inside
+  // the sandbox).
+  SANDBOX_SSH_DIR: z.string().optional(),
   COOKIE_SECURE: z
     .union([z.literal('true'), z.literal('false')])
     .optional()
