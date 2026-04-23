@@ -4,6 +4,7 @@ import { trpc } from '../trpc'
 import { Button, Card, FormError, Input } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
 import { ProvidersSection } from './settings/providers'
+import { FONT_SIZE_BOUNDS, useFontSize } from '../lib/ui-prefs'
 
 export function SettingsPage() {
   const search = useSearch({ strict: false }) as { github?: string }
@@ -55,6 +56,8 @@ export function SettingsPage() {
       </header>
 
       <main className="mx-auto max-w-3xl space-y-6 p-8">
+        <AppearanceSection />
+
         <ProvidersSection />
 
         <Card className="max-w-none">
@@ -139,5 +142,36 @@ export function SettingsPage() {
         </Card>
       </main>
     </div>
+  )
+}
+
+function AppearanceSection() {
+  const [size, setSize] = useFontSize()
+  return (
+    <Card className="max-w-none">
+      <h2 className="mb-1 text-lg font-medium">Appearance</h2>
+      <p className="mb-4 text-sm text-neutral-400">
+        Base font size scales every text-*/p-* utility in the UI. Saved per-browser.
+      </p>
+      <label className="flex items-center gap-3 text-sm">
+        <span className="w-28 text-neutral-400">Font size</span>
+        <input
+          type="range"
+          min={FONT_SIZE_BOUNDS.min}
+          max={FONT_SIZE_BOUNDS.max}
+          step={1}
+          value={size}
+          onChange={(e) => setSize(Number(e.target.value))}
+          className="flex-1"
+        />
+        <span className="w-16 text-right font-mono text-neutral-300">{size}px</span>
+        <button
+          onClick={() => setSize(FONT_SIZE_BOUNDS.default)}
+          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+        >
+          Reset
+        </button>
+      </label>
+    </Card>
   )
 }

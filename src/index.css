@@ -2,8 +2,35 @@
 
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --color-brand-500: oklch(0.7 0.18 250);
-  --color-brand-600: oklch(0.62 0.2 250);
+
+  /* one-dark accent (blue) replaces brand */
+  --color-brand-500: #61afef;
+  --color-brand-600: #519aba;
+
+  /* Re-skin Tailwind's neutral scale to the one-dark palette so utility
+     classes used throughout the app (bg-neutral-900, text-neutral-300, …)
+     pick up the theme without rewriting every className. */
+  --color-neutral-50: #f9fafb;
+  --color-neutral-100: #e6e6e6;
+  --color-neutral-200: #c8cdd5;
+  --color-neutral-300: #abb2bf;
+  --color-neutral-400: #828997;
+  --color-neutral-500: #5c6370;
+  --color-neutral-600: #4b5263;
+  --color-neutral-700: #3e4451;
+  --color-neutral-800: #2c313a;
+  --color-neutral-900: #21252b;
+  --color-neutral-950: #181a1f;
+}
+
+:root {
+  /* Overridable via the Settings → Appearance control. Drives base
+     html font-size, so all rem-based Tailwind sizes scale together. */
+  --app-font-size: 16px;
+}
+
+html {
+  font-size: var(--app-font-size);
 }
 
 html,
@@ -14,4 +41,6 @@ body,
 
 body {
   margin: 0;
+  background: #181a1f;
+  color: #abb2bf;
 }

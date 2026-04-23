@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 import { trpc, makeTrpcClient } from './trpc'
 import { router } from './router'
+import { initFontSize } from './lib/ui-prefs'
 import './index.css'
+
+initFontSize()
 
 const queryClient = new QueryClient({
   defaultOptions: {
