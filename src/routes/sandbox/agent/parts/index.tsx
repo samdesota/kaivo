@@ -4,12 +4,8 @@ import { permissionForCall } from '../transcript-store'
 import { FilePart } from './file-part'
 import { PatchPart } from './patch-part'
 import { ReasoningPart } from './reasoning-part'
-import { StepFinishPart } from './step-finish-part'
 import { TextPart } from './text-part'
 import { ToolPart } from './tool-part'
-
-/** Parts we intentionally skip rendering. */
-const HIDDEN = new Set(['step-start', 'snapshot'])
 
 export function PartRenderer({
   part,
@@ -29,8 +25,6 @@ export function PartRenderer({
   /** For task tool calls: the matched subagent's live transcript. */
   childTranscript?: TranscriptState
 }) {
-  if (HIDDEN.has(part.type)) return null
-  if ((part as { synthetic?: boolean }).synthetic) return null
   switch (part.type) {
     case 'text':
       return <TextPart part={part} role={role} />
@@ -54,8 +48,6 @@ export function PartRenderer({
       return <FilePart part={part} />
     case 'patch':
       return <PatchPart part={part} sandboxId={sandboxId} />
-    case 'step-finish':
-      return <StepFinishPart />
     default:
       return (
         <div className="text-[10px] italic text-neutral-600">

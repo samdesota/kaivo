@@ -295,16 +295,24 @@ function SessionPane({
   const parts = useMemo(() => flattenParts(state), [state])
   const renderables = useMemo(() => {
     let taskIdx = 0
-    return parts.map((p) => {
-      const role = state.messages.get(p.messageID)?.role ?? 'assistant'
+    const out: Array<{ part: typeof parts[number]; role: string; childTranscript?: TranscriptState }> = []
+    for (const p of parts) {
+      // Track task→child mapping across *all* tool parts so the index stays
+      // stable even when we skip non-rendering parts below.
       let childTranscript: TranscriptState | undefined
       if (p.type === 'tool' && (p as { tool?: string }).tool === 'task') {
         const childOcId = state.childOrder[taskIdx]
         if (childOcId) childTranscript = state.childTranscripts.get(childOcId)
         taskIdx++
       }
-      return { part: p, role, childTranscript }
-    })
+      // Skip parts that render to null — otherwise the virtualizer wrapper
+      // div still applies padding and shows as an empty band between rows.
+      if (p.type === 'step-start' || p.type === 'snapshot' || p.type === 'step-finish') continue
+      if ((p as { synthetic?: boolean }).synthetic) continue
+      const role = state.messages.get(p.messageID)?.role ?? 'assistant'
+      out.push({ part: p, role, childTranscript })
+    }
+    return out
   }, [parts, state.messages, state.childOrder, state.childTranscripts])
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
