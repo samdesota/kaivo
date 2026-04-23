@@ -39,14 +39,16 @@ export function ToolPart({
   onOpenShell?: (content: PaneContent) => void
   childTranscript?: TranscriptState
 }) {
-  const tool = (part as { tool?: string }).tool ?? 'tool'
+  // cloud_bash/cloud_pty are functionally bash/pty from the user's POV; we
+  // already collapsed the visual treatment, so normalize the label too.
+  const rawTool = (part as { tool?: string }).tool ?? 'tool'
+  const tool = rawTool === 'cloud_bash' ? 'bash' : rawTool === 'cloud_pty' ? 'pty' : rawTool
   const callID = (part as { callID?: string }).callID ?? ''
   const state: ToolState = ((part as { state?: ToolState }).state ?? {}) as ToolState
 
-  if (tool === 'bash' || tool === 'cloud_bash') {
+  if (tool === 'bash') {
     return (
       <BashToolPart
-        tool={tool}
         callID={callID}
         state={state}
         permission={permission}
@@ -54,10 +56,9 @@ export function ToolPart({
       />
     )
   }
-  if (tool === 'pty' || tool === 'cloud_pty') {
+  if (tool === 'pty') {
     return (
       <PtyToolPart
-        tool={tool}
         state={state}
         permission={permission}
         sessionId={sessionId}
@@ -105,13 +106,11 @@ function lastLine(s: string | undefined): string {
 }
 
 function BashToolPart({
-  tool,
   callID,
   state,
   permission,
   sessionId,
 }: {
-  tool: string
   callID: string
   state: ToolState
   permission?: PermissionRequest
@@ -143,11 +142,6 @@ function BashToolPart({
         <span className="font-mono text-neutral-400">$</span>
         <span className="truncate font-mono text-neutral-200">{cmd || '(no command)'}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-neutral-500">
-          {tool === 'cloud_bash' && (
-            <span className="rounded border border-brand-500/40 bg-brand-500/10 px-1 py-0.5 uppercase tracking-wide text-brand-400">
-              shared
-            </span>
-          )}
           {exitCode !== null && (
             <span className={exitCode === 0 ? 'text-neutral-500' : 'text-red-400'}>
               exit {exitCode}
@@ -239,13 +233,11 @@ function ToolBody({ children }: { children: React.ReactNode }) {
 }
 
 function PtyToolPart({
-  tool,
   state,
   permission,
   sessionId,
   onOpenShell,
 }: {
-  tool: string
   state: ToolState
   permission?: PermissionRequest
   sessionId: string
@@ -265,11 +257,6 @@ function PtyToolPart({
         <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-neutral-200">
           {label}
         </span>
-        {tool === 'cloud_pty' && (
-          <span className="rounded border border-brand-500/40 bg-brand-500/10 px-1 py-0.5 text-[9px] uppercase tracking-wide text-brand-400">
-            shared
-          </span>
-        )}
         {shellId && onOpenShell && (
           <button
             onClick={() => onOpenShell({ type: 'shell', shellId })}
