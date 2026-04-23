@@ -2,7 +2,15 @@ import { useState } from 'react'
 import type { PaneContent } from '../../shell/tab-state'
 import { XTermAttached } from '../../xterm-attached'
 import { PermissionBanner } from './permission-banner'
-import type { PermissionRequest, Part } from '../transcript-store'
+import {
+  flattenParts,
+  permissionForCall,
+  type PermissionRequest,
+  type Part,
+  type TranscriptState,
+} from '../transcript-store'
+import { TextPart } from './text-part'
+import { ReasoningPart } from './reasoning-part'
 
 interface ToolState {
   status?: 'pending' | 'running' | 'completed' | 'error' | string
@@ -20,12 +28,16 @@ export function ToolPart({
   part,
   permission,
   sessionId,
+  sandboxId,
   onOpenShell,
+  childTranscript,
 }: {
   part: Part
   permission?: PermissionRequest
   sessionId: string
+  sandboxId: string
   onOpenShell?: (content: PaneContent) => void
+  childTranscript?: TranscriptState
 }) {
   const tool = (part as { tool?: string }).tool ?? 'tool'
   const callID = (part as { callID?: string }).callID ?? ''
@@ -53,7 +65,17 @@ export function ToolPart({
       />
     )
   }
-  return <GenericToolPart tool={tool} state={state} permission={permission} sessionId={sessionId} />
+  return (
+    <GenericToolPart
+      tool={tool}
+      state={state}
+      permission={permission}
+      sessionId={sessionId}
+      sandboxId={sandboxId}
+      childTranscript={childTranscript}
+      onOpenShell={onOpenShell}
+    />
+  )
 }
 
 function StatusDot({ status }: { status?: string }) {
@@ -226,11 +248,17 @@ function GenericToolPart({
   state,
   permission,
   sessionId,
+  sandboxId,
+  childTranscript,
+  onOpenShell,
 }: {
   tool: string
   state: ToolState
   permission?: PermissionRequest
   sessionId: string
+  sandboxId: string
+  childTranscript?: TranscriptState
+  onOpenShell?: (content: PaneContent) => void
 }) {
   const running = state.status === 'running' || state.status === 'pending'
   // Auto-expand while running so the user can watch state stream in. After
@@ -262,7 +290,15 @@ function GenericToolPart({
         )}
         <span className="ml-auto text-[10px] text-neutral-500">{state.status ?? 'idle'}</span>
       </button>
-      {open && (
+      {open && isTask && (
+        <SubagentTranscript
+          transcript={childTranscript}
+          sessionId={sessionId}
+          sandboxId={sandboxId}
+          onOpenShell={onOpenShell}
+        />
+      )}
+      {open && !isTask && (
         <div className="border-t border-neutral-800 p-2 font-mono text-[11px]">
           {state.input && (
             <>
@@ -292,6 +328,73 @@ function GenericToolPart({
           <PermissionBanner req={permission} sessionId={sessionId} />
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Inline transcript of the subagent spawned by a `task` tool call. Renders
+ * the child session's parts (text/reasoning/tool) without recursing into
+ * further nested subagents — opencode supports nesting but in practice it
+ * rarely happens, and avoiding the recursion keeps the UI bounded.
+ */
+function SubagentTranscript({
+  transcript,
+  sessionId,
+  sandboxId,
+  onOpenShell,
+}: {
+  transcript?: TranscriptState
+  sessionId: string
+  sandboxId: string
+  onOpenShell?: (content: PaneContent) => void
+}) {
+  if (!transcript) {
+    return (
+      <div className="border-t border-neutral-800 px-3 py-2 text-[11px] italic text-neutral-500">
+        Waiting for subagent…
+      </div>
+    )
+  }
+  const parts = flattenParts(transcript)
+  if (parts.length === 0) {
+    return (
+      <div className="border-t border-neutral-800 px-3 py-2 text-[11px] italic text-neutral-500">
+        Subagent has not produced output yet.
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1 border-t border-neutral-800 bg-neutral-950/40 p-2">
+      {parts.map((p) => {
+        if (p.type === 'step-start' || p.type === 'step-finish' || p.type === 'snapshot') {
+          return null
+        }
+        if ((p as { synthetic?: boolean }).synthetic) return null
+        const role = transcript.messages.get(p.messageID)?.role ?? 'assistant'
+        if (p.type === 'text') return <TextPart key={p.id} part={p} role={role} />
+        if (p.type === 'reasoning') return <ReasoningPart key={p.id} part={p} />
+        if (p.type === 'tool') {
+          const callID = (p as { callID?: string }).callID
+          const perm = callID ? permissionForCall(transcript, callID) : undefined
+          return (
+            <ToolPart
+              key={p.id}
+              part={p}
+              permission={perm}
+              sessionId={sessionId}
+              sandboxId={sandboxId}
+              onOpenShell={onOpenShell}
+              // Don't pass childTranscript — keeps recursion to one level.
+            />
+          )
+        }
+        return (
+          <div key={p.id} className="text-[10px] italic text-neutral-600">
+            {p.type}
+          </div>
+        )
+      })}
     </div>
   )
 }

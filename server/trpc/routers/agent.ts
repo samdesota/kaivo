@@ -110,6 +110,16 @@ export const agentRouter = router({
       }
     }),
 
+  childTranscripts: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await agentService.childTranscripts(input.sessionId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionApprove: protectedProcedure
     .input(
       z.object({

@@ -9,6 +9,7 @@ import {
   applyEvent,
   emptyTranscript,
   flattenParts,
+  hydrateChildren,
   hydrateFromMessages,
   type TranscriptState,
 } from './transcript-store'
@@ -23,7 +24,14 @@ type Action =
       type: 'hydrate'
       msgs: Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>
     }
-  | { type: 'event'; evt: { type: string; payload: Record<string, unknown> } }
+  | {
+      type: 'hydrate-children'
+      children: Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }>
+    }
+  | {
+      type: 'event'
+      evt: { type: string; parentSessionId?: string; payload: Record<string, unknown> }
+    }
 
 function reducer(state: TranscriptState, action: Action): TranscriptState {
   switch (action.type) {
@@ -31,6 +39,8 @@ function reducer(state: TranscriptState, action: Action): TranscriptState {
       return emptyTranscript()
     case 'hydrate':
       return hydrateFromMessages(state, action.msgs as Array<{ info: unknown; parts: unknown[] }>)
+    case 'hydrate-children':
+      return hydrateChildren(state, action.children)
     case 'event':
       return applyEvent(state, action.evt)
     default:
@@ -150,6 +160,11 @@ function SessionPane({
     },
   )
 
+  const childMsgs = trpc.agent.childTranscripts.useQuery(
+    { sessionId },
+    { staleTime: 0, refetchOnWindowFocus: false },
+  )
+
   // Hydrate from cold load exactly once per session.
   const hydrated = useRef<string | null>(null)
   useEffect(() => {
@@ -166,6 +181,15 @@ function SessionPane({
     })
   }, [sessionId, messages.data])
 
+  // Hydrate child transcripts when they arrive (separately from the parent's
+  // cold load — same-session, different query). Safe to dispatch repeatedly:
+  // hydrateChildren upserts so it converges to the latest snapshot.
+  useEffect(() => {
+    if (!childMsgs.data) return
+    if (hydrated.current !== sessionId) return
+    dispatch({ type: 'hydrate-children', children: childMsgs.data })
+  }, [sessionId, childMsgs.data])
+
   // Live-merge events. `onError` flips the reconnect banner; tRPC's ws client
   // auto-reconnects under the hood, so the banner clears on the next `onData`.
   trpc.agent.transcript.useSubscription(
@@ -175,7 +199,11 @@ function SessionPane({
         setReconnecting(false)
         dispatch({
           type: 'event',
-          evt: evt as { type: string; payload: Record<string, unknown> },
+          evt: evt as {
+            type: string
+            parentSessionId?: string
+            payload: Record<string, unknown>
+          },
         })
       },
       onError() {
@@ -194,14 +222,19 @@ function SessionPane({
   const pendingCount = state.permissions.size > 0 ? state.permissions.size : pendingFromStatus.length
 
   const parts = useMemo(() => flattenParts(state), [state])
-  const renderables = useMemo(
-    () =>
-      parts.map((p) => ({
-        part: p,
-        role: state.messages.get(p.messageID)?.role ?? 'assistant',
-      })),
-    [parts, state.messages],
-  )
+  const renderables = useMemo(() => {
+    let taskIdx = 0
+    return parts.map((p) => {
+      const role = state.messages.get(p.messageID)?.role ?? 'assistant'
+      let childTranscript: TranscriptState | undefined
+      if (p.type === 'tool' && (p as { tool?: string }).tool === 'task') {
+        const childOcId = state.childOrder[taskIdx]
+        if (childOcId) childTranscript = state.childTranscripts.get(childOcId)
+        taskIdx++
+      }
+      return { part: p, role, childTranscript }
+    })
+  }, [parts, state.messages, state.childOrder, state.childTranscripts])
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const rowVirtualizer = useVirtualizer({
@@ -250,7 +283,7 @@ function SessionPane({
             style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
           >
             {rowVirtualizer.getVirtualItems().map((v) => {
-              const { part, role } = renderables[v.index]!
+              const { part, role, childTranscript } = renderables[v.index]!
               const prev = v.index > 0 ? renderables[v.index - 1] : null
               const isTool = part.type === 'tool'
               const prevIsTool = prev?.part.type === 'tool'
@@ -277,6 +310,7 @@ function SessionPane({
                     sessionId={sessionId}
                     sandboxId={sandboxId}
                     onOpenShell={onOpenShell}
+                    childTranscript={childTranscript}
                   />
                 </div>
               )

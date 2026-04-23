@@ -74,8 +74,22 @@ export interface PendingApproval {
 }
 
 export interface TranscriptEvent {
-  type: 'message.updated' | 'message.part.updated' | 'permission.updated' | 'permission.replied' | 'session.idle' | 'session.error'
+  type:
+    | 'message.updated'
+    | 'message.part.updated'
+    | 'permission.updated'
+    | 'permission.replied'
+    | 'session.idle'
+    | 'session.error'
+    | 'child.session.created'
+  /** OpenCode session ID the event came from (parent or child). */
   sessionId: string
+  /**
+   * Set when this event came from a child of the subscribed-to parent. UI
+   * uses this to route events to the child sub-transcript instead of the
+   * parent's main one.
+   */
+  parentSessionId?: string
   // Forward OpenCode event payload verbatim; UI can render deltas.
   payload: Record<string, unknown>
 }
@@ -100,6 +114,15 @@ class AgentService {
   private subs = new Map<string, SandboxSubscription>()
   private pending = new Map<string, Map<string, PendingApproval>>() // opencodeSessionId -> permissionId -> req
   private seqCounters = new Map<string, number>() // sessionId (ours) -> next seq
+  /**
+   * Reverse-index: child opencode sessionID → parent opencode sessionID.
+   * Populated from `session.created` / `session.updated` events whose
+   * `info.parentID` is set. Lets us forward child-session events to a
+   * parent's transcript subscriber so the UI can stream subagent output.
+   */
+  private parentByChild = new Map<string, string>()
+  /** Parent oc id → ordered list of child oc ids (insertion order). */
+  private childrenByParent = new Map<string, string[]>()
   /**
    * Per-session model override. Kept in memory — on server restart, sessions
    * fall back to OpenCode's default model until the user picks again. Good
@@ -471,6 +494,64 @@ class AgentService {
     }>
   }
 
+  /**
+   * Cold-load all child (subagent) sessions for a parent, with each child's
+   * full message history. UI calls this on session hydrate so completed task
+   * tools can render their subagent transcript inline even after a reload.
+   * Returned in opencode creation order (oldest first), matching the order
+   * the parent's task tool calls were made.
+   */
+  async childTranscripts(sessionId: string): Promise<
+    Array<{
+      sessionID: string
+      parentID: string
+      title: string | null
+      createdAt: number
+      messages: Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>
+    }>
+  > {
+    const row = await this.requireSession(sessionId)
+    const client = await this.getClient(row.sandboxId)
+    const all = await client.session.list({ throwOnError: true })
+    const sessions = (all.data ?? []) as Array<{
+      id: string
+      parentID?: string
+      title?: string
+      time?: { created?: number }
+    }>
+    const children = sessions
+      .filter((s) => s.parentID === row.opencodeSessionId)
+      .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))
+    // Backfill the parent↔child index so live events from these sessions get
+    // forwarded even if we missed the original session.created (e.g. server
+    // restarted while the parent was idle).
+    const list = this.childrenByParent.get(row.opencodeSessionId) ?? []
+    for (const c of children) {
+      if (!this.parentByChild.has(c.id)) this.parentByChild.set(c.id, row.opencodeSessionId)
+      if (!list.includes(c.id)) list.push(c.id)
+    }
+    this.childrenByParent.set(row.opencodeSessionId, list)
+    const out = await Promise.all(
+      children.map(async (c) => {
+        const res = await client.session
+          .messages({ path: { id: c.id }, throwOnError: true })
+          .catch(() => null)
+        const messages = (res?.data ?? []) as Array<{
+          info: Record<string, unknown>
+          parts: Array<Record<string, unknown>>
+        }>
+        return {
+          sessionID: c.id,
+          parentID: row.opencodeSessionId,
+          title: c.title ?? null,
+          createdAt: c.time?.created ?? 0,
+          messages,
+        }
+      }),
+    )
+    return out
+  }
+
   async sessionStatus(input: { sessionId: string }): Promise<{
     session: AgentSessionSummary
     pendingApprovals: PendingApproval[]
@@ -518,7 +599,16 @@ class AgentService {
       this.ensureSubscription(row.sandboxId)
       const state = this.subs.get(row.sandboxId)!
       const wrapper: TranscriptListener = (evt) => {
-        if (evt.sessionId === row.opencodeSessionId) fn(evt)
+        if (evt.sessionId === row.opencodeSessionId) {
+          fn(evt)
+          return
+        }
+        // Also forward events from any descendant sessions (subagents spawned
+        // via the task tool). Annotate with parentSessionId so the UI can
+        // route them into the matching child sub-transcript.
+        if (this.parentByChild.get(evt.sessionId) === row.opencodeSessionId) {
+          fn({ ...evt, parentSessionId: row.opencodeSessionId })
+        }
       }
       state.listeners.add(wrapper)
       innerUnsub = () => {
@@ -644,6 +734,46 @@ class AgentService {
         p.title = pat ? `${kind}: ${pat}` : `${kind} requested`
       }
       if (!p.time) p.time = { created: Date.now() }
+    }
+
+    // session.created / session.updated: maintain parent↔child index, and if
+    // this is a NEW child of some known parent, fan out a synthetic
+    // `child.session.created` so subscribers learn about it in order.
+    if (type === 'session.created' || type === 'session.updated') {
+      const info = (props as { info?: { id?: string; parentID?: string } }).info
+      const childId = info?.id
+      const parentId = info?.parentID
+      if (childId && parentId) {
+        const known = this.parentByChild.get(childId)
+        if (!known) {
+          this.parentByChild.set(childId, parentId)
+          const list = this.childrenByParent.get(parentId) ?? []
+          if (!list.includes(childId)) {
+            list.push(childId)
+            this.childrenByParent.set(parentId, list)
+          }
+          // Notify parent's listeners that a new child has appeared. UI uses
+          // this (in arrival order) to match the Nth task tool call to the
+          // Nth child session.
+          const st = this.subs.get(sandboxId)
+          if (st) {
+            const fanout: TranscriptEvent = {
+              type: 'child.session.created',
+              sessionId: childId,
+              parentSessionId: parentId,
+              payload: { info: info as Record<string, unknown> },
+            }
+            for (const l of st.listeners) {
+              try {
+                l(fanout)
+              } catch (err) {
+                logger.warn({ err }, 'transcript listener threw')
+              }
+            }
+          }
+        }
+      }
+      return
     }
 
     // Extract the opencode session id where we can.

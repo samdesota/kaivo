@@ -44,6 +44,13 @@ export interface TranscriptState {
   partsByMessage: Map<string, string[]>
   /** Pending permission requests, keyed by permission id. */
   permissions: Map<string, PermissionRequest>
+  /**
+   * Subagent (child) opencode session IDs in creation order. Used to map the
+   * Nth `task` tool call in this transcript to the Nth child session.
+   */
+  childOrder: string[]
+  /** Child opencode session ID → its own transcript state. */
+  childTranscripts: Map<string, TranscriptState>
 }
 
 export function emptyTranscript(): TranscriptState {
@@ -53,6 +60,8 @@ export function emptyTranscript(): TranscriptState {
     parts: new Map(),
     partsByMessage: new Map(),
     permissions: new Map(),
+    childOrder: [],
+    childTranscripts: new Map(),
   }
 }
 
@@ -114,14 +123,64 @@ export function hydrateFromMessages(
   return s
 }
 
+/** Cold-load child sessions returned by `agent.childTranscripts`. */
+export function hydrateChildren(
+  state: TranscriptState,
+  children: Array<{
+    sessionID: string
+    messages: Array<{ info: unknown; parts: unknown[] }>
+  }>,
+): TranscriptState {
+  const childOrder = [...state.childOrder]
+  const childTranscripts = new Map(state.childTranscripts)
+  for (const c of children) {
+    if (!childOrder.includes(c.sessionID)) childOrder.push(c.sessionID)
+    const existing = childTranscripts.get(c.sessionID) ?? emptyTranscript()
+    childTranscripts.set(c.sessionID, hydrateFromMessages(existing, c.messages))
+  }
+  return { ...state, childOrder, childTranscripts }
+}
+
 /**
  * Apply a single forwarded OpenCode event. Unknown types are ignored so new
  * SDK events don't crash the UI.
+ *
+ * Events with `parentSessionId` set originate from a subagent (child) session
+ * and are routed into that child's sub-transcript, not the parent's.
  */
 export function applyEvent(
   state: TranscriptState,
-  evt: { type: string; payload: Record<string, unknown> },
+  evt: { type: string; parentSessionId?: string; payload: Record<string, unknown> },
 ): TranscriptState {
+  // child.session.created: register a new child in arrival order so the UI
+  // can pair it with the Nth task tool call in the parent.
+  if (evt.type === 'child.session.created') {
+    const info = (evt.payload as { info?: { id?: string } }).info
+    const id = info?.id
+    if (!id) return state
+    if (state.childOrder.includes(id)) return state
+    const childTranscripts = new Map(state.childTranscripts)
+    if (!childTranscripts.has(id)) childTranscripts.set(id, emptyTranscript())
+    return {
+      ...state,
+      childOrder: [...state.childOrder, id],
+      childTranscripts,
+    }
+  }
+  // Route child-session events into the matching sub-transcript.
+  if (evt.parentSessionId) {
+    // Find the child sessionID inside the payload (varies by event shape).
+    const childOcId = extractEventSessionId(evt)
+    if (!childOcId) return state
+    const childTranscripts = new Map(state.childTranscripts)
+    const prev = childTranscripts.get(childOcId) ?? emptyTranscript()
+    const next = applyEvent(prev, { ...evt, parentSessionId: undefined })
+    childTranscripts.set(childOcId, next)
+    const childOrder = state.childOrder.includes(childOcId)
+      ? state.childOrder
+      : [...state.childOrder, childOcId]
+    return { ...state, childTranscripts, childOrder }
+  }
   switch (evt.type) {
     case 'message.updated': {
       const info = (evt.payload as { info?: MessageInfo }).info
@@ -179,6 +238,25 @@ export function flattenParts(state: TranscriptState): Part[] {
     }
   }
   return out
+}
+
+function extractEventSessionId(evt: {
+  type: string
+  payload: Record<string, unknown>
+}): string | undefined {
+  switch (evt.type) {
+    case 'message.updated':
+      return (evt.payload as { info?: { sessionID?: string } }).info?.sessionID
+    case 'message.part.updated':
+      return (evt.payload as { part?: { sessionID?: string } }).part?.sessionID
+    case 'permission.updated':
+    case 'permission.replied':
+    case 'session.idle':
+    case 'session.error':
+      return (evt.payload as { sessionID?: string }).sessionID
+    default:
+      return undefined
+  }
 }
 
 /** Lookup: find a permission whose callID matches a tool part. */

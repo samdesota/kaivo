@@ -18,6 +18,7 @@ export function PartRenderer({
   sessionId,
   sandboxId,
   onOpenShell,
+  childTranscript,
 }: {
   part: Part
   state: TranscriptState
@@ -25,6 +26,8 @@ export function PartRenderer({
   sessionId: string
   sandboxId: string
   onOpenShell?: (content: PaneContent) => void
+  /** For task tool calls: the matched subagent's live transcript. */
+  childTranscript?: TranscriptState
 }) {
   if (HIDDEN.has(part.type)) return null
   if ((part as { synthetic?: boolean }).synthetic) return null
@@ -41,7 +44,9 @@ export function PartRenderer({
           part={part}
           permission={perm}
           sessionId={sessionId}
+          sandboxId={sandboxId}
           onOpenShell={onOpenShell}
+          childTranscript={childTranscript}
         />
       )
     }
