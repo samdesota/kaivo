@@ -120,10 +120,14 @@ export const fsRouter = router({
           cwd: '/workspace',
           timeoutMs: 15_000,
         })
+        // `find /workspace` yields container-absolute paths; the rest of
+        // the fs router speaks workspace-relative paths (with leading "/"),
+        // so normalize before returning.
         const paths = res.stdout
           .split('\n')
           .map((p) => p.trim())
           .filter((p) => p.length > 0)
+          .map((p) => (p.startsWith('/workspace/') ? p.slice('/workspace'.length) : p))
         return { paths, truncated: res.truncated }
       } catch (err) {
         throw toTrpcError(err)

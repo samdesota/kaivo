@@ -124,15 +124,15 @@ export function CommandPalette({
     }
 
     for (const path of files.data?.paths ?? []) {
-      // Strip the workspace prefix in the label so "package.json" matches
-      // intuitively rather than "/workspace/repos/.../package.json".
-      const trimmed = path.startsWith('/workspace/') ? path.slice('/workspace/'.length) : path
+      // Paths come in workspace-relative form (e.g. "/src/foo.ts"). Drop
+      // the leading slash for display so the label reads naturally.
+      const display = path.replace(/^\/+/, '')
       out.push({
         id: `file:${path}`,
-        label: trimmed.split('/').pop() ?? trimmed,
-        detail: trimmed,
+        label: display.split('/').pop() ?? display,
+        detail: display,
         kind: 'file',
-        haystack: trimmed,
+        haystack: display,
         run: () => onOpenContent({ type: 'file', path }),
       })
     }
