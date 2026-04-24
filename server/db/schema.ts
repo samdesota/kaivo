@@ -202,3 +202,25 @@ export const envAuthDeviceRequests = pgTable('env_auth_device_requests', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
 })
+
+export type EnvKind = 'container' | 'local'
+export type EnvStatus = 'running' | 'archived' | 'crashed' | 'unreachable'
+
+export const envs = pgTable('envs', {
+  id: text('id').primaryKey(),
+  kind: text('kind').$type<EnvKind>().notNull(),
+  label: text('label').notNull(),
+  // For container envs: relative path like `/env/<id>` that the cc-control
+  // reverse proxy will route to the container. For local envs: absolute
+  // `http://localhost:47821`.
+  url: text('url').notNull(),
+  status: text('status').$type<EnvStatus>().notNull().default('running'),
+  containerId: text('container_id'),
+  // Reference into env_auth_tokens for revocation on delete.
+  identityTokenHash: text('identity_token_hash').references(() => envAuthTokens.tokenHash, {
+    onDelete: 'set null',
+  }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+})

@@ -13,6 +13,7 @@ import { agentShellRouter } from './routers/agent-shell.js'
 import { settingsRouter } from './routers/settings.js'
 import { envAuthRouter } from './routers/env-auth.js'
 import { envApiRouter } from './routers/env-api.js'
+import { envRouter } from './routers/env.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -29,6 +30,7 @@ export const appRouter = router({
   settings: settingsRouter,
   envAuth: envAuthRouter,
   envApi: envApiRouter,
+  env: envRouter,
 })
 
 export type AppRouter = typeof appRouter
