@@ -1,0 +1,84 @@
+import crypto from 'node:crypto'
+import { initTRPC, TRPCError } from '@trpc/server'
+import type { FastifyRequest, FastifyReply } from 'fastify'
+import superjson from 'superjson'
+import { getMeta, hashEnvToken, isPaired } from '../envmeta/service.js'
+
+export interface Context {
+  req: FastifyRequest
+  res: FastifyReply
+  envTokenPresent: boolean
+}
+
+export async function createContext({
+  req,
+  res,
+}: {
+  req: FastifyRequest
+  res: FastifyReply
+}): Promise<Context> {
+  const headerVal = req.headers['authorization']
+  const header = Array.isArray(headerVal) ? headerVal[0] : headerVal
+  const token =
+    typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
+      ? header.slice(7).trim()
+      : null
+
+  if (!token) {
+    return { req, res, envTokenPresent: false }
+  }
+  const meta = getMeta()
+  if (!meta.envTokenHash) return { req, res, envTokenPresent: false }
+  const incoming = hashEnvToken(token)
+  const a = Buffer.from(incoming)
+  const b = Buffer.from(meta.envTokenHash)
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b)
+  return { req, res, envTokenPresent: ok }
+}
+
+const t = initTRPC.context<Context>().create({
+  transformer: superjson,
+  errorFormatter({ shape, error }) {
+    return {
+      ...shape,
+      data: {
+        ...shape.data,
+        cause:
+          error.cause && typeof error.cause === 'object' && 'code' in error.cause
+            ? { code: (error.cause as { code: string }).code }
+            : undefined,
+      },
+    }
+  },
+})
+
+export const router = t.router
+export const publicProcedure = t.procedure
+
+/**
+ * Calls that require a paired bearer envToken. Pairing calls use
+ * `pairProcedure` instead; they are the *only* things that respond when
+ * the env is unpaired.
+ */
+export const authedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!isPaired()) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'env is not paired',
+    })
+  }
+  if (!ctx.envTokenPresent) {
+    throw new TRPCError({ code: 'UNAUTHORIZED' })
+  }
+  return next({ ctx })
+})
+
+/**
+ * Pairing-only procedures. Rejected once the env is paired.
+ */
+export const pairProcedure = t.procedure.use(({ next }) => {
+  if (isPaired()) {
+    throw new TRPCError({ code: 'CONFLICT', message: 'env already paired' })
+  }
+  return next()
+})
