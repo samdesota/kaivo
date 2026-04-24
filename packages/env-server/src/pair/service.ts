@@ -34,7 +34,6 @@ function randomEnvToken(): string {
 
 export interface PairStartResult {
   sessionId: string
-  code: string
   expiresIn: number
 }
 
@@ -59,14 +58,16 @@ export function pairStart(): PairStartResult {
     })
     .run()
 
-  // Print on stdout for visibility via launchd log / docker logs.
+  // Print on stdout only; the code is NEVER returned from the RPC so that
+  // attestation depends on the caller being able to read the local log
+  // (launchd / docker logs). Returning it would let anyone who reached
+  // this endpoint auto-confirm pairing — defeats the purpose.
   logger.info({ code, sessionId }, 'pair code issued')
   // eslint-disable-next-line no-console
   console.log(`pair code: ${code} (session ${sessionId})`)
 
   return {
     sessionId,
-    code,
     expiresIn: Math.floor(PAIR_TTL_MS / 1000),
   }
 }

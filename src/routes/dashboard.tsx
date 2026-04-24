@@ -4,6 +4,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
 import { Button, Card, FormError, Input } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
+import { clearAllEnvTokens } from '../lib/env-tokens'
+import { EnvironmentsSection } from './environments'
 
 export function DashboardPage() {
   const qc = useQueryClient()
@@ -22,6 +24,7 @@ export function DashboardPage() {
 
   async function onLogout() {
     await logout.mutateAsync()
+    clearAllEnvTokens()
     await qc.invalidateQueries()
   }
 
@@ -57,6 +60,8 @@ export function DashboardPage() {
       </header>
 
       <main className="mx-auto max-w-4xl p-8 space-y-6">
+        <EnvironmentsSection />
+
         <section>
           <Card className="max-w-none">
             <h2 className="mb-3 text-lg font-medium">Create a sandbox</h2>
