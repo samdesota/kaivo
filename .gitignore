@@ -1,6 +1,7 @@
 node_modules
 dist
 docker/base-sandbox/plugin/
+docker/base-sandbox/cc-env/
 .env
 .env.local
 .env.*.local

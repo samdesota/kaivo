@@ -14,7 +14,7 @@
     "build:client": "vite build",
     "build:server": "tsup",
     "start": "node dist/server/index.js",
-    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json && cd packages/opencode-plugin && npm run typecheck",
+    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json && (cd packages/opencode-plugin && npm run typecheck) && (cd packages/env-server && npm run typecheck)",
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -23,7 +23,8 @@
     "test:e2e:live": "tsx scripts/live-e2e.ts",
     "test:e2e:stack": "scripts/e2e-stack.sh",
     "build:plugin": "cd packages/opencode-plugin && npm install --no-audit --no-fund --silent && npm run build",
-    "prepare:sandbox-image": "npm run build:plugin && mkdir -p docker/base-sandbox/plugin && cp packages/opencode-plugin/dist/index.js docker/base-sandbox/plugin/index.js",
+    "build:env-server": "cd packages/env-server && npm install --no-audit --no-fund --silent && npm run build",
+    "prepare:sandbox-image": "npm run build:plugin && npm run build:env-server && bash scripts/prepare-sandbox-image.sh",
     "docker:sandbox": "npm run prepare:sandbox-image && docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox"
   },
   "dependencies": {

@@ -139,6 +139,12 @@ class EnvManager {
         .set({ containerId: container.id })
         .where(eq(envs.id, id))
       logger.info({ envId: id, containerId: container.id }, 'env container started')
+      // Wait for cc-env to respond on /healthz so the webapp's first token
+      // test succeeds. Best-effort: if the probe times out we still return
+      // the env — periodic probeHealth will catch it up.
+      await this.waitForHealthz(id, container.id).catch((err) => {
+        logger.warn({ err, envId: id }, 'env healthz wait failed')
+      })
     } catch (err) {
       logger.error({ err, envId: id }, 'env container start failed')
       await db.update(envs).set({ status: 'crashed' }).where(eq(envs.id, id))
@@ -147,6 +153,37 @@ class EnvManager {
 
     const row = await this.requireRow(id)
     return { env: summarize(row), envToken }
+  }
+
+  private async waitForHealthz(envId: string, containerId: string): Promise<void> {
+    const deadline = Date.now() + 20_000
+    while (Date.now() < deadline) {
+      try {
+        const info = await getDocker().getContainer(containerId).inspect()
+        const ip =
+          info.NetworkSettings?.Networks?.[env.DOCKER_NETWORK]?.IPAddress ??
+          null
+        if (ip) {
+          const res = await undiciRequest(`http://${ip}:${ENV_PORT}/healthz`, {
+            method: 'GET',
+            headersTimeout: 2_000,
+            bodyTimeout: 2_000,
+          })
+          await res.body.dump()
+          if (res.statusCode >= 200 && res.statusCode < 400) {
+            await db
+              .update(envs)
+              .set({ lastSeenAt: new Date() })
+              .where(eq(envs.id, envId))
+            return
+          }
+        }
+      } catch {
+        // retry
+      }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    throw new EnvError('unreachable', `env ${envId} /healthz did not respond`)
   }
 
   /**
@@ -353,18 +390,20 @@ class EnvManager {
       Labels: { [ENV_CONTAINER_LABEL]: opts.envId },
       User: '1000:1000',
       WorkingDir: '/workspace',
-      // Phase 5 replaces this with `cc-env`. For now we keep the container
-      // idle so the orchestrator code path can be exercised end-to-end
-      // without requiring the env-server binary.
-      Cmd: ['tail', '-f', '/dev/null'],
+      // The image CMD already runs cc-env; we override here so a future
+      // rev can swap to a wrapper (e.g. supervisord) without rebuilding.
+      Cmd: ['node', '/opt/cc-env/main.js'],
       Tty: false,
       OpenStdin: false,
       Env: [
         `CC_WORKING_DIR=/workspace`,
         `CC_PORT=${ENV_PORT}`,
+        `CC_HOST=0.0.0.0`,
         `CC_IDENTITY_URL=${env.SANDBOX_APP_URL}`,
         `CC_STATE_DIR=/var/lib/cc-env`,
         `CC_KIND=container`,
+        `CC_LABEL=${ENV_CONTAINER_LABEL}:${opts.envId}`,
+        `CC_ALLOWED_ORIGINS=${env.PUBLIC_URL}`,
       ],
       HostConfig: {
         Binds: [

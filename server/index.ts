@@ -22,6 +22,8 @@ import { registerShellWsRoutes } from './ws/shell.js'
 import { registerGitHubRoutes } from './http/github.js'
 import { registerPreviewProxy } from './preview/proxy.js'
 import { registerAgentProxy } from './agent/proxy.js'
+import { registerEnvProxy } from './env-orchestrator/proxy.js'
+import { envReconciler } from './env-orchestrator/reconciler.js'
 import { agentService } from './agent/service.js'
 import { bootstrapProvidersFromEnv } from './agent/providers.js'
 
@@ -56,6 +58,7 @@ async function buildServer() {
   await registerShellWsRoutes(server)
   registerPreviewProxy(server)
   registerAgentProxy(server)
+  registerEnvProxy(server)
   registerGitHubRoutes(server)
 
   server.get('/healthz', async () => ({ ok: true }))
@@ -107,6 +110,7 @@ async function buildServer() {
         req.url.startsWith('/trpc') ||
         req.url.startsWith('/api') ||
         req.url.startsWith('/agent') ||
+        req.url.startsWith('/env/') ||
         req.url.startsWith('/preview/') ||
         /^\/sandbox\/[^/]+\/agent(\/|$)/.test(req.url)
       ) {
@@ -134,6 +138,7 @@ async function main() {
       await sandboxManager.reconcile()
       // Kick off opencode on any surviving sandboxes. Non-fatal on failure.
       await agentService.reconcile()
+      await envReconciler.reconcile()
     } catch (err) {
       logger.warn({ err }, 'sandbox reconcile failed')
     }
@@ -157,6 +162,13 @@ async function main() {
   }, 10_000)
   reconcileTimer.unref()
 
+  const envReconcileTimer = setInterval(() => {
+    envReconciler
+      .reconcile()
+      .catch((err) => logger.warn({ err }, 'env reconcile failed'))
+  }, 15_000)
+  envReconcileTimer.unref()
+
   // Re-bootstrap opencode on any sandbox where the process has died; longer
   // interval than the sandbox reconcile because the ready-probe inside each
   // call is an HTTP round-trip per sandbox.
@@ -171,6 +183,7 @@ async function main() {
     logger.info({ signal }, 'shutting down')
     clearInterval(purgeTimer)
     clearInterval(reconcileTimer)
+    clearInterval(envReconcileTimer)
     clearInterval(agentReconcileTimer)
     try {
       await server.close()
