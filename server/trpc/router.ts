@@ -11,6 +11,8 @@ import { jobRouter } from './routers/job.js'
 import { agentRouter } from './routers/agent.js'
 import { agentShellRouter } from './routers/agent-shell.js'
 import { settingsRouter } from './routers/settings.js'
+import { envAuthRouter } from './routers/env-auth.js'
+import { envApiRouter } from './routers/env-api.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -25,6 +27,8 @@ export const appRouter = router({
   agent: agentRouter,
   agentShell: agentShellRouter,
   settings: settingsRouter,
+  envAuth: envAuthRouter,
+  envApi: envApiRouter,
 })
 
 export type AppRouter = typeof appRouter

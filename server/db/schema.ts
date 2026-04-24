@@ -180,3 +180,25 @@ export const agentTranscripts = pgTable('agent_transcripts', {
   contentJson: jsonb('content_json').$type<Record<string, unknown>>().notNull(),
   ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export type EnvAuthTokenSource = 'service' | 'device'
+export type EnvAuthDeviceStatus = 'pending' | 'approved' | 'denied' | 'expired'
+
+export const envAuthTokens = pgTable('env_auth_tokens', {
+  tokenHash: text('token_hash').primaryKey(),
+  label: text('label').notNull(),
+  source: text('source').$type<EnvAuthTokenSource>().notNull(),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+})
+
+export const envAuthDeviceRequests = pgTable('env_auth_device_requests', {
+  deviceCode: text('device_code').primaryKey(),
+  userCode: text('user_code').notNull().unique(),
+  label: text('label').notNull(),
+  status: text('status').$type<EnvAuthDeviceStatus>().notNull().default('pending'),
+  grantedTokenHash: text('granted_token_hash'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+})

@@ -62,6 +62,11 @@ const schema = z.object({
   ANTHROPIC_BASE_URL_BOOTSTRAP: z.string().optional(),
   OPENAI_API_KEY_BOOTSTRAP: z.string().optional(),
   OPENAI_BASE_URL_BOOTSTRAP: z.string().optional(),
+  // Shared secret for orchestrator → identity's envAuth.issueFromService.
+  // In v1 the orchestrator and identity routers live in the same process so
+  // this is essentially a self-check; still required so the wiring mirrors
+  // the split-process deployment.
+  CC_SERVICE_CREDENTIAL: z.string().min(16),
 })
 
 const parsed = schema.safeParse(process.env)
