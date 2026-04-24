@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { identityProcedure, router } from '../trpc.js'
-import { buildProviderEnv } from '../../agent/providers.js'
+import { buildProviderEnvRaw } from '../../agent/providers.js'
 import { RepoConfigError, repoConfigService } from '../../repo/configs.js'
 
 /**
@@ -11,7 +11,7 @@ import { RepoConfigError, repoConfigService } from '../../repo/configs.js'
  */
 export const envApiRouter = router({
   resolveProviderKeys: identityProcedure.query(async () => {
-    return buildProviderEnv()
+    return buildProviderEnvRaw()
   }),
 
   listRepoConfigs: identityProcedure.query(async () => {

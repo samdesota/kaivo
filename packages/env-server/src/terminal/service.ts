@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 import { spawn as ptySpawn, type IPty } from 'node-pty'
+import { spawn as procSpawn, type ChildProcess } from 'node:child_process'
 import type {
   Terminal as HeadlessTerminalType,
   ITerminalOptions,
@@ -32,10 +33,12 @@ const { SerializeAddon } = localRequire('@xterm/addon-serialize') as {
 const SCROLLBACK_LINES = 10_000
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 32
+const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
+const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
 
 export class ShellError extends Error {
   constructor(
-    public code: 'not_found' | 'invalid_cwd',
+    public code: 'not_found' | 'invalid_cwd' | 'timeout',
     message: string,
   ) {
     super(message)
@@ -50,6 +53,7 @@ export interface ShellInfo {
   cwd: string
   ownerKind: ShellOwnerKind
   ownerSessionId: string | null
+  isRunOnce: boolean
   exitCode: number | null
   createdAt: Date
   lastActivityAt: Date
@@ -60,7 +64,8 @@ type Subscriber = (chunk: string) => void
 
 interface ShellHandle {
   id: string
-  pty: IPty
+  pty: IPty | null
+  child: ChildProcess | null
   term: HeadlessTerminalType
   serialize: SerializeAddonType
   cols: number
@@ -68,15 +73,35 @@ interface ShellHandle {
   cwd: string
   ownerKind: ShellOwnerKind
   ownerSessionId: string | null
+  isRunOnce: boolean
   exitCode: number | null
   createdAt: Date
   lastActivityAt: Date
   subscribers: Set<Subscriber>
   disposed: boolean
+  retentionTimer: NodeJS.Timeout | null
+}
+
+export interface RunOnceStreamOpts {
+  cmd: string
+  cwd?: string
+  cols?: number
+  rows?: number
+  ownerSessionId?: string | null
+  onStdout?: (chunk: Buffer) => void
+  onStderr?: (chunk: Buffer) => void
+  signal?: AbortSignal
+}
+
+export interface RunOnceStreamHandle {
+  shellId: string
+  exitPromise: Promise<{ exitCode: number; truncated: boolean }>
+  dispose(): Promise<void>
 }
 
 class TerminalService {
   private shells = new Map<string, ShellHandle>()
+  private runOnceRetentionMs = DEFAULT_RUN_ONCE_RETENTION_MS
 
   async create(opts: {
     cols?: number
@@ -114,6 +139,7 @@ class TerminalService {
     const handle: ShellHandle = {
       id,
       pty,
+      child: null,
       term,
       serialize,
       cols,
@@ -121,11 +147,13 @@ class TerminalService {
       cwd,
       ownerKind,
       ownerSessionId,
+      isRunOnce: false,
       exitCode: null,
       createdAt: now,
       lastActivityAt: now,
       subscribers: new Set(),
       disposed: false,
+      retentionTimer: null,
     }
 
     pty.onData((data) => {
@@ -142,8 +170,7 @@ class TerminalService {
 
     pty.onExit(({ exitCode }) => {
       handle.exitCode = exitCode
-      // Leave the handle around so late attaches can read final scrollback;
-      // the UI is expected to dispose.
+      // Leave around so late attaches can read final scrollback.
     })
 
     this.shells.set(id, handle)
@@ -163,19 +190,30 @@ class TerminalService {
     return toInfo(handle)
   }
 
-  get(id: string): ShellInfo {
+  get(id: string): ShellInfo | null {
     const h = this.shells.get(id)
-    if (!h) throw new ShellError('not_found', `shell ${id} not found`)
-    return toInfo(h)
+    return h ? toInfo(h) : null
   }
 
   list(): ShellInfo[] {
-    return [...this.shells.values()].filter((h) => h.ownerKind === 'human').map(toInfo)
+    return [...this.shells.values()]
+      .filter((h) => h.ownerKind === 'human' && !h.isRunOnce)
+      .map(toInfo)
   }
 
   write(id: string, data: string): void {
     const h = this.shells.get(id)
     if (!h) throw new ShellError('not_found', `shell ${id} not found`)
+    if (h.pty) {
+      h.pty.write(data)
+    }
+    h.lastActivityAt = new Date()
+  }
+
+  /** Send raw bytes to a persistent agent shell. */
+  sendKeys(id: string, data: string): void {
+    const h = this.shells.get(id)
+    if (!h || h.disposed || !h.pty) return
     h.pty.write(data)
     h.lastActivityAt = new Date()
   }
@@ -183,7 +221,7 @@ class TerminalService {
   resize(id: string, cols: number, rows: number): ShellInfo {
     const h = this.shells.get(id)
     if (!h) throw new ShellError('not_found', `shell ${id} not found`)
-    h.pty.resize(cols, rows)
+    if (h.pty) h.pty.resize(cols, rows)
     h.cols = cols
     h.rows = rows
     h.term.resize(cols, rows)
@@ -194,7 +232,10 @@ class TerminalService {
     return toInfo(h)
   }
 
-  attach(id: string, onChunk: Subscriber): { snapshot: string; detach: () => void } {
+  attach(
+    id: string,
+    onChunk: Subscriber,
+  ): { snapshot: string; detach: () => void } {
     const h = this.shells.get(id)
     if (!h) throw new ShellError('not_found', `shell ${id} not found`)
     const snapshot = h.serialize.serialize()
@@ -207,28 +248,205 @@ class TerminalService {
     }
   }
 
+  /** Current xterm scrollback, or null if disposed/unknown. */
+  snapshot(id: string): string | null {
+    const h = this.shells.get(id)
+    if (!h || h.disposed) return null
+    return h.serialize.serialize({ scrollback: SCROLLBACK_LINES })
+  }
+
   dispose(id: string): void {
     const h = this.shells.get(id)
     if (!h) return
-    try {
-      h.pty.kill()
-    } catch {
-      // already gone
-    }
     h.disposed = true
     this.shells.delete(id)
-    db.delete(shellSessions).where(eq(shellSessions.id, id)).run()
-  }
-
-  shutdownAll(): void {
-    for (const h of this.shells.values()) {
+    if (h.retentionTimer) {
+      clearTimeout(h.retentionTimer)
+      h.retentionTimer = null
+    }
+    for (const sub of h.subscribers) {
+      try {
+        sub('\r\n\x1b[2m[session closed]\x1b[0m\r\n')
+      } catch {
+        // ignore
+      }
+    }
+    h.subscribers.clear()
+    if (h.pty) {
       try {
         h.pty.kill()
       } catch {
         // ignore
       }
     }
-    this.shells.clear()
+    if (h.child) {
+      try {
+        h.child.kill('SIGKILL')
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      h.term.dispose()
+    } catch {
+      // ignore
+    }
+    db.delete(shellSessions).where(eq(shellSessions.id, id)).run()
+  }
+
+  shutdownAll(): void {
+    for (const id of [...this.shells.keys()]) this.dispose(id)
+  }
+
+  /**
+   * Streaming command exec: forks a bash subshell, pipes its stdout/stderr
+   * through a headless xterm so the existing `/ws/shell/:id` path can
+   * attach and replay scrollback, and resolves `exitPromise` when the
+   * command completes. Retained for a few minutes post-exit so a late
+   * attach still sees the scrollback.
+   */
+  runOnceStream(opts: RunOnceStreamOpts): RunOnceStreamHandle {
+    const id = ulid().toLowerCase()
+    const cols = opts.cols ?? DEFAULT_COLS
+    const rows = opts.rows ?? DEFAULT_ROWS
+    const cwd = opts.cwd && opts.cwd.trim() !== '' ? opts.cwd : config.CC_WORKING_DIR
+    const ownerSessionId = opts.ownerSessionId ?? null
+
+    const term = new HeadlessTerminal({
+      cols,
+      rows,
+      scrollback: SCROLLBACK_LINES,
+      allowProposedApi: true,
+    })
+    const serialize = new SerializeAddon()
+    term.loadAddon(serialize as unknown as ITerminalAddon)
+
+    const now = new Date()
+    const handle: ShellHandle = {
+      id,
+      pty: null,
+      child: null,
+      term,
+      serialize,
+      cols,
+      rows,
+      cwd,
+      ownerKind: 'agent',
+      ownerSessionId,
+      isRunOnce: true,
+      exitCode: null,
+      createdAt: now,
+      lastActivityAt: now,
+      subscribers: new Set(),
+      disposed: false,
+      retentionTimer: null,
+    }
+    this.shells.set(id, handle)
+
+    let ringBytes = 0
+    let truncated = false
+    const writeChunk = (chunk: Buffer) => {
+      if (handle.disposed) return
+      handle.lastActivityAt = new Date()
+      if (ringBytes + chunk.length > RUN_ONCE_STREAM_BUFFER_BYTES) {
+        truncated = true
+      }
+      ringBytes += chunk.length
+      const str = chunk.toString('utf8')
+      term.write(str)
+      for (const sub of handle.subscribers) {
+        try {
+          sub(str)
+        } catch (err) {
+          logger.warn({ err, id }, 'run-once subscriber threw')
+        }
+      }
+    }
+
+    const exitPromise = (async (): Promise<{ exitCode: number; truncated: boolean }> => {
+      db.insert(shellSessions)
+        .values({
+          id,
+          cwd,
+          cols,
+          rows,
+          ownerKind: 'agent',
+          ownerSessionId,
+          createdAt: now.toISOString(),
+          lastActivityAt: now.toISOString(),
+        })
+        .run()
+
+      return await new Promise<{ exitCode: number; truncated: boolean }>((resolve, reject) => {
+        if (handle.disposed) {
+          resolve({ exitCode: 130, truncated: false })
+          return
+        }
+        const child = procSpawn('bash', ['-lc', opts.cmd], {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env },
+        })
+        handle.child = child
+
+        const onAbort = () => {
+          try {
+            child.kill('SIGKILL')
+          } catch {
+            // ignore
+          }
+        }
+        if (opts.signal) {
+          if (opts.signal.aborted) onAbort()
+          else opts.signal.addEventListener('abort', onAbort, { once: true })
+        }
+
+        child.stdout.on('data', (c: Buffer) => {
+          writeChunk(c)
+          opts.onStdout?.(c)
+        })
+        child.stderr.on('data', (c: Buffer) => {
+          writeChunk(c)
+          opts.onStderr?.(c)
+        })
+
+        child.on('error', (err) => {
+          opts.signal?.removeEventListener('abort', onAbort)
+          reject(new ShellError('not_found', `bash spawn failed: ${err.message}`))
+        })
+        child.on('exit', (code, signal) => {
+          opts.signal?.removeEventListener('abort', onAbort)
+          const exitCode = code ?? (signal ? 128 : 0)
+          handle.exitCode = exitCode
+          handle.child = null
+          term.write('', () => {
+            if (!handle.disposed && this.runOnceRetentionMs > 0) {
+              handle.retentionTimer = setTimeout(
+                () => this.dispose(id),
+                this.runOnceRetentionMs,
+              )
+              handle.retentionTimer.unref?.()
+            } else if (!handle.disposed) {
+              this.dispose(id)
+            }
+            resolve({ exitCode, truncated })
+          })
+        })
+      })
+    })()
+    exitPromise.catch(() => undefined)
+
+    return {
+      shellId: id,
+      exitPromise,
+      dispose: async () => {
+        this.dispose(id)
+      },
+    }
+  }
+
+  __setRunOnceRetentionMs(ms: number): void {
+    this.runOnceRetentionMs = ms
   }
 }
 
@@ -240,6 +458,7 @@ function toInfo(h: ShellHandle): ShellInfo {
     cwd: h.cwd,
     ownerKind: h.ownerKind,
     ownerSessionId: h.ownerSessionId,
+    isRunOnce: h.isRunOnce,
     exitCode: h.exitCode,
     createdAt: h.createdAt,
     lastActivityAt: h.lastActivityAt,

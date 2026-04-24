@@ -3,11 +3,13 @@ import { initTRPC, TRPCError } from '@trpc/server'
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import superjson from 'superjson'
 import { getMeta, hashEnvToken, isPaired } from '../envmeta/service.js'
+import { opencodeSupervisor } from '../agent/opencode.js'
 
 export interface Context {
   req: FastifyRequest
   res: FastifyReply
   envTokenPresent: boolean
+  agentShellTokenPresent: boolean
 }
 
 export async function createContext({
@@ -25,15 +27,25 @@ export async function createContext({
       : null
 
   if (!token) {
-    return { req, res, envTokenPresent: false }
+    return { req, res, envTokenPresent: false, agentShellTokenPresent: false }
   }
+
+  // Order: check envToken (webapp) first, then agent-shell token (plugin).
+  let envTokenPresent = false
   const meta = getMeta()
-  if (!meta.envTokenHash) return { req, res, envTokenPresent: false }
-  const incoming = hashEnvToken(token)
-  const a = Buffer.from(incoming)
-  const b = Buffer.from(meta.envTokenHash)
-  const ok = a.length === b.length && crypto.timingSafeEqual(a, b)
-  return { req, res, envTokenPresent: ok }
+  if (meta.envTokenHash) {
+    const incoming = hashEnvToken(token)
+    const a = Buffer.from(incoming)
+    const b = Buffer.from(meta.envTokenHash)
+    envTokenPresent = a.length === b.length && crypto.timingSafeEqual(a, b)
+  }
+
+  let agentShellTokenPresent = false
+  if (!envTokenPresent) {
+    agentShellTokenPresent = opencodeSupervisor.verifyAgentShellToken(token)
+  }
+
+  return { req, res, envTokenPresent, agentShellTokenPresent }
 }
 
 const t = initTRPC.context<Context>().create({
@@ -81,4 +93,23 @@ export const pairProcedure = t.procedure.use(({ next }) => {
     throw new TRPCError({ code: 'CONFLICT', message: 'env already paired' })
   }
   return next()
+})
+
+/**
+ * Plugin-only calls: requires the agent-shell bearer token minted by the
+ * opencode supervisor. The plugin running inside opencode presents this on
+ * every tRPC call. Webapp-issued envTokens are also accepted so a developer
+ * running curl from a browser session can poke agentShell if they want.
+ */
+export const agentShellProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!isPaired()) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'env is not paired',
+    })
+  }
+  if (!ctx.envTokenPresent && !ctx.agentShellTokenPresent) {
+    throw new TRPCError({ code: 'UNAUTHORIZED' })
+  }
+  return next({ ctx })
 })

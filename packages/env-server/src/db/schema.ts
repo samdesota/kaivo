@@ -44,6 +44,28 @@ export const repos = sqliteTable('repos', {
   createdAt: text('created_at').notNull(),
 })
 
+export type AgentSessionStatus = 'active' | 'archived'
+
+export const agentSessions = sqliteTable('agent_sessions', {
+  id: text('id').primaryKey(),
+  opencodeSessionId: text('opencode_session_id').notNull().unique(),
+  title: text('title'),
+  status: text('status').$type<AgentSessionStatus>().notNull(),
+  selectedProviderId: text('selected_provider_id'),
+  selectedModelId: text('selected_model_id'),
+  createdAt: text('created_at').notNull(),
+  lastActivityAt: text('last_activity_at').notNull(),
+})
+
+export const agentTranscripts = sqliteTable('agent_transcripts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: text('session_id').notNull(),
+  seq: integer('seq').notNull(),
+  role: text('role').notNull(),
+  contentJson: text('content_json').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
 export type JobState =
   | 'pending'
   | 'running'

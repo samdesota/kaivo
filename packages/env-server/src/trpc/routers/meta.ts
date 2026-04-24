@@ -1,6 +1,8 @@
 import { authedProcedure, publicProcedure, router } from '../trpc.js'
 import { config } from '../../config.js'
 import { getMeta, isPaired } from '../../envmeta/service.js'
+import { opencodeSupervisor } from '../../agent/opencode.js'
+import { getIdentityToken } from '../../identity/client.js'
 
 export const metaRouter = router({
   info: authedProcedure.query(() => {
@@ -11,8 +13,8 @@ export const metaRouter = router({
       workingDir: config.CC_WORKING_DIR,
       paired: m.envTokenHash !== null,
       pairedAt: m.pairedAt,
-      opencodeReady: false, // Phase 4 fills this in
-      identityReady: false, // Phase 4 fills this in
+      opencodeReady: opencodeSupervisor.isReady(),
+      identityReady: getIdentityToken() !== null,
       version: '0.0.1',
     }
   }),

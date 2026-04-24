@@ -29,6 +29,14 @@ const schema = z.object({
   // server. "*" is NOT allowed; we always need bearer auth from a
   // specific origin so tokens aren't leaked cross-site.
   CC_ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+
+  // Opencode binary; must be in PATH or an absolute path.
+  CC_OPENCODE_BIN: z.string().default('opencode'),
+
+  // `file://` URI or absolute path to the cloud-code opencode plugin. In
+  // container mode the Dockerfile bakes it to /opt; in local mode
+  // install.sh writes it under the state dir.
+  CC_OPENCODE_PLUGIN_PATH: z.string().default('file:///opt/cloud-code-plugin/index.js'),
 })
 
 const parsed = schema.safeParse(process.env)

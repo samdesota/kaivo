@@ -5,6 +5,9 @@ import { shellRouter } from './routers/shell.js'
 import { fsRouter } from './routers/fs.js'
 import { repoRouter } from './routers/repo.js'
 import { jobRouter } from './routers/job.js'
+import { agentRouter } from './routers/agent.js'
+import { agentShellRouter } from './routers/agent-shell.js'
+import { previewRouter } from './routers/preview.js'
 
 export const appRouter = router({
   meta: metaRouter,
@@ -13,6 +16,9 @@ export const appRouter = router({
   fs: fsRouter,
   repo: repoRouter,
   job: jobRouter,
+  agent: agentRouter,
+  agentShell: agentShellRouter,
+  preview: previewRouter,
 })
 
 export type AppRouter = typeof appRouter

@@ -165,6 +165,30 @@ export async function buildProviderEnv(): Promise<Record<string, string>> {
   return out
 }
 
+/**
+ * Identity-surface version: returns raw base URLs without loopback rewrite.
+ * Env servers apply their own rewrite based on their `CC_KIND` (container
+ * vs local), since "is localhost reachable" depends on where opencode
+ * actually runs.
+ */
+export async function buildProviderEnvRaw(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  for (const provider of SUPPORTED_PROVIDERS) {
+    const cfg = await getProviderConfig(provider)
+    if (!cfg.hasApiKey) continue
+    const apiKey = await getSecret(apiKeySecretName(provider))
+    if (!apiKey) continue
+    if (provider === 'anthropic') {
+      out.ANTHROPIC_API_KEY = apiKey
+      if (cfg.baseUrl) out.ANTHROPIC_BASE_URL = cfg.baseUrl
+    } else if (provider === 'openai') {
+      out.OPENAI_API_KEY = apiKey
+      if (cfg.baseUrl) out.OPENAI_BASE_URL = cfg.baseUrl
+    }
+  }
+  return out
+}
+
 export async function anyProviderConfigured(): Promise<boolean> {
   for (const p of SUPPORTED_PROVIDERS) {
     const cfg = await getProviderConfig(p)

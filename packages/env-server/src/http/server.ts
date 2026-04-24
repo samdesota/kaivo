@@ -8,6 +8,9 @@ import { appRouter } from '../trpc/router.js'
 import { createContext } from '../trpc/trpc.js'
 import { getMeta, hashEnvToken, isPaired } from '../envmeta/service.js'
 import { terminalService } from '../terminal/service.js'
+import { opencodeSupervisor } from '../agent/opencode.js'
+import { registerAgentProxy } from '../agent/proxy.js'
+import { getIdentityToken } from '../identity/client.js'
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -42,12 +45,17 @@ export async function buildServer(): Promise<FastifyInstance> {
     return {
       ok: true,
       paired: isPaired(),
-      identityReady: false, // Phase 4 wires this
-      opencodeReady: false, // Phase 4 wires this
+      identityReady: getIdentityToken() !== null,
+      opencodeReady: opencodeSupervisor.isReady(),
     }
   })
 
   await app.register(fastifyWebsocket)
+
+  // `/agent/*` reverse proxy to local opencode server. Registered BEFORE
+  // the PTY WS route so `/agent/*` upgrade requests match the proxy's
+  // WS handler.
+  registerAgentProxy(app)
 
   // PTY WebSocket. Auth: envToken in `?token=` query or first
   // text frame of the form `AUTH <token>`. The query flavor is more
