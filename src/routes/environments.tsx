@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from '@tanstack/react-router'
 import { trpc } from '../trpc'
 import { Button, Card, FormError, Input } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
@@ -115,9 +116,13 @@ export function EnvironmentsSection() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-lg font-medium text-brand-500">
+                      <Link
+                        to="/env/$id"
+                        params={{ id: env.id }}
+                        className="text-lg font-medium text-brand-500 hover:underline"
+                      >
                         {env.label}
-                      </span>
+                      </Link>
                       <KindBadge kind={env.kind} />
                       <StatusBadge status={env.status} />
                       <TokenBadge envId={env.id} />

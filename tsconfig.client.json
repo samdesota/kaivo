@@ -17,6 +17,9 @@
     "server/trpc/routers/**/*.ts",
     "server/trpc/trpc.ts",
     "server/trpc/context.ts",
+    "packages/env-server/src/trpc/router.ts",
+    "packages/env-server/src/trpc/routers/**/*.ts",
+    "packages/env-server/src/trpc/trpc.ts",
     "tests/e2e/**/*.ts"
   ],
   "exclude": ["node_modules", "dist"]
