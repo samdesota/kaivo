@@ -110,11 +110,14 @@ async function buildServer() {
     // and will have already responded by the time not-found runs — but we
     // still return 404 on the off-chance, since the SPA doesn't own them.
     server.setNotFoundHandler((req, reply) => {
+      // /env/<id> is a SPA route too — the orchestrator's reverse proxy
+      // only intercepts /env/<id>/<rest> for container envs (and short-
+      // circuits earlier), so anything reaching not-found is browser
+      // navigation that should land on index.html.
       if (
         req.url.startsWith('/trpc') ||
         req.url.startsWith('/api') ||
         req.url.startsWith('/agent') ||
-        req.url.startsWith('/env/') ||
         req.url.startsWith('/preview/') ||
         /^\/sandbox\/[^/]+\/agent(\/|$)/.test(req.url)
       ) {
