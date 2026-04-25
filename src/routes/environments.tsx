@@ -4,10 +4,17 @@ import { trpc } from '../trpc'
 import { Button, Card, FormError, Input } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
 import { setEnvToken, clearEnvToken, getEnvToken } from '../lib/env-tokens'
-import { confirmPairing, resolveEnvUrl, startPairing } from '../lib/env-client'
+import { confirmPairing, getLocalEnvStatus, resolveEnvUrl, startPairing } from '../lib/env-client'
+import { DEFAULT_LOCAL_ENV_URL, useLocalEnvIdentity } from '../lib/local-env-discovery'
+
+type EnvListItem = {
+  id: string
+  envToken: string | null
+}
 
 export function EnvironmentsSection() {
-  const list = trpc.env.list.useQuery(undefined, {
+  const localIdentity = useLocalEnvIdentity()
+  const list = trpc.env.list.useQuery(localIdentity.label ? { localIdentityLabel: localIdentity.label } : {}, {
     refetchInterval: 5_000,
     refetchOnWindowFocus: true,
   })
@@ -125,7 +132,7 @@ export function EnvironmentsSection() {
                       </Link>
                       <KindBadge kind={env.kind} />
                       <StatusBadge status={env.status} />
-                      <TokenBadge envId={env.id} />
+                      <TokenBadge env={env} />
                     </div>
                     <p className="mt-1 text-xs text-neutral-500">
                       {env.id} · {env.url}
@@ -177,7 +184,7 @@ export function EnvironmentsSection() {
 }
 
 function AddLocalEnvForm({ onDone }: { onDone: () => Promise<void> }) {
-  const [url, setUrl] = useState('http://127.0.0.1:47821')
+  const [url, setUrl] = useState(DEFAULT_LOCAL_ENV_URL)
   const [label, setLabel] = useState('local')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [code, setCode] = useState('')
@@ -191,6 +198,8 @@ function AddLocalEnvForm({ onDone }: { onDone: () => Promise<void> }) {
     try {
       const res = await startPairing(url)
       setSessionId(res.sessionId)
+      const status = await getLocalEnvStatus(url)
+      if (status?.label && label === 'local') setLabel(status.label)
     } catch (e) {
       setErr(extractTrpcMessage(e))
     } finally {
@@ -203,10 +212,16 @@ function AddLocalEnvForm({ onDone }: { onDone: () => Promise<void> }) {
     setErr(null)
     setBusy(true)
     try {
+      const status = await getLocalEnvStatus(url)
+      if (!status?.label) throw new Error('could not read local env identity label')
       const { envToken } = await confirmPairing(url, sessionId, code.trim())
       // Register the env with the orchestrator.
-      const env = await register.mutateAsync({ url, envToken, label: label.trim() })
-      setEnvToken(env.id, envToken)
+      await register.mutateAsync({
+        url,
+        envToken,
+        label: label.trim(),
+        localIdentityLabel: status.label,
+      })
       setSessionId(null)
       setCode('')
       await onDone()
@@ -302,8 +317,8 @@ function StatusBadge({
   )
 }
 
-function TokenBadge({ envId }: { envId: string }) {
-  const has = getEnvToken(envId) !== null
+function TokenBadge({ env }: { env: EnvListItem }) {
+  const has = env.envToken !== null || getEnvToken(env.id) !== null
   if (has) return null
   return (
     <span className="rounded-full bg-amber-900/60 px-2 py-0.5 text-xs font-medium text-amber-300">

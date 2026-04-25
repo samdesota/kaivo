@@ -6,20 +6,27 @@ import { extractTrpcMessage } from '../lib/utils'
 import { getEnvToken } from '../lib/env-tokens'
 import { envTrpc, makeEnvReactClient } from '../env-trpc'
 import { EnvTabShell, EnvContextProvider } from './env/tab-shell'
+import { useLocalEnvIdentity } from '../lib/local-env-discovery'
 
 type EnvRow = {
   id: string
   kind: 'container' | 'local'
   label: string
   url: string
+  envToken: string | null
+  localIdentityLabel: string | null
   status: 'running' | 'archived' | 'crashed' | 'unreachable'
 }
 
 export function EnvDetailPage() {
   const { id } = useParams({ from: '/env/$id' })
-  const list = trpc.env.list.useQuery(undefined, { refetchInterval: 10_000 })
+  const localIdentity = useLocalEnvIdentity()
+  const list = trpc.env.list.useQuery(
+    localIdentity.label ? { localIdentityLabel: localIdentity.label } : {},
+    { refetchInterval: 10_000 },
+  )
 
-  if (list.isLoading) {
+  if (list.isLoading || localIdentity.loading) {
     return <div className="p-8 text-neutral-500">Loading env…</div>
   }
   if (list.error) {
@@ -31,7 +38,7 @@ export function EnvDetailPage() {
       <ErrorShell message={`No env with id ${id}. It may have been deleted.`} />
     )
   }
-  const token = getEnvToken(id)
+  const token = env.envToken ?? getEnvToken(id)
   if (!token) {
     return <NoTokenShell label={env.label} />
   }
@@ -104,8 +111,8 @@ function NoTokenShell({ label }: { label: string }) {
       <h1 className="text-lg font-semibold">{label}</h1>
       <p className="mt-4 max-w-xl text-neutral-300">
         This browser doesn't have a token for this env. Tokens live in{' '}
-        <code>localStorage</code> and are issued once at pairing time — a
-        different browser or a cleared storage would need to re-pair.
+        <code>localStorage</code> for container envs. Local env tokens are
+        server-backed and require a matching local cc-env install label.
       </p>
       <p className="mt-2 text-sm text-neutral-500">
         Container envs: delete and recreate the env. Local envs: unregister

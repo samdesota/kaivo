@@ -49,6 +49,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     return {
       ok: true,
       paired: isPaired(),
+      kind: config.CC_KIND,
+      label: config.CC_LABEL,
       identityReady: getIdentityToken() !== null,
       opencodeReady: opencodeSupervisor.isReady(),
     }

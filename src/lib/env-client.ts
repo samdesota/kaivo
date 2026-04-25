@@ -105,6 +105,28 @@ export async function startPairing(
   return data
 }
 
+export async function getLocalEnvStatus(
+  envUrl: string,
+): Promise<{ kind: 'container' | 'local'; label: string; paired: boolean } | null> {
+  const base = envUrl.replace(/\/+$/, '')
+  try {
+    const res = await fetch(`${base}/healthz`, {
+      method: 'GET',
+      credentials: 'omit',
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as {
+      kind?: unknown
+      label?: unknown
+      paired?: unknown
+    }
+    if (data.kind !== 'local' || typeof data.label !== 'string') return null
+    return { kind: data.kind, label: data.label, paired: data.paired === true }
+  } catch {
+    return null
+  }
+}
+
 export async function confirmPairing(
   envUrl: string,
   sessionId: string,

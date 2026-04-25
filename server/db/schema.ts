@@ -215,6 +215,12 @@ export const envs = pgTable('envs', {
   // reverse proxy will route to the container. For local envs: absolute
   // `http://localhost:47821`.
   url: text('url').notNull(),
+  // Local env browser bearer token, stored server-side so any browser on the
+  // same computer can connect without re-pairing. Null for container envs.
+  envToken: text('env_token'),
+  // Install-time local computer label (CC_LABEL). Used to avoid showing a
+  // local env when the same user opens the app from another computer.
+  localIdentityLabel: text('local_identity_label'),
   status: text('status').$type<EnvStatus>().notNull().default('running'),
   containerId: text('container_id'),
   // Reference into env_auth_tokens for revocation on delete.

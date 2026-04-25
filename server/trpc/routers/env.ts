@@ -24,12 +24,14 @@ function toTrpcError(err: unknown): TRPCError {
 }
 
 export const envRouter = router({
-  list: protectedProcedure.query(async () => envManager.list()),
+  list: protectedProcedure
+    .input(z.object({ localIdentityLabel: z.string().min(1).max(200).optional() }).optional())
+    .query(async ({ input }) => envManager.list(input ?? {})),
 
   get: protectedProcedure
-    .input(z.object({ id: z.string().min(1) }))
+    .input(z.object({ id: z.string().min(1), localIdentityLabel: z.string().min(1).max(200).optional() }))
     .query(async ({ input }) => {
-      const row = await envManager.get(input.id)
+      const row = await envManager.get(input.id, input)
       if (!row) throw new TRPCError({ code: 'NOT_FOUND' })
       return row
     }),
@@ -54,6 +56,7 @@ export const envRouter = router({
           .refine((u) => /^https?:\/\//i.test(u), 'url must be absolute'),
         envToken: z.string().min(16).max(512),
         label: z.string().min(1).max(80),
+        localIdentityLabel: z.string().min(1).max(200),
       }),
     )
     .mutation(async ({ input }) => {

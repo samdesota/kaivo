@@ -40,6 +40,8 @@ export interface EnvSummary {
   kind: EnvKind
   label: string
   url: string
+  envToken: string | null
+  localIdentityLabel: string | null
   status: EnvStatus
   containerId: string | null
   createdAt: Date
@@ -64,6 +66,8 @@ function summarize(row: typeof envs.$inferSelect): EnvSummary {
     kind: row.kind,
     label: row.label,
     url: row.url,
+    envToken: row.envToken,
+    localIdentityLabel: row.localIdentityLabel,
     status: row.status,
     containerId: row.containerId,
     createdAt: row.createdAt,
@@ -73,14 +77,26 @@ function summarize(row: typeof envs.$inferSelect): EnvSummary {
 }
 
 class EnvManager {
-  async list(): Promise<EnvSummary[]> {
+  async list(opts: { localIdentityLabel?: string | null } = {}): Promise<EnvSummary[]> {
     const rows = await db.select().from(envs)
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    return rows.map(summarize)
+    return rows
+      .filter((row) => {
+        if (row.kind !== 'local') return true
+        if (!opts.localIdentityLabel) return false
+        return row.localIdentityLabel === opts.localIdentityLabel
+      })
+      .map(summarize)
   }
 
-  async get(id: string): Promise<EnvSummary | null> {
+  async get(
+    id: string,
+    opts: { localIdentityLabel?: string | null } = {},
+  ): Promise<EnvSummary | null> {
     const row = await this.getRow(id)
+    if (row?.kind === 'local' && row.localIdentityLabel !== opts.localIdentityLabel) {
+      return null
+    }
     return row ? summarize(row) : null
   }
 
@@ -188,29 +204,30 @@ class EnvManager {
 
   /**
    * Register an already-running local env (user ran install.sh + paired).
-   * Orchestrator keeps URL + label only; the pairing token stays in the
-   * webapp's localStorage.
+   * Orchestrator stores the local browser token, scoped by the install label,
+   * so all browsers on the same computer can use the env without re-pairing.
    */
   async registerLocal({
     url,
     envToken,
     label,
+    localIdentityLabel,
   }: {
     url: string
     envToken: string
     label: string
+    localIdentityLabel: string
   }): Promise<EnvSummary> {
     const trimmed = label.trim()
+    const trimmedIdentityLabel = localIdentityLabel.trim()
     if (!trimmed) throw new EnvError('label_required', 'label is required')
+    if (!trimmedIdentityLabel) throw new EnvError('label_required', 'local identity label is required')
     if (!url) throw new EnvError('url_required', 'url is required')
 
     // No reachability probe: a local env URL like http://127.0.0.1:47821
-    // is only reachable from the user's machine, which is the browser —
-    // not us, the orchestrator. The browser already verified the env +
-    // token by completing pair.start / pair.confirm before calling here,
-    // so for local envs we just record the metadata and let the browser
-    // talk to the env directly using its envToken.
-    void envToken
+    // is only reachable from the user's machine, which is the browser.
+    // The browser already verified the env + token by completing
+    // pair.start / pair.confirm before calling here.
 
     const id = ulid().toLowerCase()
     await db.insert(envs).values({
@@ -218,6 +235,8 @@ class EnvManager {
       kind: 'local',
       label: trimmed,
       url,
+      envToken,
+      localIdentityLabel: trimmedIdentityLabel,
       status: 'running',
       lastSeenAt: new Date(),
     })
