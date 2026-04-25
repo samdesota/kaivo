@@ -18,6 +18,15 @@ code.438d.xyz {
     reverse_proxy 127.0.0.1:3000
 }
 
+# cli-proxy-api: routes Anthropic / Gemini / etc. requests to upstream LLMs.
+# Container's own API-key auth (api-keys in config.yaml) gates access; the
+# /v0/management surface is bound to localhost inside the container so only
+# /v1/* and similar inference paths are reachable here.
+llm.438d.xyz {
+    encode gzip
+    reverse_proxy 127.0.0.1:8317
+}
+
 *.preview.438d.xyz {
     encode gzip
     tls {
