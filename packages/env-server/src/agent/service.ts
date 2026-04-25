@@ -618,35 +618,35 @@ class AgentService {
         ...dirOpts,
         throwOnError: true,
       })
+      type TokenInfo = { input?: number; total?: number; cache?: { read?: number } }
       const msgs = (msgRes.data ?? []) as Array<{
         info?: {
           role?: string
-          tokens?: { input: number }
+          tokens?: TokenInfo
           providerID?: string
           modelID?: string
         }
         parts?: Array<{
           type?: string
-          tokens?: { input: number }
+          tokens?: TokenInfo
         }>
       }>
       for (let i = msgs.length - 1; i >= 0; i--) {
         const msg = msgs[i]
         const info = msg?.info
         if (info?.role !== 'assistant') continue
-        let inputTokens = 0
+        let tokens: TokenInfo | undefined
         const steps = (msg?.parts ?? []).filter((p) => p.type === 'step-finish')
-        if (steps.length > 0) {
-          inputTokens = steps[steps.length - 1]!.tokens?.input ?? 0
-        }
-        if (!inputTokens) inputTokens = info.tokens?.input ?? 0
-        if (!inputTokens) continue
+        if (steps.length > 0) tokens = steps[steps.length - 1]!.tokens
+        if (!tokens) tokens = info.tokens
+        const contextTokens = tokens?.total ?? ((tokens?.input ?? 0) + (tokens?.cache?.read ?? 0))
+        if (!contextTokens) continue
         const provID = info.providerID
         const modID = info.modelID
         if (provID && modID) {
           const limit = await this.getModelContextLimit(client, provID, modID)
           if (limit) {
-            contextUsage = { used: inputTokens, limit }
+            contextUsage = { used: contextTokens, limit }
           }
         }
         break
