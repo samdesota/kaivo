@@ -97,16 +97,22 @@ async function resolveContainerIp(containerId: string): Promise<string | null> {
   }
 }
 
+/**
+ * Tri-state: 'skip' = not our concern (let the SPA / next handler take it),
+ * 'unavailable' = container env we know about but can't currently reach,
+ * { ip } = ready to proxy.
+ */
 async function resolveEnvUpstream(
   envId: string,
-): Promise<{ ip: string } | null> {
+): Promise<'skip' | 'unavailable' | { ip: string }> {
   const rows = await db.select().from(envs).where(eq(envs.id, envId)).limit(1)
   const row = rows[0]
-  if (!row) return null
-  if (row.kind !== 'container') return null
-  if (!row.containerId) return null
+  // Unknown envs / local envs: bow out so the SPA can serve `/env/:id` and
+  // the browser talks to the local env directly via its own loopback URL.
+  if (!row || row.kind !== 'container') return 'skip'
+  if (!row.containerId) return 'unavailable'
   const ip = await resolveContainerIp(row.containerId)
-  if (!ip) return null
+  if (!ip) return 'unavailable'
   return { ip }
 }
 
@@ -143,7 +149,8 @@ async function handleHttp(
   parsed: ParsedEnvUrl,
 ): Promise<void> {
   const upstream = await resolveEnvUpstream(parsed.envId)
-  if (!upstream) {
+  if (upstream === 'skip') return
+  if (upstream === 'unavailable') {
     reply.code(502).send({ error: 'env upstream unavailable' })
     return
   }
@@ -216,7 +223,7 @@ async function handleHttp(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleWs(clientSocket: any, req: any, parsed: ParsedEnvUrl): Promise<void> {
   const upstream = await resolveEnvUpstream(parsed.envId)
-  if (!upstream) {
+  if (upstream === 'skip' || upstream === 'unavailable') {
     safeClose(clientSocket, 4502, 'env upstream unavailable')
     return
   }
