@@ -201,17 +201,17 @@ function ContextUsageBar({ used, limit }: { used: number; limit: number }) {
   return (
     <div
       className="flex items-center gap-1.5 mr-auto"
-      title={`${formatTokenCount(used)} / ${formatTokenCount(limit)} tokens (${pct.toFixed(0)}%)`}
+      title={`${formatTokenCount(used)} / ${formatTokenCount(limit)} tokens`}
     >
-      <span className="text-[10px] text-neutral-500">
-        {formatTokenCount(used)}/{formatTokenCount(limit)}
-      </span>
       <div className="h-1.5 w-16 rounded-full bg-neutral-800 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all ${color}`}
-          style={{ width: `${pct}%` }}
+          style={{ width: `${Math.max(pct, 1)}%` }}
         />
       </div>
+      <span className="text-[10px] text-neutral-500">
+        {pct.toFixed(0)}%
+      </span>
     </div>
   )
 }

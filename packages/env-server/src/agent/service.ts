@@ -625,20 +625,31 @@ class AgentService {
           providerID?: string
           modelID?: string
         }
+        parts?: Array<{
+          type?: string
+          tokens?: { input: number }
+        }>
       }>
       for (let i = msgs.length - 1; i >= 0; i--) {
-        const info = msgs[i]?.info
-        if (info?.role === 'assistant' && info.tokens?.input) {
-          const provID = info.providerID
-          const modID = info.modelID
-          if (provID && modID) {
-            const limit = await this.getModelContextLimit(client, provID, modID)
-            if (limit) {
-              contextUsage = { used: info.tokens.input, limit }
-            }
-          }
-          break
+        const msg = msgs[i]
+        const info = msg?.info
+        if (info?.role !== 'assistant') continue
+        let inputTokens = 0
+        const steps = (msg?.parts ?? []).filter((p) => p.type === 'step-finish')
+        if (steps.length > 0) {
+          inputTokens = steps[steps.length - 1]!.tokens?.input ?? 0
         }
+        if (!inputTokens) inputTokens = info.tokens?.input ?? 0
+        if (!inputTokens) continue
+        const provID = info.providerID
+        const modID = info.modelID
+        if (provID && modID) {
+          const limit = await this.getModelContextLimit(client, provID, modID)
+          if (limit) {
+            contextUsage = { used: inputTokens, limit }
+          }
+        }
+        break
       }
     } catch {
       // ignore
