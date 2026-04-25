@@ -158,6 +158,7 @@ class AgentService {
   private parentByChild = new Map<string, string>()
   private childrenByParent = new Map<string, string[]>()
   private sessionModels = new Map<string, { providerID: string; modelID: string }>()
+  private contextLimitCache = new Map<string, number>()
 
   async agentStatus(): Promise<{ ready: boolean; hasProvider: boolean }> {
     const ready = opencodeSupervisor.isReady()
@@ -390,6 +391,34 @@ class AgentService {
     return hydrated
   }
 
+  private async getModelContextLimit(
+    client: OpencodeClient,
+    providerID: string,
+    modelID: string,
+  ): Promise<number | null> {
+    const key = `${providerID}/${modelID}`
+    const cached = this.contextLimitCache.get(key)
+    if (cached !== undefined) return cached
+    try {
+      const res = await client.config.providers({ throwOnError: true })
+      const body = res.data as {
+        providers: Array<{
+          id: string
+          models: Record<string, { id: string; limit?: { context?: number } }>
+        }>
+      }
+      for (const p of body.providers) {
+        for (const m of Object.values(p.models ?? {})) {
+          const k = `${p.id}/${m.id}`
+          if (m.limit?.context) this.contextLimitCache.set(k, m.limit.context)
+        }
+      }
+      return this.contextLimitCache.get(key) ?? null
+    } catch {
+      return null
+    }
+  }
+
   async listCommands(): Promise<
     Array<{ name: string; description?: string; template?: string; agent?: string; model?: string }>
   > {
@@ -405,11 +434,15 @@ class AgentService {
   }
 
   async runCommand(input: { sessionId: string; command: string; arguments: string }): Promise<void> {
-    const row = await this.requireSession(input.sessionId)
-    const client = await this.getClient()
+    const { row, client, model, dirOpts } = await this.sessionContext(input.sessionId)
     await client.session.command({
       path: { id: row.opencodeSessionId },
-      body: { command: input.command, arguments: input.arguments },
+      body: {
+        command: input.command,
+        arguments: input.arguments,
+        model: `${model.providerID}/${model.modelID}`,
+      },
+      ...dirOpts,
       throwOnError: true,
     })
     db.update(agentSessions)
@@ -440,9 +473,7 @@ class AgentService {
   }
 
   async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
-    const row = await this.requireSession(input.sessionId)
-    const client = await this.getClient()
-    const model = (await this.getSessionModel(row.id)) ?? this.getDefaultModel()
+    const { row, client, model, dirOpts } = await this.sessionContext(input.sessionId)
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
       body: {
@@ -450,7 +481,7 @@ class AgentService {
         tools: CLOUD_TOOL_OVERRIDES,
         model,
       },
-      ...directoryOpts(row.workingDir),
+      ...dirOpts,
       throwOnError: true,
     })
     const nextTitle =
@@ -467,10 +498,10 @@ class AgentService {
   async sessionMessages(
     sessionId: string,
   ): Promise<Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>> {
-    const row = await this.requireSession(sessionId)
-    const client = await this.getClient()
+    const { row, client, dirOpts } = await this.sessionContext(sessionId)
     const res = await client.session.messages({
       path: { id: row.opencodeSessionId },
+      ...dirOpts,
       throwOnError: true,
     })
     return (res.data ?? []) as Array<{
@@ -488,9 +519,8 @@ class AgentService {
       messages: Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>
     }>
   > {
-    const row = await this.requireSession(sessionId)
-    const client = await this.getClient()
-    const all = await client.session.list({ throwOnError: true })
+    const { row, client, dirOpts } = await this.sessionContext(sessionId)
+    const all = await client.session.list({ ...dirOpts, throwOnError: true })
     const sessions = (all.data ?? []) as Array<{
       id: string
       parentID?: string
@@ -509,7 +539,7 @@ class AgentService {
     const out = await Promise.all(
       children.map(async (c) => {
         const res = await client.session
-          .messages({ path: { id: c.id }, throwOnError: true })
+          .messages({ path: { id: c.id }, ...dirOpts, throwOnError: true })
           .catch(() => null)
         const messages = (res?.data ?? []) as Array<{
           info: Record<string, unknown>
@@ -533,8 +563,9 @@ class AgentService {
     pendingQuestions: PendingQuestion[]
     todos: TodoItem[]
     running: boolean
+    contextUsage: { used: number; limit: number } | null
   }> {
-    const row = await this.requireSession(input.sessionId)
+    const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
     const pendingMap = this.pending.get(row.opencodeSessionId)
     const pending = pendingMap ? [...pendingMap.values()] : []
     const questionMap = this.pendingQuestions.get(row.opencodeSessionId)
@@ -557,9 +588,9 @@ class AgentService {
     }
     let todos: TodoItem[] = []
     try {
-      const client = await this.getClient()
       const res = await client.session.todo({
         path: { id: row.opencodeSessionId },
+        ...dirOpts,
         throwOnError: true,
       })
       todos = ((res.data ?? []) as TodoItem[]).map((t) => ({
@@ -573,23 +604,44 @@ class AgentService {
     }
     let running = false
     try {
-      const client = await this.getClient()
-      const res = await client.session.messages({
+      const statusRes = await client.session.status({ ...dirOpts, throwOnError: true })
+      const statuses = statusRes.data as Record<string, { type: string }>
+      const st = statuses[row.opencodeSessionId]
+      running = st?.type === 'busy'
+    } catch {
+      // opencode down
+    }
+    let contextUsage: { used: number; limit: number } | null = null
+    try {
+      const msgRes = await client.session.messages({
         path: { id: row.opencodeSessionId },
+        ...dirOpts,
         throwOnError: true,
       })
-      const msgs = (res.data ?? []) as Array<{
-        info?: { role?: string; time?: { completed?: number } }
+      const msgs = (msgRes.data ?? []) as Array<{
+        info?: {
+          role?: string
+          tokens?: { input: number }
+          providerID?: string
+          modelID?: string
+        }
       }>
       for (let i = msgs.length - 1; i >= 0; i--) {
         const info = msgs[i]?.info
-        if (info?.role === 'assistant') {
-          running = !info.time?.completed
+        if (info?.role === 'assistant' && info.tokens?.input) {
+          const provID = info.providerID
+          const modID = info.modelID
+          if (provID && modID) {
+            const limit = await this.getModelContextLimit(client, provID, modID)
+            if (limit) {
+              contextUsage = { used: info.tokens.input, limit }
+            }
+          }
           break
         }
       }
     } catch {
-      // opencode down
+      // ignore
     }
     return {
       session: {
@@ -605,6 +657,7 @@ class AgentService {
       pendingQuestions: questions,
       todos,
       running,
+      contextUsage,
     }
   }
 
@@ -613,23 +666,23 @@ class AgentService {
     requestId: string
     answers: string[][]
   }): Promise<void> {
-    const row = await this.requireSession(input.sessionId)
-    await this.opencodeFetch(`/question/${encodeURIComponent(input.requestId)}/reply`, {
+    const ctx = await this.sessionContext(input.sessionId)
+    await ctx.fetch(`/question/${encodeURIComponent(input.requestId)}/reply`, {
       method: 'POST',
       body: JSON.stringify({ answers: input.answers }),
     })
-    this.pendingQuestions.get(row.opencodeSessionId)?.delete(input.requestId)
+    this.pendingQuestions.get(ctx.row.opencodeSessionId)?.delete(input.requestId)
   }
 
   async sessionRejectQuestion(input: {
     sessionId: string
     requestId: string
   }): Promise<void> {
-    const row = await this.requireSession(input.sessionId)
-    await this.opencodeFetch(`/question/${encodeURIComponent(input.requestId)}/reject`, {
+    const ctx = await this.sessionContext(input.sessionId)
+    await ctx.fetch(`/question/${encodeURIComponent(input.requestId)}/reject`, {
       method: 'POST',
     })
-    this.pendingQuestions.get(row.opencodeSessionId)?.delete(input.requestId)
+    this.pendingQuestions.get(ctx.row.opencodeSessionId)?.delete(input.requestId)
   }
 
   private async questionList(): Promise<PendingQuestion[]> {
@@ -649,13 +702,22 @@ class AgentService {
     }))
   }
 
-  private async opencodeFetch(pth: string, init: RequestInit): Promise<Response> {
+  private async opencodeFetch(
+    pth: string,
+    init: RequestInit,
+    directory?: string | null,
+  ): Promise<Response> {
     const ep = opencodeSupervisor.currentEndpoint()
     if (!ep) throw new AgentError('unavailable', 'opencode not running')
     const headers = new Headers(init.headers)
     headers.set('Authorization', opencodeBasicAuthHeader(ep.password))
     if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-    const res = await fetch(`http://${ep.host}:${ep.port}${pth}`, { ...init, headers })
+    const url = new URL(`http://${ep.host}:${ep.port}${pth}`)
+    if (directory) {
+      url.searchParams.set('directory', directory)
+      headers.set('x-opencode-directory', directory)
+    }
+    const res = await fetch(url.toString(), { ...init, headers })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       throw new AgentError(
@@ -667,10 +729,10 @@ class AgentService {
   }
 
   async sessionAbort(input: { sessionId: string }): Promise<void> {
-    const row = await this.requireSession(input.sessionId)
-    const client = await this.getClient()
+    const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
     await client.session.abort({
       path: { id: row.opencodeSessionId },
+      ...dirOpts,
       throwOnError: true,
     })
   }
@@ -680,11 +742,11 @@ class AgentService {
     permissionId: string
     response: 'once' | 'always' | 'reject'
   }): Promise<void> {
-    const row = await this.requireSession(input.sessionId)
-    const client = await this.getClient()
+    const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
     await client.postSessionIdPermissionsPermissionId({
       path: { id: row.opencodeSessionId, permissionID: input.permissionId },
       body: { response: input.response },
+      ...dirOpts,
       throwOnError: true,
     })
     this.pending.get(row.opencodeSessionId)?.delete(input.permissionId)
@@ -1045,6 +1107,16 @@ class AgentService {
     const row = rows[0]
     if (!row) throw new AgentError('not_found', `agent session ${id} not found`)
     return row
+  }
+
+  private async sessionContext(sessionId: string) {
+    const row = await this.requireSession(sessionId)
+    const client = await this.getClient()
+    const model = (await this.getSessionModel(row.id)) ?? this.getDefaultModel()
+    const dirOpts = directoryOpts(row.workingDir)
+    const scopedFetch = (pth: string, init: RequestInit) =>
+      this.opencodeFetch(pth, init, row.workingDir)
+    return { row, client, model, dirOpts, fetch: scopedFetch }
   }
 }
 

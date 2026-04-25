@@ -84,6 +84,7 @@ interface SessionStatus {
     tool?: unknown
   }>
   todos: Array<{ id: string; content: string; status: string; priority: string }>
+  contextUsage: { used: number; limit: number } | null
 }
 
 export function AgentSessionView({
@@ -182,6 +183,34 @@ export function AgentSessionView({
         ) : (
           <EmptySessionState onCreated={(id) => setSessionId(id)} />
         )}
+      </div>
+    </div>
+  )
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
+  return String(n)
+}
+
+function ContextUsageBar({ used, limit }: { used: number; limit: number }) {
+  const pct = Math.min(100, (used / limit) * 100)
+  const color =
+    pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-brand-500'
+  return (
+    <div
+      className="flex items-center gap-1.5 mr-auto"
+      title={`${formatTokenCount(used)} / ${formatTokenCount(limit)} tokens (${pct.toFixed(0)}%)`}
+    >
+      <span className="text-[10px] text-neutral-500">
+        {formatTokenCount(used)}/{formatTokenCount(limit)}
+      </span>
+      <div className="h-1.5 w-16 rounded-full bg-neutral-800 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${color}`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
   )
@@ -463,6 +492,9 @@ function SessionPane({
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center justify-end gap-2 border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
+          {statusData?.contextUsage && (
+            <ContextUsageBar used={statusData.contextUsage.used} limit={statusData.contextUsage.limit} />
+          )}
           <RestartAgentButton />
           <ModelPicker sessionId={sessionId} />
         </div>
