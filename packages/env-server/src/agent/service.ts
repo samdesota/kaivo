@@ -220,6 +220,11 @@ class AgentService {
     const client = await this.getClient()
     const create = await client.session.create({
       body: { title: input.title },
+      // Per-session working dir. opencode interprets this as the
+      // project the session is attached to — file-tool / bash / etc.
+      // run with this as cwd. Without it sessions inherit the
+      // env-server's CC_WORKING_DIR.
+      ...(input.directory ? { query: { directory: input.directory } } : {}),
       throwOnError: true,
     })
     const ocSession = create.data
