@@ -15,16 +15,26 @@ export interface Context {
 export async function createContext({
   req,
   res,
+  info,
 }: {
   req: FastifyRequest
   res: FastifyReply
+  // tRPC's ws adapter passes `info.connectionParams` (set on the client via
+  // createWSClient({ connectionParams })). Browsers can't put headers on a
+  // WS upgrade, so this is the only way the bearer reaches us for ws ops.
+  info?: { connectionParams?: Record<string, string> | null }
 }): Promise<Context> {
   const headerVal = req.headers['authorization']
   const header = Array.isArray(headerVal) ? headerVal[0] : headerVal
-  const token =
+  const fromHeader =
     typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
       ? header.slice(7).trim()
       : null
+  const fromConnectionParams =
+    typeof info?.connectionParams?.token === 'string'
+      ? info.connectionParams.token.trim()
+      : null
+  const token = fromHeader || fromConnectionParams
 
   if (!token) {
     return { req, res, envTokenPresent: false, agentShellTokenPresent: false }
