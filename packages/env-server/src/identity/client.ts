@@ -2,6 +2,10 @@ import { request as undiciRequest } from 'undici'
 import { config } from '../config.js'
 import { logger } from '../logger.js'
 import { readSecrets } from '../envmeta/service.js'
+import {
+  getIdentityToken as getStoredToken,
+  setIdentityToken as setStoredToken,
+} from './token.js'
 
 /**
  * Minimal tRPC-over-HTTP client for the identity service's `envApi.*`
@@ -57,29 +61,23 @@ function sjDecode(payload: unknown): unknown {
 }
 
 /**
- * Live identity token. Read once from secrets.json at boot; kept in memory
- * so service calls don't pay a file read per request. `setToken` lets
- * future pairing flows rotate without a restart.
+ * Live identity token storage lives in `./token` so the remote-log
+ * transport can read it without importing this module (avoiding a cycle
+ * through the logger). Re-export the read/write API here for callers that
+ * already import the identity client.
  */
-let identityToken: string | null = null
-
 export async function initIdentityToken(): Promise<void> {
   const secrets = await readSecrets()
   if (secrets.identityToken) {
-    identityToken = secrets.identityToken
+    setStoredToken(secrets.identityToken)
     logger.info('identity token loaded from secrets.json')
   } else {
     logger.warn('no identityToken in secrets.json; identity calls will fail')
   }
 }
 
-export function setIdentityToken(tok: string | null): void {
-  identityToken = tok
-}
-
-export function getIdentityToken(): string | null {
-  return identityToken
-}
+export const setIdentityToken = setStoredToken
+export const getIdentityToken = getStoredToken
 
 function url(procedure: string): string {
   const base = config.CC_IDENTITY_URL.replace(/\/+$/, '')
@@ -87,7 +85,7 @@ function url(procedure: string): string {
 }
 
 function headers(): Record<string, string> {
-  const tok = identityToken
+  const tok = getStoredToken()
   if (!tok) throw new IdentityAuthError('identity token not configured')
   return {
     authorization: `Bearer ${tok}`,
