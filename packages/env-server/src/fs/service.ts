@@ -242,7 +242,9 @@ export interface BrowseResult {
   path: string
   /** Absolute path of the user's home — useful as a "go home" anchor. */
   home: string
-  /** Absolute path of the parent of `path`, or null if `path === home`. */
+  /** Absolute path of CC_WORKING_DIR — useful as a "go default" anchor. */
+  defaultPath: string
+  /** Absolute path of the parent of `path`, or null if no parent within scope. */
   parent: string | null
   /** Subdirectories of `path`, sorted: visible first, then hidden, name asc. */
   dirs: BrowseEntry[]
@@ -250,16 +252,16 @@ export interface BrowseResult {
 
 /**
  * Folder picker source. Lists subdirectories of the requested path,
- * scoped under the user's home directory. We don't expose files because
- * the picker is for choosing a working dir, and we don't expose anything
- * outside `$HOME` to keep this from doubling as a generic FS browser.
+ * scoped to the user-trusted area = $HOME ∪ CC_WORKING_DIR. We don't
+ * expose files because the picker is for choosing a working dir.
  *
- * `absPath` may be omitted (defaults to home) or absolute. Symlinks are
- * resolved before the home-containment check.
+ * `absPath` may be omitted (defaults to CC_WORKING_DIR) or absolute.
+ * Symlinks are resolved before the containment check.
  */
 export async function browseHome(absPath?: string): Promise<BrowseResult> {
   const home = path.resolve(os.homedir())
-  const requested = absPath ? path.resolve(absPath) : home
+  const defaultPath = path.resolve(config.CC_WORKING_DIR)
+  const requested = absPath ? path.resolve(absPath) : defaultPath
   let real: string
   try {
     real = await fs.realpath(requested)
@@ -269,8 +271,20 @@ export async function browseHome(absPath?: string): Promise<BrowseResult> {
     }
     throw err
   }
-  if (real !== home && !real.startsWith(home + path.sep)) {
-    throw new FsError('path_traversal', 'path is outside $HOME')
+  // Resolve the working-dir anchor too — it might itself be a symlink.
+  let realDefault = defaultPath
+  try {
+    realDefault = await fs.realpath(defaultPath)
+  } catch {
+    // working dir doesn't exist on disk; fall back to the unresolved
+    // path so the containment check still works for $HOME-anchored
+    // browsing without throwing here.
+  }
+  const insideHome = real === home || real.startsWith(home + path.sep)
+  const insideDefault =
+    real === realDefault || real.startsWith(realDefault + path.sep)
+  if (!insideHome && !insideDefault) {
+    throw new FsError('path_traversal', 'path is outside $HOME and CC_WORKING_DIR')
   }
   let entries: import('node:fs').Dirent[]
   try {
@@ -302,10 +316,14 @@ export async function browseHome(absPath?: string): Promise<BrowseResult> {
     if (aHidden !== bHidden) return aHidden ? 1 : -1
     return a.name.localeCompare(b.name)
   })
+  // No parent if we're already at the top of either anchor (preventing
+  // `..` from walking out into /Users or /).
+  const atTop = real === home || real === realDefault
   return {
     path: real,
     home,
-    parent: real === home ? null : path.dirname(real),
+    defaultPath: realDefault,
+    parent: atTop ? null : path.dirname(real),
     dirs,
   }
 }
