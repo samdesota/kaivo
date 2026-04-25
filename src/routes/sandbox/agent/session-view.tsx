@@ -278,6 +278,45 @@ function SessionPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status.data])
 
+  // Mirror the question reconciliation for permissions. Without this a
+  // page reload leaves `state.permissions` empty while pendingFromStatus
+  // still has entries — banner doesn't render but the composer is gated
+  // on the count, so the user can't type.
+  useEffect(() => {
+    if (!status.data) return
+    const live = state.permissions
+    for (const p of pendingFromStatus) {
+      if (!live.has(p.id)) {
+        dispatch({
+          type: 'event',
+          evt: {
+            type: 'permission.updated',
+            payload: {
+              id: p.id,
+              sessionID: p.sessionId,
+              title: p.title,
+              pattern: p.pattern,
+              metadata: p.metadata,
+              time: { created: p.createdAt },
+            },
+          },
+        })
+      }
+    }
+    for (const id of live.keys()) {
+      if (!pendingFromStatus.some((p) => p.id === id)) {
+        dispatch({
+          type: 'event',
+          evt: {
+            type: 'permission.replied',
+            payload: { permissionID: id },
+          },
+        })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.data])
+
   const activeQuestions = Array.from(state.questions.values())
 
   // Hydrate todos from sessionStatus on first load. Live updates flow via

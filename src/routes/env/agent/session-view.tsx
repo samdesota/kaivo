@@ -63,7 +63,14 @@ interface SessionSummary {
 
 interface SessionStatus {
   running: boolean
-  pendingApprovals: Array<{ id: string }>
+  pendingApprovals: Array<{
+    id: string
+    sessionId: string
+    title: string
+    pattern?: string | string[]
+    metadata: Record<string, unknown>
+    createdAt: number
+  }>
   pendingQuestions: Array<{
     id: string
     sessionId: string
@@ -314,6 +321,46 @@ function SessionPane({
           evt: {
             type: 'question.replied',
             payload: { requestID: id },
+          },
+        })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusData])
+
+  // Mirror the question reconciliation for permissions. The transcript
+  // subscription is live-only, so a page reload (or a missed event
+  // window) leaves `state.permissions` empty while the env-server still
+  // has pending approvals — banner doesn't render but the composer is
+  // gated on the count, leaving the user unable to type.
+  useEffect(() => {
+    if (!statusData) return
+    const live = state.permissions
+    for (const p of pendingFromStatus) {
+      if (!live.has(p.id)) {
+        dispatch({
+          type: 'event',
+          evt: {
+            type: 'permission.updated',
+            payload: {
+              id: p.id,
+              sessionID: p.sessionId,
+              title: p.title,
+              pattern: p.pattern,
+              metadata: p.metadata,
+              time: { created: p.createdAt },
+            },
+          },
+        })
+      }
+    }
+    for (const id of live.keys()) {
+      if (!pendingFromStatus.some((p) => p.id === id)) {
+        dispatch({
+          type: 'event',
+          evt: {
+            type: 'permission.replied',
+            payload: { permissionID: id },
           },
         })
       }
