@@ -3,6 +3,8 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
+import readline from 'node:readline'
+import type { Readable } from 'node:stream'
 import { request as undiciRequest } from 'undici'
 import { config } from '../config.js'
 import { logger } from '../logger.js'
@@ -107,6 +109,49 @@ async function probeReady(host: string, port: number, password: string): Promise
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+// Strip ANSI color codes so log entries stay greppable.
+const ANSI_RE = /\x1b\[[0-9;]*m/g
+
+/**
+ * Stream a child stdio pipe through the env-server logger, one structured
+ * entry per line. `level` is the pino level used for every line — opencode
+ * doesn't tag severity itself, so we lean on which fd it came from
+ * (stdout=info, stderr=warn).
+ */
+function pipeToLogger(stream: Readable, level: 'info' | 'warn'): void {
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
+  rl.on('line', (raw) => {
+    const line = raw.replace(ANSI_RE, '').trimEnd()
+    if (!line) return
+    logger[level]({ svc: 'opencode' }, line)
+  })
+  rl.on('error', () => {
+    // child closed; nothing to do
+  })
+}
+
+/**
+ * Send `signal` to the process group led by `pid`. We spawn opencode with
+ * `detached: true` so its pid is also its pgid; signalling `-pid` reaches
+ * both the npm Node wrapper and the bun child it spawnSyncs (a plain
+ * `kill(pid)` only hits the wrapper, leaving the bun child holding the
+ * listen port).
+ */
+function killTree(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (!pid) return
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    // group already gone — fall through to a direct kill in case the
+    // child somehow isn't a group leader after all.
+    try {
+      process.kill(pid, signal)
+    } catch {
+      // truly gone
+    }
+  }
 }
 
 /**
@@ -266,23 +311,27 @@ class OpenCodeSupervisor {
       XDG_CACHE_HOME: path.join(config.CC_STATE_DIR, 'xdg', 'cache'),
     }
 
-    const logPath = path.join(config.CC_STATE_DIR, 'log', 'opencode.log')
-    await fs.mkdir(path.dirname(logPath), { recursive: true })
-    const logFd = await fs.open(logPath, 'a')
-
-    // Detach so a parent SIGTERM doesn't immediately nuke the child (we
-    // intentionally `.kill()` on shutdown). Ignore stdin.
+    // `detached: true` puts opencode in its own process group. The npm
+    // `opencode` bin is a Node wrapper that spawnSyncs the real bun
+    // binary; killing only the wrapper PID leaves the bun child holding
+    // the listen port. Owning the group lets us signal the whole tree
+    // via `process.kill(-pid, …)` on stop.
+    //
+    // Pipe stdout/stderr so we can fan them through the env-server logger
+    // (one structured entry per line, tagged service=opencode).
     const child = spawn(
       config.CC_OPENCODE_BIN,
       ['serve', '--port', String(port), '--hostname', '127.0.0.1'],
       {
         cwd: config.CC_WORKING_DIR,
         env: spawnEnv,
-        stdio: ['ignore', logFd.fd, logFd.fd],
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
       },
     )
-    // Close our copy of the log fd; the child keeps its.
-    await logFd.close()
+    child.unref()
+    if (child.stdout) pipeToLogger(child.stdout, 'info')
+    if (child.stderr) pipeToLogger(child.stderr, 'warn')
 
     child.on('exit', (code, signal) => {
       logger.info({ code, signal }, 'opencode exited')
@@ -341,11 +390,7 @@ class OpenCodeSupervisor {
     if (c.exitCode === null && c.signalCode === null) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          try {
-            c.kill('SIGKILL')
-          } catch {
-            // already gone
-          }
+          killTree(c.pid, 'SIGKILL')
           resolve()
         }, 5_000)
         c.once('exit', () => {
@@ -360,11 +405,7 @@ class OpenCodeSupervisor {
   private stopInner(): void {
     const c = this.state.child
     if (!c) return
-    try {
-      c.kill('SIGTERM')
-    } catch {
-      // already exited
-    }
+    killTree(c.pid, 'SIGTERM')
     this.state.child = null
     this.state.ready = false
     this.state.password = null
