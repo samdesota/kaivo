@@ -52,6 +52,10 @@ async function buildServer() {
     loggerInstance: logger,
     trustProxy: true,
     bodyLimit: 10 * 1024 * 1024, // 10 MB
+    // tRPC's httpBatchLink concatenates procedure names into the URL path,
+    // which can blow past Fastify's 100-char wildcard-param default; raise
+    // it so 5+ batched procs aren't dropped to a 404 by the router.
+    maxParamLength: 5000,
   })
 
   await server.register(fastifyCookie, {})

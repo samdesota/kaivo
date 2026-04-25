@@ -16,6 +16,10 @@ export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
     trustProxy: true,
+    // tRPC's httpBatchLink concatenates procedure names into the URL path,
+    // which can blow past Fastify's 100-char wildcard-param default; raise
+    // it so 5+ batched procs aren't dropped to a 404 by the router.
+    maxParamLength: 5000,
   })
 
   // CORS: explicit allowlist. No "*" — bearer tokens travel in headers so
