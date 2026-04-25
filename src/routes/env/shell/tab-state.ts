@@ -2,7 +2,7 @@ import { useEffect, useReducer, useRef } from 'react'
 
 export type PaneContent =
   | { type: 'shell'; shellId: string }
-  | { type: 'file'; path: string }
+  | { type: 'file'; path: string; absolute?: boolean }
   | { type: 'preview'; port: number }
 
 export interface Tab {
@@ -41,7 +41,8 @@ export function defaultTitle(c: PaneContent): string {
 function sameContent(a: PaneContent, b: PaneContent): boolean {
   if (a.type !== b.type) return false
   if (a.type === 'shell' && b.type === 'shell') return a.shellId === b.shellId
-  if (a.type === 'file' && b.type === 'file') return a.path === b.path
+  if (a.type === 'file' && b.type === 'file')
+    return a.path === b.path && !!a.absolute === !!b.absolute
   if (a.type === 'preview' && b.type === 'preview') return a.port === b.port
   return false
 }

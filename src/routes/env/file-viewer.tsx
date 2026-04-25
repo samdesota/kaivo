@@ -6,8 +6,8 @@ import { envTrpc } from '../../env-trpc'
 import { extractTrpcMessage } from '../../lib/utils'
 import { languageForPath } from '../../lib/cm-language'
 
-export function FileViewer({ path }: { path: string }) {
-  const read = envTrpc.fs.read.useQuery({ path })
+export function FileViewer({ path, absolute }: { path: string; absolute?: boolean }) {
+  const read = envTrpc.fs.read.useQuery({ path, absolute })
   const utils = envTrpc.useUtils()
   const write = envTrpc.fs.write.useMutation()
 
@@ -51,9 +51,9 @@ export function FileViewer({ path }: { path: string }) {
   async function onSave() {
     setWriteError(null)
     try {
-      await write.mutateAsync({ path, content: draft ?? '' })
+      await write.mutateAsync({ path, content: draft ?? '', absolute })
       setDraft(null)
-      await utils.fs.read.invalidate({ path })
+      await utils.fs.read.invalidate({ path, absolute })
     } catch (err) {
       setWriteError(extractTrpcMessage(err))
     }

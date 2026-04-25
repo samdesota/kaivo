@@ -1,15 +1,20 @@
+import path from 'node:path'
 import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { agentShellProcedure, authedProcedure, router } from '../trpc.js'
+import { config } from '../../config.js'
 import { db } from '../../db/client.js'
 import { agentSessions } from '../../db/schema.js'
-import { resolveWorkspacePath, toWorkspaceRelative } from '../../fs/service.js'
 import { terminalService } from '../../terminal/service.js'
 
 const paneContentSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('file'), path: z.string().min(1).max(4096) }),
+  z.object({
+    type: z.literal('file'),
+    path: z.string().min(1).max(4096),
+    absolute: z.boolean().optional(),
+  }),
   z.object({ type: z.literal('shell'), shellId: z.string().min(1) }),
   z.object({ type: z.literal('preview'), port: z.number().int().min(1).max(65535) }),
 ])
@@ -47,21 +52,34 @@ function subscribe(sessionId: string, listener: Listener): () => void {
   }
 }
 
-function resolveSessionId(opencodeSessionId: string): string {
+function resolveSession(opencodeSessionId: string): { id: string; workingDir: string | null } {
   const row = db
-    .select({ id: agentSessions.id })
+    .select({ id: agentSessions.id, workingDir: agentSessions.workingDir })
     .from(agentSessions)
     .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
     .limit(1)
     .all()[0]
   if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'agent session not found' })
-  return row.id
+  return row
 }
 
-function validateContent(content: AgentPaneContent): AgentPaneContent {
+/**
+ * Resolve an agent-supplied file path. Leading "/" means absolute filesystem
+ * path; anything else is relative to the agent session's working_dir (and
+ * falls back to CC_WORKING_DIR if the session has none). Always returns an
+ * absolute path — the FE viewer reads via fs.read with absolute=true so the
+ * file resolves regardless of where it sits relative to the workspace root.
+ */
+function resolveAgentFilePath(rawPath: string, sessionWorkingDir: string | null): string {
+  if (path.isAbsolute(rawPath)) return path.resolve(rawPath)
+  const base = sessionWorkingDir ?? config.CC_WORKING_DIR
+  return path.resolve(base, rawPath)
+}
+
+function validateContent(content: AgentPaneContent, sessionWorkingDir: string | null): AgentPaneContent {
   if (content.type === 'file') {
-    const abs = resolveWorkspacePath(content.path)
-    return { type: 'file', path: toWorkspaceRelative(abs) }
+    const abs = resolveAgentFilePath(content.path, sessionWorkingDir)
+    return { type: 'file', path: abs, absolute: true }
   }
   if (content.type === 'shell') {
     const info = terminalService.get(content.shellId)
@@ -81,11 +99,11 @@ export const agentUiRouter = router({
       }),
     )
     .mutation(({ input }) => {
-      const sessionId = resolveSessionId(input.opencodeSessionId)
-      const content = validateContent(input.content)
+      const session = resolveSession(input.opencodeSessionId)
+      const content = validateContent(input.content, session.workingDir)
       publish({
         type: 'open_pane',
-        sessionId,
+        sessionId: session.id,
         content,
         title: input.title,
         activate: input.activate ?? true,

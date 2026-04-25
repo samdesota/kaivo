@@ -98,7 +98,7 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
 
 function TabContent({ content }: { content: PaneContent }) {
   if (content.type === 'shell') return <ShellTabContent shellId={content.shellId} />
-  if (content.type === 'file') return <FileTabContent path={content.path} />
+  if (content.type === 'file') return <FileTabContent path={content.path} absolute={content.absolute} />
   if (content.type === 'preview') return <PreviewTabContent port={content.port} />
   return null
 }

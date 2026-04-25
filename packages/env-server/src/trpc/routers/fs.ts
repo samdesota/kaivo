@@ -40,10 +40,15 @@ export const fsRouter = router({
     }),
 
   read: authedProcedure
-    .input(z.object({ path: z.string().min(1).max(2048) }))
+    .input(
+      z.object({
+        path: z.string().min(1).max(2048),
+        absolute: z.boolean().optional(),
+      }),
+    )
     .query(async ({ input }) => {
       try {
-        return await readFile(input.path)
+        return await readFile(input.path, { absolute: input.absolute })
       } catch (err) {
         throw toTrpcError(err)
       }
@@ -54,11 +59,12 @@ export const fsRouter = router({
       z.object({
         path: z.string().min(1).max(2048),
         content: z.string().max(10 * 1024 * 1024),
+        absolute: z.boolean().optional(),
       }),
     )
     .mutation(async ({ input }) => {
       try {
-        await writeFile(input.path, input.content)
+        await writeFile(input.path, input.content, { absolute: input.absolute })
         return { ok: true as const }
       } catch (err) {
         throw toTrpcError(err)

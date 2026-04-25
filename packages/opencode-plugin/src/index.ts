@@ -140,7 +140,9 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           path: z
             .string()
             .optional()
-            .describe('For kind=file: workspace-relative path to open, for example /src/app.ts.'),
+            .describe(
+              'For kind=file: the file to open. A path with NO leading slash (e.g. "src/app.ts") is resolved relative to your current working directory. A path with a leading slash (e.g. "/etc/hosts" or "/Users/sam/notes.md") is treated as an absolute filesystem path.',
+            ),
           shellId: z.string().optional().describe('For kind=shell: shell id to open.'),
           port: z.number().int().optional().describe('For kind=preview: local preview port to open.'),
           title: z.string().optional().describe('Optional short tab title.'),

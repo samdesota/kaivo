@@ -112,8 +112,11 @@ export async function listDirectory(dirPath: string): Promise<FsEntry[]> {
   return out
 }
 
-export async function readFile(filePath: string): Promise<ReadResult> {
-  const abs = resolveWorkspacePath(filePath)
+export async function readFile(
+  filePath: string,
+  opts: { absolute?: boolean } = {},
+): Promise<ReadResult> {
+  const abs = opts.absolute ? requireAbsolute(filePath) : resolveWorkspacePath(filePath)
   let stat
   try {
     stat = await fs.stat(abs)
@@ -125,9 +128,10 @@ export async function readFile(filePath: string): Promise<ReadResult> {
   }
   if (!stat.isFile()) throw new FsError('not_readable', 'not a regular file')
 
+  const reportedPath = opts.absolute ? abs : toWorkspaceRelative(abs)
   if (stat.size > MAX_READ_BYTES) {
     return {
-      path: toWorkspaceRelative(abs),
+      path: reportedPath,
       size: stat.size,
       mtime: stat.mtime,
       encoding: 'binary',
@@ -140,7 +144,7 @@ export async function readFile(filePath: string): Promise<ReadResult> {
   const buf = await fs.readFile(abs)
   const binary = looksBinary(buf)
   return {
-    path: toWorkspaceRelative(abs),
+    path: reportedPath,
     size: stat.size,
     mtime: stat.mtime,
     encoding: binary ? 'binary' : 'utf8',
@@ -150,10 +154,21 @@ export async function readFile(filePath: string): Promise<ReadResult> {
   }
 }
 
-export async function writeFile(filePath: string, content: string): Promise<void> {
-  const abs = resolveWorkspacePath(filePath)
+export async function writeFile(
+  filePath: string,
+  content: string,
+  opts: { absolute?: boolean } = {},
+): Promise<void> {
+  const abs = opts.absolute ? requireAbsolute(filePath) : resolveWorkspacePath(filePath)
   await fs.mkdir(path.dirname(abs), { recursive: true })
   await fs.writeFile(abs, content, 'utf8')
+}
+
+function requireAbsolute(p: string): string {
+  if (!path.isAbsolute(p)) {
+    throw new FsError('not_readable', 'absolute path required when absolute=true')
+  }
+  return path.resolve(p)
 }
 
 // A single shared watcher for the env's one workingDir.

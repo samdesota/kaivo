@@ -43,7 +43,10 @@ ssh root@161.35.136.150 'cd /opt/cloud-code-tools && npm run docker:sandbox'
 ## Deploy local cc-env (mac)
 
 The launchd service runs from a deployed bundle, not from the repo. Build,
-copy artifacts, restart.
+copy artifacts, restart. The opencode plugin is loaded from a separate
+deployed file (`CC_OPENCODE_PLUGIN_PATH`), so rebuild + copy that too whenever
+`packages/opencode-plugin/src/**` changes — otherwise opencode keeps loading
+the stale bundle and new tools silently don't show up.
 
 ```bash
 cd /Users/sam/d/cloud-code-tools/packages/env-server
@@ -51,6 +54,11 @@ npm run build
 cp dist/main.js     /Users/sam/.local/share/cc-env/app/main.js
 cp dist/main.js.map /Users/sam/.local/share/cc-env/app/main.js.map
 rsync -a --delete migrations/ /Users/sam/.local/share/cc-env/app/migrations/
+
+cd /Users/sam/d/cloud-code-tools/packages/opencode-plugin
+npm run build
+cp dist/index.js /Users/sam/.local/share/cc-env/opencode-plugin/index.js
+
 launchctl kickstart -k gui/$(id -u)/com.cloudcode.env
 ```
 
