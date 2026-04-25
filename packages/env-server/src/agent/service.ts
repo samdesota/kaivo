@@ -24,6 +24,14 @@ const CLOUD_TOOL_OVERRIDES = {
   cloud_open_pane: true,
 } as const
 
+function directoryOpts(dir: string | null | undefined) {
+  if (!dir) return {}
+  return {
+    query: { directory: dir },
+    headers: { 'x-opencode-directory': dir },
+  }
+}
+
 function truncatePromptForTitle(msg: string): string {
   const flat = msg.replace(/\s+/g, ' ').trim()
   if (flat.length <= 60) return flat
@@ -229,11 +237,7 @@ class AgentService {
     const model = input.model ?? this.getDefaultModel()
     const create = await client.session.create({
       body: { title: input.title },
-      // Per-session working dir. opencode interprets this as the
-      // project the session is attached to — file-tool / bash / etc.
-      // run with this as cwd. Without it sessions inherit the
-      // env-server's CC_WORKING_DIR.
-      ...(input.directory ? { query: { directory: input.directory } } : {}),
+      ...directoryOpts(input.directory),
       throwOnError: true,
     })
     const ocSession = create.data
@@ -270,11 +274,7 @@ class AgentService {
             tools: CLOUD_TOOL_OVERRIDES,
             model,
           },
-          // opencode treats `directory` per-prompt: it scopes tool
-          // calls in this run to that cwd. Without it the run inherits
-          // the supervisor process's cwd (= CC_WORKING_DIR), which is
-          // not what the picker promised.
-          ...(input.directory ? { query: { directory: input.directory } } : {}),
+          ...directoryOpts(input.directory),
         })
         .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
     }
@@ -450,9 +450,7 @@ class AgentService {
         tools: CLOUD_TOOL_OVERRIDES,
         model,
       },
-      // Per-prompt directory — opencode resets to the supervisor's cwd
-      // otherwise. See the equivalent comment in sessionStart.
-      ...(row.workingDir ? { query: { directory: row.workingDir } } : {}),
+      ...directoryOpts(row.workingDir),
       throwOnError: true,
     })
     const nextTitle =
