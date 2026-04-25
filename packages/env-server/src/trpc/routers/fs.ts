@@ -5,6 +5,7 @@ import { authedProcedure, router } from '../trpc.js'
 import {
   FsError,
   type FsEvent,
+  browseHome,
   listDirectory,
   readFile,
   watchWorkspace,
@@ -70,4 +71,19 @@ export const fsRouter = router({
       return unsub
     })
   }),
+
+  /**
+   * Folder picker source. Lists directories under $HOME so the new-session
+   * UI can let the user pick an arbitrary working dir. `path` is optional
+   * — omitted means "start at $HOME".
+   */
+  browseHome: authedProcedure
+    .input(z.object({ path: z.string().min(1).max(4096).optional() }))
+    .query(async ({ input }) => {
+      try {
+        return await browseHome(input.path)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
 })

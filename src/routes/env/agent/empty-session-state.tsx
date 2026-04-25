@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { envTrpc } from '../../../env-trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
+import { FolderPickerModal } from './folder-picker-modal'
 
 interface RepoRow {
   id: string
@@ -21,6 +22,7 @@ export function EmptySessionState({
   const repos = envTrpc.repo.list.useQuery(undefined, { refetchInterval: 5_000 })
   const start = envTrpc.agent.sessionStart.useMutation()
   const [err, setErr] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   async function createIn(directory?: string) {
     setErr(null)
@@ -73,6 +75,13 @@ export function EmptySessionState({
           ))}
           <div className="flex flex-col gap-1 pt-1">
             <button
+              onClick={() => setPickerOpen(true)}
+              disabled={start.isPending}
+              className="rounded border border-dashed border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-brand-500/60 hover:text-neutral-100 disabled:opacity-60"
+            >
+              Choose folder…
+            </button>
+            <button
               onClick={() => void createIn(undefined)}
               disabled={start.isPending}
               className="rounded border border-dashed border-neutral-800 px-3 py-2 text-left text-xs text-neutral-500 hover:border-neutral-700 hover:text-neutral-300 disabled:opacity-60"
@@ -88,6 +97,15 @@ export function EmptySessionState({
           </div>
         )}
       </div>
+      <FolderPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        busy={start.isPending}
+        onSelect={(absPath) => {
+          setPickerOpen(false)
+          void createIn(absPath)
+        }}
+      />
     </div>
   )
 }

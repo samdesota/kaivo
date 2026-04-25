@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { envTrpc } from '../../../env-trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
+import { FolderPickerModal } from './folder-picker-modal'
 
 interface SessionSummary {
   id: string
@@ -118,6 +119,7 @@ export function NewSessionPopover({
   variant?: 'compact' | 'cta'
 }) {
   const [open, setOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   const repos = envTrpc.repo.list.useQuery(undefined, { enabled: open })
   const start = envTrpc.agent.sessionStart.useMutation()
@@ -192,6 +194,16 @@ export function NewSessionPopover({
             </button>
           ))}
           <button
+            onClick={() => {
+              setOpen(false)
+              setPickerOpen(true)
+            }}
+            disabled={start.isPending}
+            className="flex w-full items-center gap-2 border-t border-neutral-800 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-900 disabled:opacity-60"
+          >
+            <span>Choose folder…</span>
+          </button>
+          <button
             onClick={() => void createIn(undefined)}
             disabled={start.isPending}
             className="flex w-full items-center gap-2 border-t border-neutral-800 px-3 py-1.5 text-left text-xs text-neutral-400 hover:bg-neutral-900 disabled:opacity-60"
@@ -204,6 +216,15 @@ export function NewSessionPopover({
           )}
         </div>
       )}
+      <FolderPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        busy={start.isPending}
+        onSelect={(absPath) => {
+          setPickerOpen(false)
+          void createIn(absPath)
+        }}
+      />
     </div>
   )
 }

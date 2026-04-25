@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { config } from '../config.js'
@@ -228,4 +229,83 @@ function looksBinary(buf: Buffer): boolean {
     if (buf[i] === 0) return true
   }
   return false
+}
+
+export interface BrowseEntry {
+  name: string
+  /** Absolute filesystem path. */
+  path: string
+}
+
+export interface BrowseResult {
+  /** Absolute path of the directory we listed. */
+  path: string
+  /** Absolute path of the user's home — useful as a "go home" anchor. */
+  home: string
+  /** Absolute path of the parent of `path`, or null if `path === home`. */
+  parent: string | null
+  /** Subdirectories of `path`, sorted: visible first, then hidden, name asc. */
+  dirs: BrowseEntry[]
+}
+
+/**
+ * Folder picker source. Lists subdirectories of the requested path,
+ * scoped under the user's home directory. We don't expose files because
+ * the picker is for choosing a working dir, and we don't expose anything
+ * outside `$HOME` to keep this from doubling as a generic FS browser.
+ *
+ * `absPath` may be omitted (defaults to home) or absolute. Symlinks are
+ * resolved before the home-containment check.
+ */
+export async function browseHome(absPath?: string): Promise<BrowseResult> {
+  const home = path.resolve(os.homedir())
+  const requested = absPath ? path.resolve(absPath) : home
+  let real: string
+  try {
+    real = await fs.realpath(requested)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new FsError('not_found', 'directory not found')
+    }
+    throw err
+  }
+  if (real !== home && !real.startsWith(home + path.sep)) {
+    throw new FsError('path_traversal', 'path is outside $HOME')
+  }
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = await fs.readdir(real, { withFileTypes: true })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EACCES') {
+      throw new FsError('not_readable', 'directory not readable')
+    }
+    throw err
+  }
+  const dirs: BrowseEntry[] = []
+  for (const e of entries) {
+    if (!e.isDirectory() && !e.isSymbolicLink()) continue
+    // For symlinks, stat to confirm the target is a directory; skip
+    // dangling links so the picker doesn't show clickable dead entries.
+    if (e.isSymbolicLink()) {
+      try {
+        const st = await fs.stat(path.join(real, e.name))
+        if (!st.isDirectory()) continue
+      } catch {
+        continue
+      }
+    }
+    dirs.push({ name: e.name, path: path.join(real, e.name) })
+  }
+  dirs.sort((a, b) => {
+    const aHidden = a.name.startsWith('.')
+    const bHidden = b.name.startsWith('.')
+    if (aHidden !== bHidden) return aHidden ? 1 : -1
+    return a.name.localeCompare(b.name)
+  })
+  return {
+    path: real,
+    home,
+    parent: real === home ? null : path.dirname(real),
+    dirs,
+  }
 }
