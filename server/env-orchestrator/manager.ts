@@ -204,10 +204,13 @@ class EnvManager {
     if (!trimmed) throw new EnvError('label_required', 'label is required')
     if (!url) throw new EnvError('url_required', 'url is required')
 
-    // Verify the env is real and the token works. We do this by hitting
-    // /trpc/meta.info with the bearer — succeeds only if the env server
-    // accepted the token.
-    await probeEnvToken(url, envToken)
+    // No reachability probe: a local env URL like http://127.0.0.1:47821
+    // is only reachable from the user's machine, which is the browser —
+    // not us, the orchestrator. The browser already verified the env +
+    // token by completing pair.start / pair.confirm before calling here,
+    // so for local envs we just record the metadata and let the browser
+    // talk to the env directly using its envToken.
+    void envToken
 
     const id = ulid().toLowerCase()
     await db.insert(envs).values({
@@ -502,33 +505,6 @@ async function probeHealthzUnauthed(baseUrl: string): Promise<boolean> {
     return res.statusCode >= 200 && res.statusCode < 400
   } catch {
     return false
-  }
-}
-
-async function probeEnvToken(baseUrl: string, envToken: string): Promise<void> {
-  const absolute = baseUrl.startsWith('http://') || baseUrl.startsWith('https://')
-    ? baseUrl
-    : absoluteUrlFromEnv(baseUrl)
-  try {
-    const res = await undiciRequest(
-      `${absolute.replace(/\/+$/, '')}/trpc/meta.info`,
-      {
-        method: 'GET',
-        headers: { authorization: `Bearer ${envToken}` },
-        headersTimeout: HEALTH_PROBE_TIMEOUT_MS,
-        bodyTimeout: HEALTH_PROBE_TIMEOUT_MS,
-      },
-    )
-    await res.body.dump()
-    if (res.statusCode < 200 || res.statusCode >= 400) {
-      throw new EnvError(
-        'unreachable',
-        `env meta.info returned ${res.statusCode}`,
-      )
-    }
-  } catch (err) {
-    if (err instanceof EnvError) throw err
-    throw new EnvError('unreachable', `env unreachable at ${absolute}`)
   }
 }
 
