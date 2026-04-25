@@ -163,6 +163,45 @@ export function AgentSessionView({
   )
 }
 
+/**
+ * Bounces opencode in the env (env-side `agent.restart`). Useful after
+ * provider keys change in /settings — opencode reloads them on boot.
+ */
+function RestartAgentButton() {
+  const restart = envTrpc.agent.restart.useMutation()
+  const utils = envTrpc.useUtils()
+  const [err, setErr] = useState<string | null>(null)
+
+  async function onClick() {
+    if (!confirm('Restart agent? Active runs will be interrupted.')) return
+    setErr(null)
+    try {
+      await restart.mutateAsync()
+      await Promise.all([
+        utils.agent.agentStatus.invalidate(),
+        utils.agent.sessionList.invalidate(),
+        utils.agent.listModels.invalidate(),
+      ])
+    } catch (e) {
+      setErr(extractTrpcMessage(e))
+    }
+  }
+
+  return (
+    <button
+      onClick={() => void onClick()}
+      disabled={restart.isPending}
+      title={err ?? 'Restart the agent (e.g. after changing provider keys)'}
+      className={
+        'rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-900 disabled:opacity-50 ' +
+        (err ? 'border-red-700 text-red-300' : '')
+      }
+    >
+      {restart.isPending ? 'Restarting…' : 'Restart agent'}
+    </button>
+  )
+}
+
 function SessionPane({
   sessionId,
   onOpenShell,
@@ -345,7 +384,8 @@ function SessionPane({
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center justify-end border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
+          <RestartAgentButton />
           <ModelPicker sessionId={sessionId} />
         </div>
         {reconnecting && (
