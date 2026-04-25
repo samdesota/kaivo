@@ -109,6 +109,34 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+/**
+ * Poll until nothing is bound to host:port, or the deadline passes. Used
+ * after killing opencode so the next spawn doesn't hit EADDRINUSE while
+ * the OS is still tearing down the listener.
+ */
+async function waitPortFree(
+  host: string,
+  port: number,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const free = await new Promise<boolean>((resolve) => {
+      const srv = net.createServer()
+      srv.unref()
+      srv.once('error', () => resolve(false))
+      srv.once('listening', () => srv.close(() => resolve(true)))
+      try {
+        srv.listen(port, host)
+      } catch {
+        resolve(false)
+      }
+    })
+    if (free) return
+    await sleep(100)
+  }
+}
+
 interface OpenCodeState {
   child: ChildProcess | null
   port: number | null
@@ -298,6 +326,35 @@ class OpenCodeSupervisor {
   /** Kill any running child. Safe to call when nothing is running. */
   stop(): void {
     this.stopInner()
+  }
+
+  /**
+   * Kill any running child AND wait for the OS to release the listening
+   * port. Used before a restart so the new spawn doesn't race the old
+   * process's port and crash with EADDRINUSE.
+   */
+  async stopAndWait(): Promise<void> {
+    const c = this.state.child
+    const port = this.state.port
+    this.stopInner()
+    if (!c) return
+    if (c.exitCode === null && c.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          try {
+            c.kill('SIGKILL')
+          } catch {
+            // already gone
+          }
+          resolve()
+        }, 5_000)
+        c.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+      })
+    }
+    if (port) await waitPortFree('127.0.0.1', port, 5_000)
   }
 
   private stopInner(): void {

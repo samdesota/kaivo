@@ -150,6 +150,9 @@ class AgentService {
   async startAgent(): Promise<void> {
     this.invalidateClient()
     try {
+      // Bounce a running opencode first so the new spawn doesn't race the
+      // old listener for the persisted port. Idempotent if nothing's up.
+      await opencodeSupervisor.stopAndWait()
       await opencodeSupervisor.start()
       // Reset subscription so it connects to the fresh process.
       this.restartSubscription()
