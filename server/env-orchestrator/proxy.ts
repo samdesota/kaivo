@@ -127,19 +127,22 @@ export function registerEnvProxy(app: any): void {
 
   // Fastify WS routes for `/env/:envId/*`. @fastify/websocket owns the
   // upgrade listener, so regular onRequest hooks don't see WS upgrades.
+  //
+  // We only register the deep wildcard, not bare `/env/:envId` — the bare
+  // form would shadow the SPA route for browser navigation, with the
+  // websocket plugin 404'ing every non-upgrade GET. cc-env's WS endpoints
+  // (/trpc, /ws/shell/:id, /agent/*) all sit under deeper paths.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.register(async (scoped: any) => {
-    for (const route of ['/env/:envId', '/env/:envId/*']) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      scoped.get(route, { websocket: true } as never, async (socket: any, req: any) => {
-        const parsed = parseEnvUrl(req.url as string)
-        if (!parsed) {
-          safeClose(socket, 4400, 'invalid env url')
-          return
-        }
-        await handleWs(socket, req, parsed)
-      })
-    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    scoped.get('/env/:envId/*', { websocket: true } as never, async (socket: any, req: any) => {
+      const parsed = parseEnvUrl(req.url as string)
+      if (!parsed) {
+        safeClose(socket, 4400, 'invalid env url')
+        return
+      }
+      await handleWs(socket, req, parsed)
+    })
   })
 }
 
