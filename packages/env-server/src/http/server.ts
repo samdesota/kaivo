@@ -114,6 +114,9 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   await app.register(fastifyTRPCPlugin, {
     prefix: '/trpc',
+    // Enable WS subscriptions on the same /trpc endpoint so the webapp's
+    // wsLink (preview.ports, agent.transcript) can connect.
+    useWSS: true,
     trpcOptions: {
       router: appRouter,
       createContext,
