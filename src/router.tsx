@@ -13,6 +13,7 @@ import { SetupPage } from './routes/setup'
 import { DashboardPage } from './routes/dashboard'
 import { SandboxDetailPage } from './routes/sandbox'
 import { EnvDetailPage } from './routes/env'
+import { EnvAuthDevicePage } from './routes/envauth-device'
 import { SettingsPage } from './routes/settings'
 
 function RootLayout() {
@@ -33,11 +34,18 @@ function RootLayout() {
       return
     }
     if (!firstRun && !authenticated && p !== '/login') {
-      void navigate({ to: '/login', replace: true })
+      // Preserve deep links like /envauth/device?code=… so the user lands
+      // back on the page they meant to hit after signing in.
+      const path = `${location.pathname}${location.searchStr ?? ''}`
+      const next = path && path !== '/' ? path : undefined
+      void navigate({ to: '/login', search: { next }, replace: true })
       return
     }
     if (!firstRun && authenticated && (p === '/login' || p === '/setup')) {
-      void navigate({ to: '/', replace: true })
+      const s = location.search as { next?: string } | undefined
+      const next =
+        typeof s?.next === 'string' && s.next.startsWith('/') ? s.next : null
+      void navigate({ to: next ?? '/', replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status.data, location.pathname])
@@ -63,6 +71,9 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   component: LoginPage,
+  validateSearch: (s: Record<string, unknown>) => ({
+    next: typeof s.next === 'string' ? s.next : undefined,
+  }),
 })
 const setupRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -79,6 +90,14 @@ const envRoute = createRoute({
   path: '/env/$id',
   component: EnvDetailPage,
 })
+const envAuthDeviceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/envauth/device',
+  component: EnvAuthDevicePage,
+  validateSearch: (s: Record<string, unknown>) => ({
+    code: typeof s.code === 'string' ? s.code : undefined,
+  }),
+})
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
@@ -91,6 +110,7 @@ const routeTree = rootRoute.addChildren([
   setupRoute,
   sandboxRoute,
   envRoute,
+  envAuthDeviceRoute,
   settingsRoute,
 ])
 

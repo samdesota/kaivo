@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
 import { Button, Card, CenteredLayout, FormError, Input, Label } from '../components/ui'
@@ -8,7 +7,6 @@ import { extractTrpcMessage } from '../lib/utils'
 export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const navigate = useNavigate()
   const qc = useQueryClient()
   const login = trpc.auth.login.useMutation()
 
@@ -18,7 +16,10 @@ export function LoginPage() {
     try {
       await login.mutateAsync({ password })
       await qc.invalidateQueries()
-      await navigate({ to: '/' })
+      // RootLayout's auth-redirect effect picks up the new authenticated
+      // state and routes to `?next=…` (set when an unauthenticated visitor
+      // hit a deep link) or to `/` otherwise. Pushing a manual nav here
+      // races that effect.
     } catch (err) {
       setError(extractTrpcMessage(err))
     }
