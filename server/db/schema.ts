@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, bigint, check, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, integer, bigint, check, jsonb, bigserial } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 export type SandboxStatus = 'active' | 'archived' | 'crashed'
@@ -6,6 +6,7 @@ export type JobState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancell
 export type RepoSource = 'github' | 'url'
 export type AgentSessionStatus = 'active' | 'archived' | 'unavailable'
 export type ShellOwnerKind = 'human' | 'agent'
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
 export const admin = pgTable(
   'admin',
@@ -223,4 +224,20 @@ export const envs = pgTable('envs', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+})
+
+export const eventLogs = pgTable('event_logs', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Captured at the source — survives batching/retries so the timeline is
+  // correct even if a batch sat in the in-memory buffer for a second.
+  eventTs: timestamp('event_ts', { withTimezone: true }).notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  source: text('source').notNull(),
+  // Free-form principal: env id for env-server lines, "orchestrator" for
+  // identity self-logs, web session id for browser, etc. Lets us scope
+  // queries without joining auth tables.
+  principal: text('principal'),
+  level: text('level').$type<LogLevel>().notNull(),
+  msg: text('msg').notNull(),
+  ctx: jsonb('ctx').$type<Record<string, unknown> | null>(),
 })

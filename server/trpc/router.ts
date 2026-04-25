@@ -14,6 +14,7 @@ import { settingsRouter } from './routers/settings.js'
 import { envAuthRouter } from './routers/env-auth.js'
 import { envApiRouter } from './routers/env-api.js'
 import { envRouter } from './routers/env.js'
+import { logsRouter } from './routers/logs.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -31,6 +32,7 @@ export const appRouter = router({
   envAuth: envAuthRouter,
   envApi: envApiRouter,
   env: envRouter,
+  logs: logsRouter,
 })
 
 export type AppRouter = typeof appRouter

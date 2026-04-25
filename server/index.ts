@@ -26,6 +26,7 @@ import { registerEnvProxy } from './env-orchestrator/proxy.js'
 import { envReconciler } from './env-orchestrator/reconciler.js'
 import { agentService } from './agent/service.js'
 import { bootstrapProvidersFromEnv } from './agent/providers.js'
+import { purgeExpiredLogs } from './logs/service.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
@@ -185,6 +186,17 @@ async function main() {
       .catch((err) => logger.warn({ err }, 'agent reconcile failed'))
   }, 30_000)
   agentReconcileTimer.unref()
+
+  // event_logs retention sweep. Daily is plenty given the table is
+  // append-only and the index on event_ts makes the range delete cheap.
+  const logRetentionTimer = setInterval(() => {
+    purgeExpiredLogs()
+      .then((n) => {
+        if (n > 0) logger.info({ purged: n }, 'event_logs retention sweep')
+      })
+      .catch((err) => logger.warn({ err }, 'event_logs purge failed'))
+  }, 24 * 60 * 60 * 1000)
+  logRetentionTimer.unref()
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'shutting down')
