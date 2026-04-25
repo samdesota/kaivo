@@ -53,6 +53,11 @@ export interface AgentSessionSummary {
 export interface PendingApproval {
   id: string
   sessionId: string
+  // The opencode tool callID this permission gates. Required so the FE
+  // reconciler can re-attach a banner to the right tool part on reload —
+  // without it, the entry sits in state.permissions but no ToolPart
+  // calls permissionForCall() with a matching callID.
+  callID?: string
   title: string
   pattern?: string | string[]
   metadata: Record<string, unknown>
@@ -840,6 +845,7 @@ class AgentService {
       const p = props as unknown as {
         id: string
         sessionID: string
+        callID?: string
         title?: string
         pattern?: string | string[]
         metadata?: Record<string, unknown>
@@ -853,6 +859,7 @@ class AgentService {
       byPerm.set(p.id, {
         id: p.id,
         sessionId: p.sessionID,
+        callID: p.callID ?? (p.metadata as { callID?: string } | undefined)?.callID,
         title: p.title ?? 'Approval required',
         pattern: p.pattern,
         metadata: p.metadata ?? {},

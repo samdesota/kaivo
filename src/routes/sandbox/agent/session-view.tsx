@@ -294,6 +294,7 @@ function SessionPane({
             payload: {
               id: p.id,
               sessionID: p.sessionId,
+              callID: (p as { callID?: string }).callID,
               title: p.title,
               pattern: p.pattern,
               metadata: p.metadata,

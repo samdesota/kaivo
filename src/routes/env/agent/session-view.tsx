@@ -3,7 +3,6 @@ import { Link } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { envTrpc } from '../../../env-trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
-import { clientLogger } from '../../../lib/client-logger'
 import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
 import { QuestionBanner } from './parts/question-banner'
@@ -67,6 +66,7 @@ interface SessionStatus {
   pendingApprovals: Array<{
     id: string
     sessionId: string
+    callID?: string
     title: string
     pattern?: string | string[]
     metadata: Record<string, unknown>
@@ -337,22 +337,8 @@ function SessionPane({
   useEffect(() => {
     if (!statusData) return
     const live = state.permissions
-    clientLogger.debug('permission reconcile tick', {
-      sessionId,
-      pendingFromStatusCount: pendingFromStatus.length,
-      liveCount: live.size,
-      pendingFromStatusIds: pendingFromStatus.map((p) => p.id),
-      pendingFromStatusSample: pendingFromStatus[0],
-      liveIds: Array.from(live.keys()),
-    })
     for (const p of pendingFromStatus) {
       if (!live.has(p.id)) {
-        clientLogger.info('permission reconcile inject updated', {
-          sessionId,
-          id: p.id,
-          metadataCallID: (p.metadata as { callID?: string } | undefined)?.callID,
-          title: p.title,
-        })
         dispatch({
           type: 'event',
           evt: {
@@ -360,6 +346,7 @@ function SessionPane({
             payload: {
               id: p.id,
               sessionID: p.sessionId,
+              callID: p.callID,
               title: p.title,
               pattern: p.pattern,
               metadata: p.metadata,
@@ -371,7 +358,6 @@ function SessionPane({
     }
     for (const id of live.keys()) {
       if (!pendingFromStatus.some((p) => p.id === id)) {
-        clientLogger.info('permission reconcile inject replied', { sessionId, id })
         dispatch({
           type: 'event',
           evt: {
