@@ -51,6 +51,10 @@ export const agentSessions = sqliteTable('agent_sessions', {
   opencodeSessionId: text('opencode_session_id').notNull().unique(),
   title: text('title'),
   status: text('status').$type<AgentSessionStatus>().notNull(),
+  // Per-session working dir picked at create time. Shells opened from
+  // a session inherit this so they land in the same place the agent's
+  // tools run. Null means "use CC_WORKING_DIR" (e.g. older rows).
+  workingDir: text('working_dir'),
   selectedProviderId: text('selected_provider_id'),
   selectedModelId: text('selected_model_id'),
   createdAt: text('created_at').notNull(),

@@ -26,18 +26,27 @@ interface ShellCreateResult {
   id: string
 }
 
+interface AgentSessionRow {
+  id: string
+  workingDir: string | null
+}
+
 export function CommandPalette({
   open,
   onClose,
   onOpenContent,
   onCloseTab,
   hasActiveTab,
+  activeSessionId,
 }: {
   open: boolean
   onClose: () => void
   onOpenContent: (content: PaneContent) => void
   onCloseTab: () => void
   hasActiveTab: boolean
+  /** Currently focused agent session — its workingDir becomes the cwd
+   * for any shell created here. */
+  activeSessionId?: string | null
 }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -61,6 +70,15 @@ export function CommandPalette({
   })
   const utils = envTrpc.useUtils()
   const createShell = envTrpc.shell.create.useMutation()
+  const sessions = envTrpc.agent.sessionList.useQuery(undefined, {
+    enabled: open,
+    staleTime: 5_000,
+  })
+  const sessionRows = (sessions.data ?? []) as AgentSessionRow[]
+  const activeCwd =
+    (activeSessionId
+      ? sessionRows.find((s) => s.id === activeSessionId)?.workingDir
+      : null) ?? undefined
 
   const items: PaletteItem[] = useMemo(() => {
     const out: PaletteItem[] = []
@@ -73,7 +91,9 @@ export function CommandPalette({
       haystack: 'new shell terminal',
       run: async () => {
         try {
-          const info = (await createShell.mutateAsync({})) as ShellCreateResult
+          const info = (await createShell.mutateAsync(
+            activeCwd ? { cwd: activeCwd } : {},
+          )) as ShellCreateResult
           await utils.shell.list.invalidate()
           onOpenContent({ type: 'shell', shellId: info.id })
         } catch (e) {
@@ -114,7 +134,7 @@ export function CommandPalette({
     }
 
     return out
-  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, utils, createShell])
+  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, utils, createShell, activeCwd])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

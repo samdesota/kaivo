@@ -17,6 +17,7 @@ interface EnvRow extends EnvRef {
 export function EnvTabShell({ env }: { env: EnvRow }) {
   const [state, dispatch] = useRightPaneState(env.id)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
 
   const openContent = (content: PaneContent) => {
     dispatch({ type: 'open', content, activate: true })
@@ -44,7 +45,10 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   const hasTabs = state.tabs.length > 0
   const agentSection = (
     <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agents">
-      <AgentSessionView onOpenShell={openContent} />
+      <AgentSessionView
+        onOpenShell={openContent}
+        onActiveSessionChange={setActiveSessionId}
+      />
     </section>
   )
 
@@ -102,6 +106,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
           if (state.activeTabId) dispatch({ type: 'close', tabId: state.activeTabId })
         }}
         hasActiveTab={hasTabs}
+        activeSessionId={activeSessionId}
       />
     </div>
   )

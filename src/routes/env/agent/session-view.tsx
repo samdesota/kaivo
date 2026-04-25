@@ -83,12 +83,23 @@ interface SessionStatus {
 
 export function AgentSessionView({
   onOpenShell,
+  onActiveSessionChange,
 }: {
   onOpenShell?: (content: PaneContent) => void
+  /**
+   * Fires whenever the focused session changes. Lets EnvTabShell forward
+   * the active session id (and thus its working dir) to the command
+   * palette so new shells default to the session's cwd.
+   */
+  onActiveSessionChange?: (sessionId: string | null) => void
 }) {
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
   const sessions = envTrpc.agent.sessionList.useQuery(undefined, { refetchInterval: 5_000 })
   const [sessionId, setSessionId] = useState<string | null>(null)
+  useEffect(() => {
+    onActiveSessionChange?.(sessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
   const start = envTrpc.agent.startAgent.useMutation()
   const [startError, setStartError] = useState<string | null>(null)
 

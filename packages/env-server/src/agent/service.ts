@@ -46,6 +46,7 @@ export interface AgentSessionSummary {
   opencodeSessionId: string
   title: string | null
   status: AgentSessionStatus
+  workingDir: string | null
   createdAt: Date
   lastActivityAt: Date
 }
@@ -206,6 +207,7 @@ class AgentService {
       opencodeSessionId: r.opencodeSessionId,
       title: r.title,
       status: r.status,
+      workingDir: r.workingDir ?? null,
       createdAt: dbDate(r.createdAt),
       lastActivityAt: dbDate(r.lastActivityAt),
     }))
@@ -241,6 +243,7 @@ class AgentService {
         opencodeSessionId: ocSession.id,
         title: derivedTitle,
         status: 'active',
+        workingDir: input.directory ?? null,
         selectedProviderId: input.model?.providerID ?? null,
         selectedModelId: input.model?.modelID ?? null,
         createdAt: now.toISOString(),
@@ -271,6 +274,7 @@ class AgentService {
       opencodeSessionId: ocSession.id,
       title: derivedTitle,
       status: 'active',
+      workingDir: input.directory ?? null,
       createdAt: now,
       lastActivityAt: now,
     }
@@ -290,6 +294,7 @@ class AgentService {
       opencodeSessionId: row.opencodeSessionId,
       title,
       status: row.status,
+      workingDir: row.workingDir ?? null,
       createdAt: dbDate(row.createdAt),
       lastActivityAt: now,
     }
@@ -404,6 +409,7 @@ class AgentService {
       opencodeSessionId: row.opencodeSessionId,
       title: row.title,
       status: input.status,
+      workingDir: row.workingDir ?? null,
       createdAt: dbDate(row.createdAt),
       lastActivityAt: now,
     }
@@ -566,6 +572,7 @@ class AgentService {
         opencodeSessionId: row.opencodeSessionId,
         title: row.title,
         status: row.status,
+        workingDir: row.workingDir ?? null,
         createdAt: dbDate(row.createdAt),
         lastActivityAt: dbDate(row.lastActivityAt),
       },
