@@ -1,0 +1,21 @@
+{
+  "name": "cloud-code-desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "npm run build && electron dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@samdesota/webframe": "^0.1.0",
+    "electron": "^32.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}

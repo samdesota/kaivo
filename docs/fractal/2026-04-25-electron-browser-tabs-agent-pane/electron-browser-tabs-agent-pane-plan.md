@@ -16,6 +16,8 @@ Prepare `webframe` for scoped package publishing so `cloud-code-tools` can consu
 
 **Depends on:** none
 
+**Status:** done
+
 ## Task 2: Add Desktop Electron Test Harness
 
 Create the test harness before feature work so every later Electron task can be verified by an agent without relying on manual observation.
@@ -34,6 +36,8 @@ Create the test harness before feature work so every later Electron task can be 
 
 **Depends on:** Task 1
 
+**Status:** done
+
 ## Task 3: Add `cloud-code-desktop` Package Skeleton
 
 Create the desktop app package inside `cloud-code-tools` and wire it into the harness without changing browser pane behavior yet.
@@ -51,6 +55,8 @@ Create the desktop app package inside `cloud-code-tools` and wire it into the ha
 
 **Depends on:** Task 2
 
+**Status:** done
+
 ## Task 4: Boot Existing App Inside Electron
 
 Wire the desktop app to launch the existing React chrome through `webframe` while preserving the normal web development flow.
@@ -67,6 +73,8 @@ Wire the desktop app to launch the existing React chrome through `webframe` whil
 - Manual: start server, client, and desktop app; verify the existing agent UI loads.
 
 **Depends on:** Task 3
+
+**Status:** done
 
 ## Task 5: Add Browser Pane State and Schemas
 

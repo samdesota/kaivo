@@ -1,0 +1,105 @@
+import fs from 'node:fs'
+import http from 'node:http'
+import path from 'node:path'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { _electron as electron } from '@playwright/test'
+import { expect, test } from './harness/electron-fixture'
+import { parseDesktopLogFile } from './harness/logs'
+
+const vitePort = 5191
+const viteUrl = `http://127.0.0.1:${vitePort}/login`
+
+test('desktop harness reaches the React app shell through webframe', async ({ desktopLogPath, desktopStateDir }, testInfo) => {
+  const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(vitePort), '--strictPort'], {
+    cwd: path.resolve('.'),
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  const viteLogs: string[] = []
+  vite.stdout?.on('data', (chunk) => viteLogs.push(String(chunk)))
+  vite.stderr?.on('data', (chunk) => viteLogs.push(String(chunk)))
+
+  try {
+    await waitForHttp(viteUrl)
+    const app = await electron.launch({
+      args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/cloud-code-desktop/dist/main.js')],
+      env: {
+        ...process.env,
+        NODE_ENV: 'development',
+        CC_DESKTOP_CHROME_URL: viteUrl,
+        CC_DESKTOP_TEST_LOG: desktopLogPath,
+        CC_DESKTOP_TEST_STATE_DIR: desktopStateDir,
+      },
+    })
+
+    try {
+      const page = await app.firstWindow()
+      await expect(page.getByLabel('Password')).toBeVisible({ timeout: 15_000 })
+      const state = await app.evaluate(() => globalThis.cloudCodeDesktopTest.getState())
+      expect(state.config.chromeUrl).toBe(viteUrl)
+      expect(state.windowIds.length).toBeGreaterThanOrEqual(1)
+
+      const records = parseDesktopLogFile(desktopLogPath)
+      expect(records.some((record) => record.kind === 'main')).toBe(true)
+      expect(records.some((record) => record.kind === 'chrome-renderer')).toBe(true)
+    } finally {
+      await app.close().catch(() => undefined)
+    }
+  } catch (error) {
+    await testInfo.attach('vite-log-tail', {
+      body: viteLogs.slice(-40).join(''),
+      contentType: 'text/plain',
+    })
+    throw error
+  } finally {
+    await stopProcess(vite)
+  }
+})
+
+async function waitForHttp(url: string): Promise<void> {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    if (await canGet(url)) return
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error(`Timed out waiting for ${url}`)
+}
+
+function canGet(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(url, (res) => {
+      res.resume()
+      resolve((res.statusCode ?? 500) < 500)
+    })
+    req.on('error', () => resolve(false))
+    req.setTimeout(1000, () => {
+      req.destroy()
+      resolve(false)
+    })
+  })
+}
+
+async function stopProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return
+  child.kill('SIGTERM')
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL')
+      resolve()
+    }, 3000)
+    child.once('exit', () => {
+      clearTimeout(timeout)
+      resolve()
+    })
+  })
+}
+
+declare global {
+  // Playwright evaluates this inside Electron's main process.
+  var cloudCodeDesktopTest: {
+    getState: () => {
+      config: { chromeUrl: string }
+      windowIds: string[]
+    }
+  }
+}

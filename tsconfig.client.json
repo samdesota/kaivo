@@ -20,7 +20,8 @@
     "packages/env-server/src/trpc/router.ts",
     "packages/env-server/src/trpc/routers/**/*.ts",
     "packages/env-server/src/trpc/trpc.ts",
-    "tests/e2e/**/*.ts"
+    "tests/e2e/**/*.ts",
+    "tests/desktop/**/*.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }
