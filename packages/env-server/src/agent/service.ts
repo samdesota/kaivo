@@ -919,7 +919,21 @@ class AgentService {
       .all()
     const row = rows[0]
     if (!row) return
-    const nextSeq = (this.seqCounters.get(row.id) ?? 0) + 1
+    // seqCounters is in-memory and resets on restart; seed from the DB max
+    // on first use of a session this process to avoid colliding with rows
+    // written by a previous run.
+    let prevSeq = this.seqCounters.get(row.id)
+    if (prevSeq === undefined) {
+      const max = db
+        .select({ seq: agentTranscripts.seq })
+        .from(agentTranscripts)
+        .where(eq(agentTranscripts.sessionId, row.id))
+        .orderBy(desc(agentTranscripts.seq))
+        .limit(1)
+        .all()[0]
+      prevSeq = max?.seq ?? 0
+    }
+    const nextSeq = prevSeq + 1
     this.seqCounters.set(row.id, nextSeq)
     try {
       db.insert(agentTranscripts)
