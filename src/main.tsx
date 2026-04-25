@@ -5,9 +5,11 @@ import { RouterProvider } from '@tanstack/react-router'
 import { trpc, makeTrpcClient } from './trpc'
 import { router } from './router'
 import { initFontSize } from './lib/ui-prefs'
+import { installClientLogCapture } from './lib/client-logger'
 import './index.css'
 
 initFontSize()
+installClientLogCapture()
 
 const queryClient = new QueryClient({
   defaultOptions: {
