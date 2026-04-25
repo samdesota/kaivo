@@ -15,8 +15,31 @@ import { eq } from 'drizzle-orm'
 import { ulid } from 'ulid'
 import { config } from '../config.js'
 import { db } from '../db/client.js'
-import { shellSessions, type ShellOwnerKind } from '../db/schema.js'
+import { agentSessions, shellSessions, type ShellOwnerKind } from '../db/schema.js'
 import { logger } from '../logger.js'
+
+/**
+ * Resolve the cwd a new shell should land in. Precedence:
+ *   1. explicit `cwd` argument (the agent picked one),
+ *   2. the working dir stored on the owning agent session, if any,
+ *   3. CC_WORKING_DIR.
+ *
+ * Without (2), shells opened from a session with a custom picker dir
+ * still landed in CC_WORKING_DIR — defeating the per-session picker.
+ */
+function resolveCwd(cwd: string | undefined, ownerSessionId: string | null): string {
+  if (cwd && cwd.trim() !== '') return cwd
+  if (ownerSessionId) {
+    const row = db
+      .select({ workingDir: agentSessions.workingDir })
+      .from(agentSessions)
+      .where(eq(agentSessions.opencodeSessionId, ownerSessionId))
+      .limit(1)
+      .all()[0]
+    if (row?.workingDir) return row.workingDir
+  }
+  return config.CC_WORKING_DIR
+}
 
 const localRequire = createRequire(import.meta.url)
 const { Terminal: HeadlessTerminal } = localRequire('@xterm/headless') as {
@@ -113,9 +136,9 @@ class TerminalService {
     const id = ulid().toLowerCase()
     const cols = opts.cols ?? DEFAULT_COLS
     const rows = opts.rows ?? DEFAULT_ROWS
-    const cwd = opts.cwd && opts.cwd.trim() !== '' ? opts.cwd : config.CC_WORKING_DIR
     const ownerKind: ShellOwnerKind = opts.ownerKind ?? 'human'
     const ownerSessionId = opts.ownerSessionId ?? null
+    const cwd = resolveCwd(opts.cwd, ownerSessionId)
 
     const term = new HeadlessTerminal({
       cols,
@@ -309,8 +332,8 @@ class TerminalService {
     const id = ulid().toLowerCase()
     const cols = opts.cols ?? DEFAULT_COLS
     const rows = opts.rows ?? DEFAULT_ROWS
-    const cwd = opts.cwd && opts.cwd.trim() !== '' ? opts.cwd : config.CC_WORKING_DIR
     const ownerSessionId = opts.ownerSessionId ?? null
+    const cwd = resolveCwd(opts.cwd, ownerSessionId)
 
     const term = new HeadlessTerminal({
       cols,
