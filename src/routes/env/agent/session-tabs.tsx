@@ -123,6 +123,7 @@ export function NewSessionPopover({
   const ref = useRef<HTMLDivElement | null>(null)
   const repos = envTrpc.repo.list.useQuery(undefined, { enabled: open })
   const start = envTrpc.agent.sessionStart.useMutation()
+  const utils = envTrpc.useUtils()
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -138,6 +139,7 @@ export function NewSessionPopover({
     setErr(null)
     try {
       const res = (await start.mutateAsync({ directory })) as { id: string }
+      await utils.agent.sessionList.invalidate()
       onCreated(res.id)
       setOpen(false)
     } catch (e) {
@@ -149,18 +151,20 @@ export function NewSessionPopover({
     variant === 'cta' ? (
       <button
         onClick={() => setOpen((v) => !v)}
+        disabled={start.isPending}
         className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600"
       >
-        {label}
+        {start.isPending ? 'Creating…' : label}
       </button>
     ) : (
       <button
         onClick={() => setOpen((v) => !v)}
+        disabled={start.isPending}
         className="shrink-0 rounded px-2 py-1 text-xs text-brand-400 hover:bg-neutral-900 hover:text-brand-300"
         title="New agent session"
         aria-label="New session"
       >
-        {label}
+        {start.isPending ? 'Creating…' : label}
       </button>
     )
 

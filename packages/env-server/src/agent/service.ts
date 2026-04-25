@@ -4,11 +4,14 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
 import { db } from '../db/client.js'
 import { agentSessions, agentTranscripts, type AgentSessionStatus } from '../db/schema.js'
 import { logger } from '../logger.js'
+import { getMeta, setDefaultModel as setEnvDefaultModel } from '../envmeta/service.js'
 import {
   OpenCodeError,
   opencodeBasicAuthHeader,
   opencodeSupervisor,
 } from './opencode.js'
+
+const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
 
 const CLOUD_TOOL_OVERRIDES = {
   bash: false,
@@ -220,6 +223,7 @@ class AgentService {
     model?: { providerID: string; modelID: string }
   }): Promise<AgentSessionSummary> {
     const client = await this.getClient()
+    const model = input.model ?? this.getDefaultModel()
     const create = await client.session.create({
       body: { title: input.title },
       // Per-session working dir. opencode interprets this as the
@@ -261,8 +265,13 @@ class AgentService {
           body: {
             parts: [{ type: 'text', text: prompt }],
             tools: CLOUD_TOOL_OVERRIDES,
-            ...(input.model ? { model: input.model } : {}),
+            model,
           },
+          // opencode treats `directory` per-prompt: it scopes tool
+          // calls in this run to that cwd. Without it the run inherits
+          // the supervisor process's cwd (= CC_WORKING_DIR), which is
+          // not what the picker promised.
+          ...(input.directory ? { query: { directory: input.directory } } : {}),
         })
         .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
     }
@@ -322,12 +331,24 @@ class AgentService {
       }
     }
     models.sort((a, b) => a.label.localeCompare(b.label))
-    const defEntry = Object.entries(body.default ?? {})[0]
+    const defaultModel = this.getDefaultModel()
     return {
       models,
-      defaultProviderID: defEntry?.[0] ?? null,
-      defaultModelID: defEntry?.[1] ?? null,
+      defaultProviderID: defaultModel.providerID,
+      defaultModelID: defaultModel.modelID,
     }
+  }
+
+  getDefaultModel(): { providerID: string; modelID: string } {
+    const meta = getMeta()
+    if (meta.defaultProviderId && meta.defaultModelId) {
+      return { providerID: meta.defaultProviderId, modelID: meta.defaultModelId }
+    }
+    return { ...BUILTIN_DEFAULT_MODEL }
+  }
+
+  setDefaultModel(model: { providerID: string; modelID: string }): void {
+    setEnvDefaultModel(model.providerID, model.modelID)
   }
 
   async setSessionModel(
@@ -418,14 +439,17 @@ class AgentService {
   async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient()
-    const model = await this.getSessionModel(row.id)
+    const model = (await this.getSessionModel(row.id)) ?? this.getDefaultModel()
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
       body: {
         parts: [{ type: 'text', text: input.message }],
         tools: CLOUD_TOOL_OVERRIDES,
-        ...(model ? { model } : {}),
+        model,
       },
+      // Per-prompt directory — opencode resets to the supervisor's cwd
+      // otherwise. See the equivalent comment in sessionStart.
+      ...(row.workingDir ? { query: { directory: row.workingDir } } : {}),
       throwOnError: true,
     })
     const nextTitle =

@@ -215,6 +215,20 @@ export const agentRouter = router({
     }
   }),
 
+  defaultModelGet: authedProcedure.query(() => agentService.getDefaultModel()),
+
+  defaultModelSet: authedProcedure
+    .input(
+      z.object({
+        providerID: z.string().min(1).max(100),
+        modelID: z.string().min(1).max(200),
+      }),
+    )
+    .mutation(({ input }) => {
+      agentService.setDefaultModel(input)
+      return { ok: true as const }
+    }),
+
   sessionSetModel: authedProcedure
     .input(
       z.object({

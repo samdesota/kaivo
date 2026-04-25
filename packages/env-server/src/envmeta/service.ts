@@ -46,17 +46,30 @@ export interface EnvMetaRow {
   pairedAt: string | null
   opencodePort: number | null
   opencodePasswordHash: string | null
+  defaultProviderId: string | null
+  defaultModelId: string | null
 }
 
 export function getMeta(): EnvMetaRow {
   const rows = db.select().from(envMeta).where(eq(envMeta.id, 1)).all()
   const r = rows[0]
-  if (!r) return { envTokenHash: null, pairedAt: null, opencodePort: null, opencodePasswordHash: null }
+  if (!r) {
+    return {
+      envTokenHash: null,
+      pairedAt: null,
+      opencodePort: null,
+      opencodePasswordHash: null,
+      defaultProviderId: null,
+      defaultModelId: null,
+    }
+  }
   return {
     envTokenHash: r.envTokenHash,
     pairedAt: r.pairedAt,
     opencodePort: r.opencodePort,
     opencodePasswordHash: r.opencodePasswordHash,
+    defaultProviderId: r.defaultProviderId,
+    defaultModelId: r.defaultModelId,
   }
 }
 
@@ -73,6 +86,13 @@ export function setOpencodePort(port: number): void {
 
 export function setOpencodePasswordHash(hash: string): void {
   db.update(envMeta).set({ opencodePasswordHash: hash }).where(eq(envMeta.id, 1)).run()
+}
+
+export function setDefaultModel(providerID: string, modelID: string): void {
+  db.update(envMeta)
+    .set({ defaultProviderId: providerID, defaultModelId: modelID })
+    .where(eq(envMeta.id, 1))
+    .run()
 }
 
 /**

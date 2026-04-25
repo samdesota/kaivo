@@ -61,6 +61,8 @@ export function SettingsPage() {
 
         <ProvidersSection />
 
+        <AgentDefaultModelSection />
+
         <Card className="max-w-none">
           <h2 className="mb-1 text-lg font-medium">Repo configs</h2>
           <p className="mb-4 text-sm text-neutral-400">
@@ -154,6 +156,66 @@ export function SettingsPage() {
         </Card>
       </main>
     </div>
+  )
+}
+
+function AgentDefaultModelSection() {
+  const current = trpc.agent.defaultModelGet.useQuery()
+  const save = trpc.agent.defaultModelSet.useMutation()
+  const utils = trpc.useUtils()
+  const [providerID, setProviderID] = useState('openai')
+  const [modelID, setModelID] = useState('gpt-5.5')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!current.data) return
+    setProviderID(current.data.providerID)
+    setModelID(current.data.modelID)
+  }, [current.data])
+
+  async function onSave() {
+    setError(null)
+    try {
+      await save.mutateAsync({ providerID: providerID.trim(), modelID: modelID.trim() })
+      await utils.agent.defaultModelGet.invalidate()
+    } catch (err) {
+      setError(extractTrpcMessage(err))
+    }
+  }
+
+  return (
+    <Card className="max-w-none">
+      <h2 className="mb-1 text-lg font-medium">Agent default model</h2>
+      <p className="mb-4 text-sm text-neutral-400">
+        Used for new messages when a session has no model override. The built-in default is <span className="font-mono">openai/gpt-5.5</span>.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto]">
+        <Input
+          value={providerID}
+          onChange={(e) => setProviderID(e.target.value)}
+          placeholder="openai"
+          maxLength={100}
+        />
+        <Input
+          value={modelID}
+          onChange={(e) => setModelID(e.target.value)}
+          placeholder="gpt-5.5"
+          maxLength={200}
+        />
+        <Button
+          onClick={() => void onSave()}
+          disabled={save.isPending || !providerID.trim() || !modelID.trim()}
+        >
+          {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+      {current.isLoading && <p className="mt-2 text-xs text-neutral-500">Loading current default…</p>}
+      {error && (
+        <div className="mt-3">
+          <FormError>{error}</FormError>
+        </div>
+      )}
+    </Card>
   )
 }
 

@@ -5,6 +5,7 @@ import { db } from '../db/client.js'
 import { agentSessions, agentTranscripts, type AgentSessionStatus } from '../db/schema.js'
 import { logger } from '../logger.js'
 import { sandboxManager } from '../sandbox/manager.js'
+import { getSecret, putSecret } from '../secrets/index.js'
 import { anyProviderConfigured } from './providers.js'
 import {
   OpenCodeError,
@@ -14,6 +15,9 @@ import {
   resolveEndpoint,
   startOpenCode,
 } from './opencode.js'
+
+const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
+const DEFAULT_MODEL_SECRET = 'agent.default_model'
 
 /**
  * Force every prompt to route shell work through our plugin tools so the
@@ -288,6 +292,7 @@ class AgentService {
     model?: { providerID: string; modelID: string }
   }): Promise<AgentSessionSummary> {
     const client = await this.getClient(input.sandboxId)
+    const model = input.model ?? await this.getDefaultModel()
     // Intentionally do NOT pass `directory` on session.create — OpenCode
     // routes events through a per-project bus when a session is bound to a
     // non-default directory, and our global /event subscription stops
@@ -338,7 +343,7 @@ class AgentService {
           body: {
             parts: [{ type: 'text', text: prompt }],
             tools: CLOUD_TOOL_OVERRIDES,
-            ...(input.model ? { model: input.model } : {}),
+            model,
           },
         })
         .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
@@ -404,14 +409,31 @@ class AgentService {
       }
     }
     models.sort((a, b) => a.label.localeCompare(b.label))
-    // OpenCode returns `default` as a map of providerID -> modelID; pick the
-    // first entry as "the" default for the UI.
-    const defEntry = Object.entries(body.default ?? {})[0]
+    const defaultModel = await this.getDefaultModel()
     return {
       models,
-      defaultProviderID: defEntry?.[0] ?? null,
-      defaultModelID: defEntry?.[1] ?? null,
+      defaultProviderID: defaultModel.providerID,
+      defaultModelID: defaultModel.modelID,
     }
+  }
+
+  async getDefaultModel(): Promise<{ providerID: string; modelID: string }> {
+    const raw = await getSecret(DEFAULT_MODEL_SECRET)
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { providerID?: unknown; modelID?: unknown }
+        if (typeof parsed.providerID === 'string' && typeof parsed.modelID === 'string') {
+          return { providerID: parsed.providerID, modelID: parsed.modelID }
+        }
+      } catch {
+        // Fall through to the built-in default.
+      }
+    }
+    return { ...BUILTIN_DEFAULT_MODEL }
+  }
+
+  async setDefaultModel(model: { providerID: string; modelID: string }): Promise<void> {
+    await putSecret(DEFAULT_MODEL_SECRET, JSON.stringify(model))
   }
 
   async setSessionModel(
@@ -513,13 +535,13 @@ class AgentService {
   async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient(row.sandboxId)
-    const model = await this.getSessionModel(row.id)
+    const model = (await this.getSessionModel(row.id)) ?? await this.getDefaultModel()
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
       body: {
         parts: [{ type: 'text', text: input.message }],
         tools: CLOUD_TOOL_OVERRIDES,
-        ...(model ? { model } : {}),
+        model,
       },
       throwOnError: true,
     })

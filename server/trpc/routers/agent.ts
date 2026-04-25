@@ -224,6 +224,20 @@ export const agentRouter = router({
       }
     }),
 
+  defaultModelGet: protectedProcedure.query(() => agentService.getDefaultModel()),
+
+  defaultModelSet: protectedProcedure
+    .input(
+      z.object({
+        providerID: z.string().min(1).max(100),
+        modelID: z.string().min(1).max(200),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      await agentService.setDefaultModel(input)
+      return { ok: true as const }
+    }),
+
   sessionSetModel: protectedProcedure
     .input(
       z.object({

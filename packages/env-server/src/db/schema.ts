@@ -6,6 +6,8 @@ export const envMeta = sqliteTable('env_meta', {
   pairedAt: text('paired_at'),
   opencodePort: integer('opencode_port'),
   opencodePasswordHash: text('opencode_password_hash'),
+  defaultProviderId: text('default_provider_id'),
+  defaultModelId: text('default_model_id'),
 })
 
 export const pairSessions = sqliteTable('pair_sessions', {

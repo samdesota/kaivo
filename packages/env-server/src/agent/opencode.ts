@@ -440,10 +440,10 @@ class OpenCodeSupervisor {
     const cfg = {
       plugin: [config.CC_OPENCODE_PLUGIN_PATH],
       agent: {
-        plan: { mode: 'primary', model: 'anthropic/claude-opus-4-7' },
-        build: { mode: 'primary', model: 'anthropic/claude-opus-4-6' },
-        general: { mode: 'subagent', model: 'anthropic/claude-sonnet-4-6' },
-        explore: { mode: 'subagent', model: 'anthropic/claude-sonnet-4-6' },
+        plan: { mode: 'primary', model: 'openai/gpt-5.5' },
+        build: { mode: 'primary', model: 'openai/gpt-5.5' },
+        general: { mode: 'subagent', model: 'openai/gpt-5.5' },
+        explore: { mode: 'subagent', model: 'openai/gpt-5.5' },
       },
     }
     await fs.writeFile(path.join(dir, 'opencode.json'), JSON.stringify(cfg, null, 2))
