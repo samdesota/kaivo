@@ -33,6 +33,7 @@ const CLOUD_TOOL_OVERRIDES = {
   cloud_pty_write: true,
   cloud_pty_read: true,
   cloud_pty_close: true,
+  cloud_open_pane: true,
 } as const
 
 /** Turn a user prompt into a compact session title (≤60 chars, single line). */

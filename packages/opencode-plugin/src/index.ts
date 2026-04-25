@@ -51,7 +51,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     return {}
   }
   console.error(
-    `[cloud-code-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close (appUrl=${creds.appUrl})`,
+    `[cloud-code-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane (appUrl=${creds.appUrl})`,
   )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
@@ -128,6 +128,29 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
         },
         async execute(args, context) {
           return runCloudPtyClose(client, args, context as unknown as ToolCtxLike)
+        },
+      }),
+      cloud_open_pane: tool({
+        description:
+          'Open or focus a right-side pane tab in the Cloud Code UI. Supports the currently available pane types: file, shell, and preview. Use this to show the human relevant context. This tool does not read, write, or execute anything by itself.',
+        args: {
+          kind: z
+            .enum(['file', 'shell', 'preview'])
+            .describe('Pane type to open: file, shell, or preview.'),
+          path: z
+            .string()
+            .optional()
+            .describe('For kind=file: workspace-relative path to open, for example /src/app.ts.'),
+          shellId: z.string().optional().describe('For kind=shell: shell id to open.'),
+          port: z.number().int().optional().describe('For kind=preview: local preview port to open.'),
+          title: z.string().optional().describe('Optional short tab title.'),
+          activate: z
+            .boolean()
+            .optional()
+            .describe('Whether to focus the opened tab. Defaults to true.'),
+        },
+        async execute(args, context) {
+          return runCloudOpenPane(client, args, context as unknown as ToolCtxLike)
         },
       }),
     },
@@ -339,6 +362,67 @@ function ptyError(shellId: string, err: unknown): { output: string; metadata: Re
       status: 'error',
       stderr: (err as Error).message,
     },
+  }
+}
+
+async function runCloudOpenPane(
+  client: AgentShellClient,
+  args: {
+    kind: 'file' | 'shell' | 'preview'
+    path?: string
+    shellId?: string
+    port?: number
+    title?: string
+    activate?: boolean
+  },
+  ctx: ToolCtxLike,
+): Promise<{ output: string; metadata: Record<string, unknown> }> {
+  try {
+    let content:
+      | { type: 'file'; path: string }
+      | { type: 'shell'; shellId: string }
+      | { type: 'preview'; port: number }
+    if (args.kind === 'file') {
+      if (!args.path) throw new Error('path is required for kind=file')
+      content = { type: 'file', path: args.path }
+    } else if (args.kind === 'shell') {
+      if (!args.shellId) throw new Error('shellId is required for kind=shell')
+      content = { type: 'shell', shellId: args.shellId }
+    } else {
+      if (!args.port) throw new Error('port is required for kind=preview')
+      content = { type: 'preview', port: args.port }
+    }
+
+    await client.mutate<{ ok: true }>('agentUi.openPane', {
+      opencodeSessionId: ctx.sessionID,
+      content,
+      title: args.title,
+      activate: args.activate,
+    })
+
+    const label =
+      content.type === 'file'
+        ? content.path
+        : content.type === 'shell'
+          ? content.shellId
+          : `:${content.port}`
+    ctx.metadata({
+      title: `open ${content.type} ${truncateTitle(label)}`,
+      metadata: { status: 'success', pane_type: content.type },
+    })
+    return {
+      output: `Opened ${content.type} pane ${label}.`,
+      metadata: { status: 'success', pane_type: content.type },
+    }
+  } catch (err) {
+    return {
+      output: '',
+      metadata: {
+        status: 'error',
+        stderr: err instanceof AppUnreachableError ? 'cloud-code app unreachable' : (err as Error).message,
+        error: (err as Error).message,
+      },
+    }
   }
 }
 

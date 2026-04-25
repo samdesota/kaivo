@@ -9,6 +9,11 @@ import { SplitPane } from './shell/split-pane'
 import { type PaneContent, useRightPaneState } from './shell/tab-state'
 import type { EnvRef } from '../../lib/env-client'
 
+interface OpenPaneOptions {
+  title?: string
+  activate?: boolean
+}
+
 interface EnvRow extends EnvRef {
   label: string
   status: string
@@ -19,8 +24,8 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
 
-  const openContent = (content: PaneContent) => {
-    dispatch({ type: 'open', content, activate: true })
+  const openContent = (content: PaneContent, options?: OpenPaneOptions) => {
+    dispatch({ type: 'open', content, title: options?.title, activate: options?.activate ?? true })
   }
 
   useEffect(() => {
@@ -46,7 +51,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   const agentSection = (
     <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agents">
       <AgentSessionView
-        onOpenShell={openContent}
+        onOpenPane={openContent}
         onActiveSessionChange={setActiveSessionId}
       />
     </section>

@@ -21,6 +21,7 @@ const CLOUD_TOOL_OVERRIDES = {
   cloud_pty_write: true,
   cloud_pty_read: true,
   cloud_pty_close: true,
+  cloud_open_pane: true,
 } as const
 
 function truncatePromptForTitle(msg: string): string {
@@ -116,11 +117,17 @@ export interface TranscriptEvent {
 
 type TranscriptListener = (evt: TranscriptEvent) => void
 
-interface Subscription {
-  listeners: Set<TranscriptListener>
+// One opencode `/event` SSE stream per project directory. opencode routes
+// events for sessions bound to a non-default directory through that
+// project's bus, so a single global subscription only sees the supervisor's
+// CC_WORKING_DIR. We maintain one stream per distinct workingDir in use
+// (empty string is the default project).
+interface SubState {
+  directory: string
   controller: AbortController | null
   running: boolean
   restartTimer: ReturnType<typeof setTimeout> | null
+  listenerCount: number
 }
 
 export interface ModelInfo {
@@ -135,12 +142,8 @@ function dbDate(iso: string): Date {
 
 class AgentService {
   private client: OpencodeClient | null = null
-  private sub: Subscription = {
-    listeners: new Set(),
-    controller: null,
-    running: false,
-    restartTimer: null,
-  }
+  private listeners = new Set<TranscriptListener>()
+  private subs = new Map<string, SubState>()
   private pending = new Map<string, Map<string, PendingApproval>>() // opencodeSessionId -> permissionId
   private pendingQuestions = new Map<string, Map<string, PendingQuestion>>() // opencodeSessionId -> requestId
   private seqCounters = new Map<string, number>() // our session id -> next seq
@@ -276,7 +279,7 @@ class AgentService {
         .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
     }
 
-    this.ensureSubscription()
+    this.ensureSubscription(input.directory ?? '')
 
     return {
       id,
@@ -695,7 +698,10 @@ class AgentService {
     void (async () => {
       const row = await this.requireSession(sessionId).catch(() => null)
       if (!row || unsubscribed) return
-      this.ensureSubscription()
+      const directory = row.workingDir ?? ''
+      const state = this.getOrCreateSubState(directory)
+      state.listenerCount++
+      this.ensureSubscription(directory)
       const wrapper: TranscriptListener = (evt) => {
         if (evt.sessionId === row.opencodeSessionId) {
           fn(evt)
@@ -705,10 +711,13 @@ class AgentService {
           fn({ ...evt, parentSessionId: row.opencodeSessionId })
         }
       }
-      this.sub.listeners.add(wrapper)
+      this.listeners.add(wrapper)
       innerUnsub = () => {
-        this.sub.listeners.delete(wrapper)
-        if (this.sub.listeners.size === 0) this.stopSubscription()
+        this.listeners.delete(wrapper)
+        const s = this.subs.get(directory)
+        if (!s) return
+        s.listenerCount--
+        if (s.listenerCount <= 0) this.stopSubscription(directory)
       }
       if (unsubscribed) innerUnsub()
     })()
@@ -718,78 +727,109 @@ class AgentService {
     }
   }
 
-  private ensureSubscription(): void {
-    if (this.sub.running) return
-    this.sub.running = true
-    void this.runEventLoop().finally(() => {
-      this.sub.running = false
+  private getOrCreateSubState(directory: string): SubState {
+    let state = this.subs.get(directory)
+    if (!state) {
+      state = {
+        directory,
+        controller: null,
+        running: false,
+        restartTimer: null,
+        listenerCount: 0,
+      }
+      this.subs.set(directory, state)
+    }
+    return state
+  }
+
+  private ensureSubscription(directory: string = ''): void {
+    const state = this.getOrCreateSubState(directory)
+    if (state.running) return
+    state.running = true
+    void this.runEventLoop(directory).finally(() => {
+      const s = this.subs.get(directory)
+      if (s) s.running = false
     })
   }
 
-  private stopSubscription(): void {
-    if (this.sub.controller) {
+  private stopSubscription(directory: string): void {
+    const state = this.subs.get(directory)
+    if (!state) return
+    if (state.controller) {
       try {
-        this.sub.controller.abort()
+        state.controller.abort()
       } catch {
         // ignore
       }
-      this.sub.controller = null
+      state.controller = null
     }
-    if (this.sub.restartTimer) {
-      clearTimeout(this.sub.restartTimer)
-      this.sub.restartTimer = null
+    if (state.restartTimer) {
+      clearTimeout(state.restartTimer)
+      state.restartTimer = null
     }
   }
 
-  /** Restart the subscription (after opencode restart, etc.). */
+  /** Restart all subscriptions (after opencode restart, etc.). */
   private restartSubscription(): void {
-    if (this.sub.controller) {
-      try {
-        this.sub.controller.abort()
-      } catch {
-        // ignore
+    for (const state of this.subs.values()) {
+      if (state.controller) {
+        try {
+          state.controller.abort()
+        } catch {
+          // ignore
+        }
+        state.controller = null
       }
     }
-    this.sub.controller = null
-    if (this.sub.listeners.size > 0) this.ensureSubscription()
+    for (const state of this.subs.values()) {
+      if (state.listenerCount > 0) this.ensureSubscription(state.directory)
+    }
   }
 
-  private async runEventLoop(): Promise<void> {
+  private async runEventLoop(directory: string): Promise<void> {
     let client: OpencodeClient
     try {
       client = await this.getClient()
     } catch (err) {
-      logger.warn({ err }, 'agent subscribe: client init failed')
-      this.scheduleRestart()
+      logger.warn({ err, directory }, 'agent subscribe: client init failed')
+      this.scheduleRestart(directory)
       return
     }
     const controller = new AbortController()
-    this.sub.controller = controller
+    const state = this.subs.get(directory)
+    if (state) state.controller = controller
     try {
-      const stream = await client.event.subscribe({ signal: controller.signal })
+      const stream = await client.event.subscribe({
+        signal: controller.signal,
+        ...(directory ? { query: { directory } } : {}),
+      })
       for await (const evt of stream.stream) {
         if (controller.signal.aborted) break
         await this.handleEvent(evt)
       }
     } catch (err) {
       if (!controller.signal.aborted) {
-        logger.warn({ err }, 'agent event stream failed')
+        logger.warn({ err, directory }, 'agent event stream failed')
         this.invalidateClient()
-        this.scheduleRestart()
+        this.scheduleRestart(directory)
       }
     } finally {
-      this.sub.controller = null
+      const s = this.subs.get(directory)
+      if (s && s.controller === controller) s.controller = null
     }
   }
 
-  private scheduleRestart(): void {
-    if (this.sub.listeners.size === 0) return
-    if (this.sub.restartTimer) return
-    this.sub.restartTimer = setTimeout(() => {
-      this.sub.restartTimer = null
-      if (this.sub.listeners.size > 0) this.ensureSubscription()
+  private scheduleRestart(directory: string): void {
+    const state = this.subs.get(directory)
+    if (!state) return
+    if (state.listenerCount === 0) return
+    if (state.restartTimer) return
+    state.restartTimer = setTimeout(() => {
+      const s = this.subs.get(directory)
+      if (s) s.restartTimer = null
+      if (s && s.listenerCount > 0) this.ensureSubscription(directory)
     }, 2_000)
-    this.sub.restartTimer.unref?.()
+    state.restartTimer.unref?.()
   }
 
   private async handleEvent(raw: unknown): Promise<void> {
@@ -843,7 +883,7 @@ class AgentService {
             parentSessionId: parentId,
             payload: { info: info as Record<string, unknown> },
           }
-          for (const l of this.sub.listeners) {
+          for (const l of this.listeners) {
             try {
               l(fanout)
             } catch (err) {
@@ -939,7 +979,7 @@ class AgentService {
       sessionId: ocSessionId,
       payload: props,
     }
-    for (const l of this.sub.listeners) {
+    for (const l of this.listeners) {
       try {
         l(evt)
       } catch (err) {

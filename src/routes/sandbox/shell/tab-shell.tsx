@@ -7,6 +7,11 @@ import { RightPane } from './right-pane'
 import { SplitPane } from './split-pane'
 import { type PaneContent, useRightPaneState } from './tab-state'
 
+interface OpenPaneOptions {
+  title?: string
+  activate?: boolean
+}
+
 interface TabShellProps {
   sandboxId: string
   sandboxName: string
@@ -18,8 +23,8 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
   const [state, dispatch] = useRightPaneState(sandboxId)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
-  const openContent = (content: PaneContent) => {
-    dispatch({ type: 'open', content, activate: true })
+  const openContent = (content: PaneContent, options?: OpenPaneOptions) => {
+    dispatch({ type: 'open', content, title: options?.title, activate: options?.activate ?? true })
   }
 
   // Reflect the active sandbox in the document title so browser tabs are
@@ -48,7 +53,7 @@ export function TabShell({ sandboxId, sandboxName, sandboxStatus, running }: Tab
   const hasTabs = state.tabs.length > 0
   const agentSection = (
     <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agents">
-      <AgentSessionView sandboxId={sandboxId} onOpenShell={openContent} />
+      <AgentSessionView sandboxId={sandboxId} onOpenPane={openContent} />
     </section>
   )
 

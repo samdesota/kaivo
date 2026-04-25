@@ -36,6 +36,11 @@ type Action =
       evt: { type: string; parentSessionId?: string; payload: Record<string, unknown> }
     }
 
+interface OpenPaneOptions {
+  title?: string
+  activate?: boolean
+}
+
 function reducer(state: TranscriptState, action: Action): TranscriptState {
   switch (action.type) {
     case 'reset':
@@ -53,10 +58,10 @@ function reducer(state: TranscriptState, action: Action): TranscriptState {
 
 export function AgentSessionView({
   sandboxId,
-  onOpenShell,
+  onOpenPane,
 }: {
   sandboxId: string
-  onOpenShell?: (content: PaneContent) => void
+  onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
 }) {
   const status = trpc.agent.agentStatus.useQuery({ sandboxId }, { refetchInterval: 5_000 })
   const sessions = trpc.agent.sessionList.useQuery({ sandboxId }, { refetchInterval: 5_000 })
@@ -133,7 +138,7 @@ export function AgentSessionView({
             key={sessionId}
             sandboxId={sandboxId}
             sessionId={sessionId}
-            onOpenShell={onOpenShell}
+            onOpenPane={onOpenPane}
           />
         ) : (
           <EmptySessionState sandboxId={sandboxId} onCreated={(id) => setSessionId(id)} />
@@ -146,11 +151,11 @@ export function AgentSessionView({
 function SessionPane({
   sandboxId,
   sessionId,
-  onOpenShell,
+  onOpenPane,
 }: {
   sandboxId: string
   sessionId: string
-  onOpenShell?: (content: PaneContent) => void
+  onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
 }) {
   const [state, dispatch] = useReducer(reducer, undefined as unknown as TranscriptState, emptyTranscript)
   const [reconnecting, setReconnecting] = useState(false)
@@ -223,6 +228,19 @@ function SessionPane({
       },
       onError() {
         setReconnecting(true)
+      },
+    },
+  )
+
+  trpc.agentUi.events.useSubscription(
+    { sessionId },
+    {
+      onData(evt) {
+        if (evt.type !== 'open_pane') return
+        onOpenPane?.(evt.content as PaneContent, {
+          title: evt.title,
+          activate: evt.activate,
+        })
       },
     },
   )
@@ -444,7 +462,7 @@ function SessionPane({
                     role={role}
                     sessionId={sessionId}
                     sandboxId={sandboxId}
-                    onOpenShell={onOpenShell}
+                    onOpenShell={onOpenPane}
                     childTranscript={childTranscript}
                   />
                 </div>

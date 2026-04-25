@@ -136,6 +136,38 @@ describe('cloud-code opencode plugin', () => {
     expect(ctx.metadataCalls.at(0)?.metadata?.cloudcode_shell_id).toBe('pty-42')
   })
 
+  it('cloud_open_pane: mutation publishes pane intent', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      expect(String(url)).toBe('http://app:3000/trpc/agentUi.openPane')
+      expect(init?.method).toBe('POST')
+      const parsed = JSON.parse(init!.body as string)
+      expect(parsed.json).toEqual({
+        opencodeSessionId: 'oc-pane',
+        content: { type: 'file', path: '/src/app.ts' },
+        title: 'app.ts',
+        activate: true,
+      })
+      return new Response(JSON.stringify({ result: { data: { json: { ok: true } } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+
+    const hooks = buildHooks({
+      tokenOverride: 't',
+      appUrlOverride: 'http://app:3000',
+      fetchImpl,
+    })
+    const result = (await hooks.tool!.cloud_open_pane!.execute(
+      { kind: 'file', path: '/src/app.ts', title: 'app.ts', activate: true },
+      makeCtx('oc-pane') as never,
+    )) as { output: string; metadata: Record<string, unknown> }
+
+    expect(result.output).toBe('Opened file pane /src/app.ts.')
+    expect(result.metadata.status).toBe('success')
+    expect(result.metadata.pane_type).toBe('file')
+  })
+
   it('cloud_pty: structured error on unreachable app', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down')

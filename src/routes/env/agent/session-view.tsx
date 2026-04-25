@@ -36,6 +36,11 @@ type Action =
       evt: { type: string; parentSessionId?: string; payload: Record<string, unknown> }
     }
 
+interface OpenPaneOptions {
+  title?: string
+  activate?: boolean
+}
+
 function reducer(state: TranscriptState, action: Action): TranscriptState {
   switch (action.type) {
     case 'reset':
@@ -82,10 +87,10 @@ interface SessionStatus {
 }
 
 export function AgentSessionView({
-  onOpenShell,
+  onOpenPane,
   onActiveSessionChange,
 }: {
-  onOpenShell?: (content: PaneContent) => void
+  onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   /**
    * Fires whenever the focused session changes. Lets EnvTabShell forward
    * the active session id (and thus its working dir) to the command
@@ -172,7 +177,7 @@ export function AgentSessionView({
           <SessionPane
             key={sessionId}
             sessionId={sessionId}
-            onOpenShell={onOpenShell}
+            onOpenPane={onOpenPane}
           />
         ) : (
           <EmptySessionState onCreated={(id) => setSessionId(id)} />
@@ -223,10 +228,10 @@ function RestartAgentButton() {
 
 function SessionPane({
   sessionId,
-  onOpenShell,
+  onOpenPane,
 }: {
   sessionId: string
-  onOpenShell?: (content: PaneContent) => void
+  onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
 }) {
   const [state, dispatch] = useReducer(reducer, undefined as unknown as TranscriptState, emptyTranscript)
   const [reconnecting, setReconnecting] = useState(false)
@@ -291,6 +296,19 @@ function SessionPane({
       },
       onError() {
         setReconnecting(true)
+      },
+    },
+  )
+
+  envTrpc.agentUi.events.useSubscription(
+    { sessionId },
+    {
+      onData(evt) {
+        if (evt.type !== 'open_pane') return
+        onOpenPane?.(evt.content as PaneContent, {
+          title: evt.title,
+          activate: evt.activate,
+        })
       },
     },
   )
@@ -495,7 +513,7 @@ function SessionPane({
                         state={state}
                         role={role}
                         sessionId={sessionId}
-                        onOpenShell={onOpenShell}
+                        onOpenShell={onOpenPane}
                         childTranscript={childTranscript}
                       />
                     </div>
