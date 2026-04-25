@@ -9,7 +9,9 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   splitting: false,
-  // better-sqlite3 and node-pty ship native bindings; keep external so the
-  // compiled binary picks up the installed node_modules at runtime.
-  external: ['better-sqlite3', 'node-pty'],
+  // tsup's default is to externalize everything declared in `dependencies`,
+  // which is what we want here: bundling CJS deps that use dynamic requires
+  // (better-sqlite3, pino, …) into ESM produces "Dynamic require of X is
+  // not supported" failures at runtime. Ship the bundle alongside a full
+  // `npm install` of the env-server package.json instead.
 })

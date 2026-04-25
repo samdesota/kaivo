@@ -8,6 +8,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 async function findMigrationsDir(): Promise<string> {
   const candidates = [
+    // Bundled deploys (install.sh + base-sandbox image) ship migrations
+    // alongside main.js, so HERE is the right anchor.
+    path.resolve(HERE, 'migrations'),
+    path.resolve(HERE, '../migrations'),
+    // Source / `tsx watch` runs main.js from src/, two levels above the
+    // package's `migrations/` dir.
     path.resolve(HERE, '../../migrations'),
     path.resolve(HERE, '../../../migrations'),
     path.resolve(process.cwd(), 'migrations'),

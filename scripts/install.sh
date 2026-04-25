@@ -91,6 +91,15 @@ prompt CC_LABEL "env label (shown in the orchestrator UI)" "$(hostname -s)"
 
 mkdir -p "$install_dir/app" "$state_dir"
 
+echo "==> ensuring opencode CLI is available"
+if ! command -v opencode >/dev/null 2>&1; then
+  echo "    opencode not found in PATH; installing globally via npm"
+  npm install -g --no-audit --no-fund --silent opencode-ai@1.4.14
+fi
+opencode_bin=$(command -v opencode)
+opencode_dir=$(dirname "$opencode_bin")
+echo "    opencode at $opencode_bin"
+
 echo "==> building cc-env"
 (
   cd "$repo_root/packages/env-server"
@@ -110,20 +119,21 @@ cp "$repo_root/packages/env-server/dist/main.js" "$install_dir/app/main.js"
 rm -rf "$install_dir/app/migrations"
 cp -R "$repo_root/packages/env-server/migrations" "$install_dir/app/migrations"
 
-# Slimmed runtime package.json — only better-sqlite3 + node-pty need to
-# be installed at runtime; everything else was inlined by tsup.
-cat > "$install_dir/app/package.json" <<'EOF'
-{
-  "name": "cc-env-runtime",
-  "version": "0.0.1",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "better-sqlite3": "^11.5.0",
-    "node-pty": "^1.0.0"
+# Ship the env-server package.json verbatim so `npm install` pulls in all
+# runtime deps. tsup externalizes `dependencies`, so the bundled main.js
+# expects to resolve them from a real node_modules tree.
+node --input-type=module -e "
+  import fs from 'node:fs'
+  const src = JSON.parse(fs.readFileSync('${repo_root}/packages/env-server/package.json', 'utf8'))
+  const out = {
+    name: 'cc-env-runtime',
+    version: src.version,
+    private: true,
+    type: 'module',
+    dependencies: src.dependencies ?? {},
   }
-}
-EOF
+  fs.writeFileSync('${install_dir}/app/package.json', JSON.stringify(out, null, 2) + '\n')
+"
 
 (
   cd "$install_dir/app"
@@ -244,7 +254,7 @@ case "$service_kind" in
     <key>CC_IDENTITY_URL</key><string>${CC_IDENTITY_URL}</string>
     <key>CC_ALLOWED_ORIGINS</key><string>${CC_APP_ORIGIN}</string>
     <key>CC_OPENCODE_PLUGIN_PATH</key><string>${plugin_path_uri}</string>
-    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>${opencode_dir}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -281,6 +291,7 @@ Environment=CC_STATE_DIR=${state_dir}
 Environment=CC_IDENTITY_URL=${CC_IDENTITY_URL}
 Environment=CC_ALLOWED_ORIGINS=${CC_APP_ORIGIN}
 Environment=CC_OPENCODE_PLUGIN_PATH=${plugin_path_uri}
+Environment=PATH=${opencode_dir}:/usr/local/bin:/usr/bin:/bin
 ExecStart=${node_bin} ${install_dir}/app/main.js
 Restart=on-failure
 RestartSec=2

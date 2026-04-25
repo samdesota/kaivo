@@ -18,20 +18,19 @@ cp "${root}/packages/env-server/dist/main.js" "${ctx}/cc-env/main.js"
 rm -rf "${ctx}/cc-env/migrations"
 cp -R "${root}/packages/env-server/migrations" "${ctx}/cc-env/migrations"
 
-# Minimal runtime package.json. Keep version + name so npm install is
-# deterministic; drop devDeps and non-native runtime deps (tsup inlined).
+# Ship the env-server package.json verbatim. tsup externalizes
+# `dependencies`, so the bundled main.js resolves them from node_modules
+# at runtime — slimming would reintroduce the "module not found" errors
+# we hit when betting on tsup to inline CJS-via-ESM deps.
 node --input-type=module -e "
   import fs from 'node:fs'
   const src = JSON.parse(fs.readFileSync('${root}/packages/env-server/package.json', 'utf8'))
-  const native = ['better-sqlite3', 'node-pty']
   const out = {
     name: src.name,
     version: src.version,
     private: true,
     type: 'module',
-    dependencies: Object.fromEntries(
-      Object.entries(src.dependencies ?? {}).filter(([k]) => native.includes(k))
-    ),
+    dependencies: src.dependencies ?? {},
   }
   fs.writeFileSync('${ctx}/cc-env/package.json', JSON.stringify(out, null, 2) + '\n')
 "
