@@ -54,6 +54,12 @@ body {
   color: #abb2bf;
 }
 
+html.overlay-layer-document,
+body.overlay-layer-document,
+#root.overlay-layer-document {
+  background: transparent;
+}
+
 .no-scrollbar {
   scrollbar-width: none;
 }

@@ -22,6 +22,17 @@ export type OverlayResponse =
   | { requestId: string; type: 'error'; message: string }
 
 export function OverlayLayerPage() {
+  useEffect(() => {
+    document.documentElement.classList.add('overlay-layer-document')
+    document.body.classList.add('overlay-layer-document')
+    document.getElementById('root')?.classList.add('overlay-layer-document')
+    return () => {
+      document.documentElement.classList.remove('overlay-layer-document')
+      document.body.classList.remove('overlay-layer-document')
+      document.getElementById('root')?.classList.remove('overlay-layer-document')
+    }
+  }, [])
+
   return <OverlayLayerApp />
 }
 
