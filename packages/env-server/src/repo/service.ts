@@ -1,13 +1,16 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { eq } from 'drizzle-orm'
 import { ulid } from 'ulid'
 import { config } from '../config.js'
+import { db } from '../db/client.js'
+import { repos } from '../db/schema.js'
 import { getRepoConfig, listRepoConfigs, type RepoConfigSummary } from '../identity/client.js'
 
 export class RepoError extends Error {
   constructor(
-    public readonly code: 'not_found' | 'invalid_config' | 'clone_failed',
+    public readonly code: 'not_found' | 'invalid_config' | 'already_exists' | 'clone_failed' | 'delete_failed',
     message: string,
   ) {
     super(message)
@@ -17,8 +20,24 @@ export class RepoError extends Error {
 
 export interface RepoCloneResult {
   configId: string
+  repoId: string
   workingDir: string
   name: string
+  worktreeName: string
+}
+
+export interface RepoWorktreeSummary {
+  id: string
+  configId: string | null
+  name: string
+  slug: string
+  worktreeName: string
+  worktreeSlug: string
+  originUrl: string
+  ref: string
+  workingDir: string
+  githubFullName: string | null
+  createdAt: string
 }
 
 function slugify(name: string): string {
@@ -65,7 +84,23 @@ class RepoService {
     return listRepoConfigs()
   }
 
-  async cloneConfig(configId: string): Promise<RepoCloneResult> {
+  listWorktrees(): RepoWorktreeSummary[] {
+    return db.select().from(repos).all().map((row) => ({
+      id: row.id,
+      configId: row.configId,
+      name: row.name,
+      slug: row.slug,
+      worktreeName: row.worktreeName ?? path.basename(row.workspacePath),
+      worktreeSlug: row.worktreeSlug ?? path.basename(row.workspacePath),
+      originUrl: row.originUrl,
+      ref: row.ref,
+      workingDir: row.workspacePath,
+      githubFullName: row.githubFullName,
+      createdAt: row.createdAt,
+    }))
+  }
+
+  async cloneConfig(configId: string, worktreeName: string): Promise<RepoCloneResult> {
     let bundle: Awaited<ReturnType<typeof getRepoConfig>>
     try {
       bundle = await getRepoConfig(configId)
@@ -79,13 +114,30 @@ class RepoService {
 
     const cloneRoot = path.join(config.CC_WORKING_DIR, 'repos')
     const slug = slugify(bundle.summary.name)
-    const workingDir = path.join(cloneRoot, `${slug}-${ulid().toLowerCase().slice(-8)}`)
-    await fs.mkdir(cloneRoot, { recursive: true })
+    if (!worktreeName.trim()) throw new RepoError('invalid_config', 'work tree name is required')
+    const worktreeSlug = slugify(worktreeName)
+    const repoRoot = path.join(cloneRoot, slug)
+    const workingDir = path.join(repoRoot, worktreeSlug)
+    await fs.mkdir(repoRoot, { recursive: true })
+
+    try {
+      await fs.stat(workingDir)
+      throw new RepoError('already_exists', `work tree already exists: ${slug}/${worktreeSlug}`)
+    } catch (err) {
+      if (err instanceof RepoError) throw err
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+    }
 
     const args = ['clone', '--progress']
     if (bundle.summary.ref) args.push('--branch', bundle.summary.ref)
-    args.push(repoUrl(bundle.summary), workingDir)
-    await runGitClone(args)
+    const originUrl = repoUrl(bundle.summary)
+    args.push(originUrl, workingDir)
+    try {
+      await runGitClone(args)
+    } catch (err) {
+      await fs.rm(workingDir, { recursive: true, force: true }).catch(() => undefined)
+      throw err
+    }
 
     for (const file of bundle.files) {
       const target = safeJoin(workingDir, file.path)
@@ -93,7 +145,38 @@ class RepoService {
       await fs.writeFile(target, file.contents, 'utf8')
     }
 
-    return { configId, workingDir, name: bundle.summary.name }
+    const repoId = ulid()
+    db.insert(repos).values({
+      id: repoId,
+      configId,
+      name: bundle.summary.name,
+      slug,
+      worktreeName,
+      worktreeSlug,
+      originUrl,
+      ref: bundle.summary.ref ?? '',
+      workspacePath: workingDir,
+      source: bundle.summary.source ?? (bundle.summary.githubFullName ? 'github' : 'url'),
+      githubRepoId: null,
+      githubFullName: bundle.summary.githubFullName ?? null,
+      createdAt: new Date().toISOString(),
+    }).run()
+
+    return { configId, repoId, workingDir, name: bundle.summary.name, worktreeName }
+  }
+
+  async deleteWorktree(repoId: string): Promise<{ id: string }> {
+    const rows = db.select().from(repos).where(eq(repos.id, repoId)).limit(1).all()
+    const row = rows[0]
+    if (!row) throw new RepoError('not_found', 'work tree not found')
+    const workspacePath = path.resolve(row.workspacePath)
+    const cloneRoot = path.resolve(config.CC_WORKING_DIR, 'repos')
+    if (workspacePath !== cloneRoot && !workspacePath.startsWith(cloneRoot + path.sep)) {
+      throw new RepoError('delete_failed', 'work tree path is outside repo clone root')
+    }
+    await fs.rm(workspacePath, { recursive: true, force: true })
+    db.delete(repos).where(eq(repos.id, repoId)).run()
+    return { id: repoId }
   }
 }
 

@@ -45,6 +45,8 @@ export const repos = sqliteTable('repos', {
   configId: text('config_id'),
   name: text('name').notNull(),
   slug: text('slug').notNull(),
+  worktreeName: text('worktree_name'),
+  worktreeSlug: text('worktree_slug'),
   originUrl: text('origin_url').notNull(),
   ref: text('ref').notNull(),
   workspacePath: text('workspace_path').notNull(),

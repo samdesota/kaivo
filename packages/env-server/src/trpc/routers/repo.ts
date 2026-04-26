@@ -17,13 +17,10 @@ function toTrpcError(err: unknown): TRPCError {
   })
 }
 
-// Phase 3 stub: repos.* endpoints return the SQLite rows but don't yet
-// orchestrate clone/remove. Phase 4 will flesh out add/remove once
-// identity-side `envApi.listRepoConfigs` is plumbed.
 export const repoRouter = router({
-  list: authedProcedure.query(() => {
-    return db.select().from(repos).all()
-  }),
+  list: authedProcedure.query(() => db.select().from(repos).all()),
+
+  listWorktrees: authedProcedure.query(() => repoService.listWorktrees()),
 
   listRecentFolders: authedProcedure.query(() => recentFolderService.list()),
 
@@ -34,10 +31,20 @@ export const repoRouter = router({
   listConfigs: authedProcedure.query(async () => repoService.listConfigs()),
 
   cloneConfig: authedProcedure
-    .input(z.object({ configId: z.string().min(1) }))
+    .input(z.object({ configId: z.string().min(1), worktreeName: z.string().min(1).max(120) }))
     .mutation(async ({ input }) => {
       try {
-        return await repoService.cloneConfig(input.configId)
+        return await repoService.cloneConfig(input.configId, input.worktreeName)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  deleteWorktree: authedProcedure
+    .input(z.object({ repoId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await repoService.deleteWorktree(input.repoId)
       } catch (err) {
         throw toTrpcError(err)
       }

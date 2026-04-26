@@ -11,7 +11,7 @@ const testState = vi.hoisted(() => ({
 }))
 
 vi.mock('../config.js', () => ({
-  config: { CC_WORKING_DIR: testState.tmpRoot },
+  config: { CC_WORKING_DIR: testState.tmpRoot, CC_STATE_DIR: testState.tmpRoot },
 }))
 
 vi.mock('../identity/client.js', () => ({
@@ -59,13 +59,38 @@ afterEach(async () => {
 })
 
 describe('repo service', () => {
-  it('full clone path is returned and config files are materialized', async () => {
-    const { repoService } = await import('./service.js')
+  async function setupRepoService() {
+    const [{ repoService }, { sqliteRaw }] = await Promise.all([
+      import('./service.js'),
+      import('../db/client.js'),
+    ])
+    sqliteRaw.exec(`
+      CREATE TABLE IF NOT EXISTS repos (
+        id TEXT PRIMARY KEY,
+        config_id TEXT,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        worktree_name TEXT,
+        worktree_slug TEXT,
+        origin_url TEXT NOT NULL,
+        ref TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('github','url')),
+        github_repo_id TEXT,
+        github_full_name TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+    return repoService
+  }
 
-    const result = await repoService.cloneConfig('cfg-1')
+  it('full clone path is returned and config files are materialized', async () => {
+    const repoService = await setupRepoService()
+
+    const result = await repoService.cloneConfig('cfg-1', 'Bug Shell Resize')
 
     expect(result.configId).toBe('cfg-1')
-    expect(result.workingDir).toContain(path.join(testState.tmpRoot, 'repos', 'project-one-'))
+    expect(result.workingDir).toBe(path.join(testState.tmpRoot, 'repos', 'project-one', 'bug-shell-resize'))
     expect(testState.cloneArgs[0]).toEqual([
       'clone',
       '--progress',
@@ -77,12 +102,36 @@ describe('repo service', () => {
     await expect(fs.readFile(path.join(result.workingDir, '.cloud/model.json'), 'utf8')).resolves.toBe(
       '{"model":"gpt-5.5"}',
     )
+    expect(repoService.listWorktrees()).toMatchObject([
+      {
+        configId: 'cfg-1',
+        name: 'Project One',
+        slug: 'project-one',
+        worktreeName: 'Bug Shell Resize',
+        worktreeSlug: 'bug-shell-resize',
+        workingDir: result.workingDir,
+      },
+    ])
+  })
+
+  it('deletes a cloned work tree', async () => {
+    const repoService = await setupRepoService()
+
+    const result = await repoService.cloneConfig('cfg-1', 'Cleanup Me')
+
+    await repoService.deleteWorktree(result.repoId)
+
+    await expect(fs.stat(result.workingDir)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(repoService.listWorktrees()).toEqual([])
   })
 
   it('invalid config maps to not_found', async () => {
-    const { RepoError, repoService } = await import('./service.js')
+    const [{ RepoError }, repoService] = await Promise.all([
+      import('./service.js'),
+      setupRepoService(),
+    ])
 
-    await expect(repoService.cloneConfig('missing')).rejects.toBeInstanceOf(RepoError)
-    await expect(repoService.cloneConfig('missing')).rejects.toMatchObject({ code: 'not_found' })
+    await expect(repoService.cloneConfig('missing', 'demo')).rejects.toBeInstanceOf(RepoError)
+    await expect(repoService.cloneConfig('missing', 'demo')).rejects.toMatchObject({ code: 'not_found' })
   })
 })
