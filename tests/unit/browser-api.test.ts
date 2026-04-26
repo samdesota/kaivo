@@ -9,6 +9,9 @@ function makeWindow() {
     setActive: vi.fn(async () => ({ ok: true })),
     close: vi.fn(async () => ({ ok: true })),
     goto: vi.fn(async () => ({ ok: true })),
+    back: vi.fn(async () => ({ ok: true })),
+    forward: vi.fn(async () => ({ ok: true })),
+    reload: vi.fn(async () => ({ ok: true })),
     subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
   }
   const win = {
@@ -23,7 +26,12 @@ function makeWindow() {
           close: { mutate: calls.close },
           onChange: { subscribe: calls.subscribe },
         },
-        navigation: { goto: { mutate: calls.goto } },
+        navigation: {
+          goto: { mutate: calls.goto },
+          back: { mutate: calls.back },
+          forward: { mutate: calls.forward },
+          reload: { mutate: calls.reload },
+        },
       },
     },
   } as unknown as Window & { webframe: unknown }
@@ -66,8 +74,14 @@ describe('browser API adapter', () => {
 
     await api.focusTab({ browserTabId: 'tab-1' })
     await api.navigate({ browserTabId: 'tab-1', url: 'https://example.org' })
+    await api.back({ browserTabId: 'tab-1' })
+    await api.forward({ browserTabId: 'tab-1' })
+    await api.reload({ browserTabId: 'tab-1' })
     await api.closeTab({ browserTabId: 'tab-1' })
     expect(calls.goto).toHaveBeenLastCalledWith({ tabId: 'tab-1', url: 'https://example.org' })
+    expect(calls.back).toHaveBeenLastCalledWith({ tabId: 'tab-1' })
+    expect(calls.forward).toHaveBeenLastCalledWith({ tabId: 'tab-1' })
+    expect(calls.reload).toHaveBeenLastCalledWith({ tabId: 'tab-1', ignoreCache: false })
     expect(calls.close).toHaveBeenLastCalledWith({ tabId: 'tab-1' })
   })
 })

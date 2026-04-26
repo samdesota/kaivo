@@ -14,6 +14,9 @@ export type BrowserApi = {
   attachTab(input: { paneId: string; browserTabId: string }): Promise<void>
   focusTab(input: { browserTabId: string }): Promise<void>
   navigate(input: { browserTabId: string; url: string }): Promise<void>
+  back(input: { browserTabId: string }): Promise<void>
+  forward(input: { browserTabId: string }): Promise<void>
+  reload(input: { browserTabId: string; ignoreCache?: boolean }): Promise<void>
   closeTab(input: { browserTabId: string }): Promise<void>
   setSlot(input: BrowserSlotUpdate): Promise<void>
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
@@ -39,6 +42,9 @@ type WebframeGlobal = {
     }
     navigation: {
       goto: { mutate: (input: unknown) => Promise<unknown> }
+      back: { mutate: (input: unknown) => Promise<unknown> }
+      forward: { mutate: (input: unknown) => Promise<unknown> }
+      reload: { mutate: (input: unknown) => Promise<unknown> }
     }
   }
 }
@@ -105,6 +111,24 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     async navigate(input) {
       const webframe = getWebframe(win)
       await webframe.trpc.navigation.goto.mutate({ tabId: input.browserTabId, url: input.url })
+    },
+
+    async back(input) {
+      const webframe = getWebframe(win)
+      await webframe.trpc.navigation.back.mutate({ tabId: input.browserTabId })
+    },
+
+    async forward(input) {
+      const webframe = getWebframe(win)
+      await webframe.trpc.navigation.forward.mutate({ tabId: input.browserTabId })
+    },
+
+    async reload(input) {
+      const webframe = getWebframe(win)
+      await webframe.trpc.navigation.reload.mutate({
+        tabId: input.browserTabId,
+        ignoreCache: input.ignoreCache ?? false,
+      })
     },
 
     async closeTab(input) {

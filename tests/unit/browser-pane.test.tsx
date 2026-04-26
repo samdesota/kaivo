@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { act, render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = {
@@ -9,6 +9,9 @@ const api = {
   attachTab: vi.fn(async () => undefined),
   focusTab: vi.fn(async () => undefined),
   navigate: vi.fn(async () => undefined),
+  back: vi.fn(async () => undefined),
+  forward: vi.fn(async () => undefined),
+  reload: vi.fn(async () => undefined),
   closeTab: vi.fn(async () => undefined),
   setSlot: vi.fn(async () => undefined),
   onTabChange: vi.fn(() => () => undefined),
@@ -94,5 +97,31 @@ describe('BrowserPane', () => {
     api.isAvailable.mockReturnValue(false)
     const view = render(<BrowserPane paneId="pane-1" active={true} />)
     expect(view.getByText('Browser pane unavailable')).toBeTruthy()
+  })
+
+  it('renders controls and drives browser navigation', async () => {
+    const view = render(
+      <BrowserPane paneId="pane-1" browserTabId="native-tab-1" url="https://example.com" active={true} />,
+    )
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalledWith({
+      paneId: 'pane-1',
+      browserTabId: 'native-tab-1',
+    }))
+
+    fireEvent.click(view.getByLabelText('Back'))
+    fireEvent.click(view.getByLabelText('Forward'))
+    fireEvent.click(view.getByLabelText('Reload'))
+    expect(api.back).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
+    expect(api.forward).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
+    expect(api.reload).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
+
+    const input = view.getByLabelText('URL') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'example.org/path' } })
+    fireEvent.submit(view.getByLabelText('Browser controls'))
+    await waitFor(() => expect(api.navigate).toHaveBeenCalledWith({
+      browserTabId: 'native-tab-1',
+      url: 'https://example.org/path',
+    }))
   })
 })

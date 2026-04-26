@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "npm run build && electron dist/main.js",
+    "package:mac": "npm run build && electron-packager . \"Cloud Code Desktop\" --platform=darwin --arch=arm64 --out=release --overwrite --ignore='^/src($|/)' --ignore='^/dist/.*\\.map$'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -14,6 +15,7 @@
     "electron": "^32.3.3"
   },
   "devDependencies": {
+    "@electron/packager": "^20.0.0",
     "@types/node": "^22.9.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2"
