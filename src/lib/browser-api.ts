@@ -8,6 +8,14 @@ export type BrowserTabChange = {
   patch: Record<string, unknown>
 }
 
+export type BrowserTabCreated = {
+  browserTabId: string
+  windowId: string | null
+  openerBrowserTabId: string | null
+  url: string
+  title: string
+}
+
 export type BrowserApi = {
   isAvailable(): boolean
   createTab(input: { paneId: string; url?: string }): Promise<{ browserTabId: string }>
@@ -20,6 +28,7 @@ export type BrowserApi = {
   closeTab(input: { browserTabId: string }): Promise<void>
   setSlot(input: BrowserSlotUpdate): Promise<void>
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
+  onWindowTabCreated(handler: (event: BrowserTabCreated) => void): () => void
 }
 
 type WebframeGlobal = {
@@ -37,6 +46,18 @@ type WebframeGlobal = {
         subscribe: (
           input: unknown,
           opts: { onData?: (data: { tabId: string; patch: Record<string, unknown> }) => void },
+        ) => { unsubscribe: () => void }
+      }
+      onCreated?: {
+        subscribe: (
+          input: unknown,
+          opts: {
+            onData?: (data: {
+              tab: { id: string; url: string; title: string }
+              windowId: string | null
+              openerTabId: string | null
+            }) => void
+          },
         ) => { unsubscribe: () => void }
       }
     }
@@ -157,6 +178,30 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
         },
       })
       return () => sub.unsubscribe()
+    },
+
+    onWindowTabCreated(handler) {
+      if (!win?.webframe?.trpc?.tabs.onCreated) return () => undefined
+      let unsubscribed = false
+      let sub: { unsubscribe: () => void } | null = null
+      void getWindowId().then((windowId) => {
+        if (unsubscribed || !win?.webframe?.trpc?.tabs.onCreated) return
+        sub = win.webframe.trpc.tabs.onCreated.subscribe({ windowId }, {
+          onData(data) {
+            handler({
+              browserTabId: data.tab.id,
+              windowId: data.windowId,
+              openerBrowserTabId: data.openerTabId,
+              url: data.tab.url,
+              title: data.tab.title,
+            })
+          },
+        })
+      })
+      return () => {
+        unsubscribed = true
+        sub?.unsubscribe()
+      }
     },
   }
 }

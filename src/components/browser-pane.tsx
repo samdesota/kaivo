@@ -7,21 +7,24 @@ interface BrowserPaneProps {
   browserTabId?: string
   active: boolean
   onBrowserTabId?: (browserTabId: string) => void
+  onTitleChange?: (title: string) => void
 }
 
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 }
 
-export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId }: BrowserPaneProps) {
+export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId, onTitleChange }: BrowserPaneProps) {
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
   const createdTabIdRef = useRef<string | null>(null)
   const onBrowserTabIdRef = useRef(onBrowserTabId)
+  const onTitleChangeRef = useRef(onTitleChange)
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
   const [address, setAddress] = useState(url ?? '')
 
   browserTabIdRef.current = browserTabId
   onBrowserTabIdRef.current = onBrowserTabId
+  onTitleChangeRef.current = onTitleChange
 
   useEffect(() => {
     setAddress(url ?? '')
@@ -97,6 +100,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId 
     return browserApi.onTabChange((event) => {
       if (event.browserTabId !== browserTabIdRef.current) return
       if (typeof event.patch.url === 'string') setAddress(event.patch.url)
+      if (typeof event.patch.title === 'string') onTitleChangeRef.current?.(event.patch.title)
     })
   }, [])
 

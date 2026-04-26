@@ -71,7 +71,7 @@ export function SessionTabs({
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1">
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap">
         {active.map((s) => {
           const selected = s.id === sessionId
           const label = s.title ?? s.id.slice(-6)

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { trpc } from '../trpc'
 import { envTrpc, makeEnvReactClient } from '../env-trpc'
+import { browserApi } from '../lib/browser-api'
 import { extractTrpcMessage } from '../lib/utils'
 import { useLocalEnvIdentity } from '../lib/local-env-discovery'
 import { ShellChrome } from './env/shell/shell-chrome'
@@ -325,7 +326,7 @@ function useWorkspaceOpenPane(dispatchWorkspaceState: WorkspaceUiDispatch) {
     (content: PaneContent, options?: { title?: string; activate?: boolean }) => {
       const envId = ctx.localEnvTarget?.env.id
       if (!envId && content.type !== 'browser') return
-      const id = `${content.type}-${envId ?? 'browser'}-${Date.now()}`
+      const id = makeWorkspaceTabId(content.type, envId)
       if (content.type === 'shell') {
         dispatchWorkspaceState({
           type: 'openTab',
@@ -349,6 +350,10 @@ function useWorkspaceOpenPane(dispatchWorkspaceState: WorkspaceUiDispatch) {
     },
     [ctx.localEnvTarget?.env.id, dispatchWorkspaceState],
   )
+}
+
+function makeWorkspaceTabId(type: string, envId?: string): string {
+  return `${type}-${envId ?? 'browser'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function WorkspaceEnvTargetProvider({ children }: { children: ReactNode }) {
@@ -408,6 +413,31 @@ function WorkspaceTabPane({
   dispatchWorkspaceState: WorkspaceUiDispatch
 }) {
   const ctx = useWorkspaceContext()
+  const tabsRef = useRef(ctx.uiState.workspaceTabs)
+
+  tabsRef.current = ctx.uiState.workspaceTabs
+
+  useEffect(() => {
+    return browserApi.onWindowTabCreated((event) => {
+      if (!event.openerBrowserTabId) return
+      const openedFromThisWorkspace = tabsRef.current.some(
+        (tab) => tab.type === 'browser' && tab.browserTabId === event.openerBrowserTabId,
+      )
+      if (!openedFromThisWorkspace) return
+      dispatchWorkspaceState({
+        type: 'openTab',
+        tab: {
+          id: makeWorkspaceTabId('browser'),
+          type: 'browser',
+          url: event.url,
+          browserTabId: event.browserTabId,
+          title: truncateTabTitle(event.title || event.url),
+        },
+        activate: true,
+      })
+    })
+  }, [dispatchWorkspaceState])
+
   const activeTab =
     ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId) ??
     ctx.uiState.workspaceTabs[0]
@@ -416,26 +446,37 @@ function WorkspaceTabPane({
     : null
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-neutral-950" aria-label="Workspace Tabs">
-      <div role="tablist" className="flex items-center gap-0.5 overflow-x-auto border-b border-neutral-800 px-2 py-1">
+      <div
+        role="tablist"
+        className="flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b border-neutral-800 bg-neutral-950 px-2 py-1"
+      >
         {ctx.uiState.workspaceTabs.map((tab) => (
           <div
             key={tab.id}
             role="tab"
             aria-selected={tab.id === ctx.uiState.activeWorkspaceTabId}
             className={
-              'group flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs ' +
+              'group flex shrink-0 items-center gap-0.5 rounded transition-colors ' +
               (tab.id === ctx.uiState.activeWorkspaceTabId
                 ? 'bg-neutral-800 text-neutral-100'
                 : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200')
             }
           >
-            <button onClick={() => dispatchWorkspaceState({ type: 'activateTab', tabId: tab.id })}>
+            <button
+              onClick={() => dispatchWorkspaceState({ type: 'activateTab', tabId: tab.id })}
+              className="max-w-[200px] truncate py-1 pl-2 pr-1 text-xs"
+              title={workspaceTabLabel(tab)}
+            >
               {tab.title}
             </button>
             <button
-              onClick={() => dispatchWorkspaceState({ type: 'closeTab', tabId: tab.id })}
-              className="rounded px-1 text-neutral-500 hover:bg-neutral-700 hover:text-neutral-100"
+              onClick={(e) => {
+                e.stopPropagation()
+                dispatchWorkspaceState({ type: 'closeTab', tabId: tab.id })
+              }}
+              className="mr-1 rounded px-1 text-[11px] leading-none text-neutral-500 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 hover:opacity-100"
               aria-label="Close tab"
+              title="Close tab"
             >
               ×
             </button>
@@ -455,6 +496,9 @@ function WorkspaceTabPane({
             onClose={() => dispatchWorkspaceState({ type: 'closeTab', tabId: activeTab.id })}
             onBrowserTabId={(browserTabId) =>
               dispatchWorkspaceState({ type: 'setBrowserTabId', tabId: activeTab.id, browserTabId })
+            }
+            onTitleChange={(title) =>
+              dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
             }
           />
         ) : (
@@ -476,10 +520,12 @@ function WorkspaceTabContent({
   tab,
   onClose,
   onBrowserTabId,
+  onTitleChange,
 }: {
   tab: WorkspaceTab
   onClose: () => void
   onBrowserTabId: (browserTabId: string) => void
+  onTitleChange: (title: string) => void
 }) {
   if (tab.type === 'shell') {
     return (
@@ -508,11 +554,18 @@ function WorkspaceTabContent({
           browserTabId={tab.browserTabId}
           active
           onBrowserTabId={onBrowserTabId}
+          onTitleChange={onTitleChange}
         />
       </div>
     )
   }
   return <span>{workspaceTabLabel(tab)}</span>
+}
+
+function truncateTabTitle(title: string): string {
+  const trimmed = title.trim()
+  if (!trimmed) return 'Browser'
+  return trimmed.length > 48 ? `${trimmed.slice(0, 47)}…` : trimmed
 }
 
 function WorkspaceBottomBar() {

@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { envTrpc } from '../../../env-trpc'
+import { browserApi } from '../../../lib/browser-api'
 import { FileTabContent } from '../tabs/file-tab'
 import { BrowserTabContent } from '../tabs/browser-tab'
 import { PreviewTabContent } from '../tabs/preview-tab'
@@ -22,6 +23,9 @@ interface ShellRow {
 
 export function RightPane({ state, dispatch }: RightPaneProps) {
   const shells = envTrpc.shell.list.useQuery(undefined, { refetchInterval: 5_000 })
+  const tabsRef = useRef(state.tabs)
+
+  tabsRef.current = state.tabs
 
   const liveShellIds = useMemo(() => {
     if (!shells.data) return null
@@ -33,13 +37,29 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
     dispatch({ type: 'pruneShells', liveShellIds })
   }, [liveShellIds, dispatch])
 
+  useEffect(() => {
+    return browserApi.onWindowTabCreated((event) => {
+      if (!event.openerBrowserTabId) return
+      const openedFromThisPane = tabsRef.current.some(
+        (tab) => tab.content.type === 'browser' && tab.content.browserTabId === event.openerBrowserTabId,
+      )
+      if (!openedFromThisPane) return
+      dispatch({
+        type: 'open',
+        content: { type: 'browser', url: event.url, browserTabId: event.browserTabId },
+        title: truncateTabTitle(event.title || event.url),
+        activate: true,
+      })
+    })
+  }, [dispatch])
+
   const activeTab = state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0]
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-neutral-950">
       <div
         role="tablist"
-        className="flex items-center gap-0.5 overflow-x-auto border-b border-neutral-800 bg-neutral-950 px-2 py-1"
+        className="flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b border-neutral-800 bg-neutral-950 px-2 py-1"
       >
         {state.tabs.map((t) => {
           const active = t.id === state.activeTabId
@@ -49,7 +69,7 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
               role="tab"
               aria-selected={active}
               className={
-                'group flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs ' +
+                'group flex shrink-0 items-center gap-0.5 rounded transition-colors ' +
                 (active
                   ? 'bg-neutral-800 text-neutral-100'
                   : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200')
@@ -57,7 +77,7 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
             >
               <button
                 onClick={() => dispatch({ type: 'activate', tabId: t.id })}
-                className="max-w-[200px] truncate"
+                className="max-w-[200px] truncate py-1 pl-2 pr-1 text-xs"
                 title={tabTitleDetail(t.content)}
               >
                 {t.title || defaultTitle(t.content)}
@@ -67,7 +87,7 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
                   e.stopPropagation()
                   dispatch({ type: 'close', tabId: t.id })
                 }}
-                className="rounded px-1 text-neutral-500 hover:bg-neutral-700 hover:text-neutral-100"
+                className="mr-1 rounded px-1 text-[11px] leading-none text-neutral-500 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 hover:opacity-100"
                 aria-label="Close tab"
                 title="Close tab"
               >
@@ -121,10 +141,17 @@ function TabContent({
         onBrowserTabId={(browserTabId) =>
           dispatch({ type: 'setBrowserTabId', tabId, browserTabId })
         }
+        onTitleChange={(title) => dispatch({ type: 'setTitle', tabId, title: truncateTabTitle(title) })}
       />
     )
   }
   return null
+}
+
+function truncateTabTitle(title: string): string {
+  const trimmed = title.trim()
+  if (!trimmed) return 'Browser'
+  return trimmed.length > 48 ? `${trimmed.slice(0, 47)}…` : trimmed
 }
 
 function tabTitleDetail(c: PaneContent): string {
