@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -6,10 +5,11 @@ import { _electron as electron } from '@playwright/test'
 import { expect, test } from './harness/electron-fixture'
 import { parseDesktopLogFile } from './harness/logs'
 
-const vitePort = 5191
-const viteUrl = `http://127.0.0.1:${vitePort}/login`
+const vitePort = 5195
+const chromeUrl = `http://127.0.0.1:${vitePort}/browser-open-pane-fixture.html`
+const tabUrl = `http://127.0.0.1:${vitePort}/browser-api-tab.html?agent-open`
 
-test('desktop harness reaches the React app shell through webframe', async ({ desktopLogPath, desktopStateDir }, testInfo) => {
+test('agent browser open_pane path attaches a real webframe tab', async ({ desktopLogPath, desktopStateDir }, testInfo) => {
   const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(vitePort), '--strictPort'], {
     cwd: path.resolve('.'),
     env: process.env,
@@ -20,13 +20,13 @@ test('desktop harness reaches the React app shell through webframe', async ({ de
   vite.stderr?.on('data', (chunk) => viteLogs.push(String(chunk)))
 
   try {
-    await waitForHttp(viteUrl)
+    await waitForHttp(chromeUrl)
     const app = await electron.launch({
       args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/cloud-code-desktop/dist/main.js')],
       env: {
         ...process.env,
         NODE_ENV: 'development',
-        CC_DESKTOP_CHROME_URL: viteUrl,
+        CC_DESKTOP_CHROME_URL: chromeUrl,
         CC_DESKTOP_TEST_LOG: desktopLogPath,
         CC_DESKTOP_TEST_STATE_DIR: desktopStateDir,
       },
@@ -34,14 +34,22 @@ test('desktop harness reaches the React app shell through webframe', async ({ de
 
     try {
       const page = await app.firstWindow()
-      await expect(page.getByLabel('Password')).toBeVisible({ timeout: 15_000 })
-      const state = await app.evaluate(() => globalThis.cloudCodeDesktopTest.getState())
-      expect(state.config.chromeUrl).toBe(viteUrl)
-      expect(state.windowIds.length).toBeGreaterThanOrEqual(1)
+      await expect(page.getByText('Browser Open Pane Fixture')).toBeVisible({ timeout: 15_000 })
+      await page.evaluate((url) => window.cloudCodeOpenBrowserPane(url), tabUrl)
 
-      const records = parseDesktopLogFile(desktopLogPath)
-      expect(records.some((record) => record.kind === 'main')).toBe(true)
-      expect(records.some((record) => record.kind === 'chrome-renderer')).toBe(true)
+      await expect.poll(async () => {
+        const state = await app.evaluate(() => globalThis.cloudCodeDesktopTest.getState())
+        return state.tabRecords.some((tab) => tab.url === tabUrl)
+      }).toBe(true)
+
+      const state = await app.evaluate(() => globalThis.cloudCodeDesktopTest.getState())
+      expect(state.windowInfo[0]?.slots.some((slot) => slot.name.startsWith('browser-pane:'))).toBe(true)
+
+      await expect.poll(() =>
+        parseDesktopLogFile(desktopLogPath).some(
+          (record) => record.kind === 'tab-renderer' && record.msg.includes('browser api tab ready'),
+        ),
+      ).toBe(true)
     } finally {
       await app.close().catch(() => undefined)
     }
@@ -95,14 +103,7 @@ async function stopProcess(child: ChildProcess): Promise<void> {
 }
 
 declare global {
-  // Playwright evaluates this inside Electron's main process.
-  var cloudCodeDesktopTest: {
-    getState: () => Promise<{
-      config: { chromeUrl: string }
-      windowIds: string[]
-      tabRecords: Array<{ id: string; url: string }>
-      windowInfo: Array<{ slots: Array<{ name: string }> }>
-      nativeViews: Array<{ children: Array<{ bounds?: { x: number; y: number; width: number; height: number } }> }>
-    }>
+  interface Window {
+    cloudCodeOpenBrowserPane: (url: string) => void
   }
 }

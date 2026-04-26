@@ -4,6 +4,7 @@ export type PaneContent =
   | { type: 'shell'; shellId: string }
   | { type: 'file'; path: string }
   | { type: 'preview'; port: number }
+  | { type: 'browser'; url?: string; browserTabId?: string }
 
 export interface Tab {
   id: string
@@ -21,6 +22,7 @@ export type RightPaneAction =
   | { type: 'activate'; tabId: string }
   | { type: 'close'; tabId: string }
   | { type: 'setTitle'; tabId: string; title: string }
+  | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
   | { type: 'pruneShells'; liveShellIds: ReadonlySet<string> }
   | { type: 'hydrate'; state: RightPaneState }
 
@@ -35,6 +37,7 @@ export function defaultTitle(c: PaneContent): string {
     return parts[parts.length - 1] ?? c.path
   }
   if (c.type === 'preview') return `:${c.port}`
+  if (c.type === 'browser') return browserTitle(c)
   return 'Tab'
 }
 
@@ -43,7 +46,20 @@ function sameContent(a: PaneContent, b: PaneContent): boolean {
   if (a.type === 'shell' && b.type === 'shell') return a.shellId === b.shellId
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'preview' && b.type === 'preview') return a.port === b.port
+  if (a.type === 'browser' && b.type === 'browser') {
+    if (a.browserTabId && b.browserTabId) return a.browserTabId === b.browserTabId
+    return (a.url ?? '') === (b.url ?? '')
+  }
   return false
+}
+
+function browserTitle(c: Extract<PaneContent, { type: 'browser' }>): string {
+  if (!c.url) return 'Browser'
+  try {
+    return new URL(c.url).hostname || c.url
+  } catch {
+    return c.url
+  }
 }
 
 export function initialState(): RightPaneState {
@@ -100,6 +116,16 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
         ),
       }
     }
+    case 'setBrowserTabId': {
+      return {
+        ...state,
+        tabs: state.tabs.map((t) =>
+          t.id === action.tabId && t.content.type === 'browser'
+            ? { ...t, content: { ...t.content, browserTabId: action.browserTabId } }
+            : t,
+        ),
+      }
+    }
     case 'pruneShells': {
       const keep = state.tabs.filter(
         (t) => t.content.type !== 'shell' || action.liveShellIds.has(t.content.shellId),
@@ -143,6 +169,12 @@ function loadStored(sandboxId: string): RightPaneState | null {
       if (c.type === 'shell' && typeof c.shellId === 'string') return true
       if (c.type === 'file' && typeof c.path === 'string') return true
       if (c.type === 'preview' && typeof c.port === 'number') return true
+      if (c.type === 'browser') {
+        return (
+          (c.url === undefined || typeof c.url === 'string') &&
+          (c.browserTabId === undefined || typeof c.browserTabId === 'string')
+        )
+      }
       return false
     })
     if (tabs.length === 0) return { tabs: [], activeTabId: '' }

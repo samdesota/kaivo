@@ -168,6 +168,38 @@ describe('cloud-code opencode plugin', () => {
     expect(result.metadata.pane_type).toBe('file')
   })
 
+  it('cloud_open_pane: browser mutation publishes pane intent', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      expect(String(url)).toBe('http://app:3000/trpc/agentUi.openPane')
+      expect(init?.method).toBe('POST')
+      const parsed = JSON.parse(init!.body as string)
+      expect(parsed.json).toEqual({
+        opencodeSessionId: 'oc-browser-pane',
+        content: { type: 'browser', url: 'https://example.com' },
+        title: 'Example',
+        activate: true,
+      })
+      return new Response(JSON.stringify({ result: { data: { json: { ok: true } } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+
+    const hooks = buildHooks({
+      tokenOverride: 't',
+      appUrlOverride: 'http://app:3000',
+      fetchImpl,
+    })
+    const result = (await hooks.tool!.cloud_open_pane!.execute(
+      { kind: 'browser', url: 'https://example.com', title: 'Example', activate: true },
+      makeCtx('oc-browser-pane') as never,
+    )) as { output: string; metadata: Record<string, unknown> }
+
+    expect(result.output).toBe('Opened browser pane https://example.com.')
+    expect(result.metadata.status).toBe('success')
+    expect(result.metadata.pane_type).toBe('browser')
+  })
+
   it('cloud_pty: structured error on unreachable app', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down')

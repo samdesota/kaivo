@@ -2,6 +2,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { trpc } from '../../../trpc'
+import { handleAgentUiOpenPaneEvent } from '../../../lib/agent-ui-open-pane'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
@@ -236,11 +237,7 @@ function SessionPane({
     { sessionId },
     {
       onData(evt) {
-        if (evt.type !== 'open_pane') return
-        onOpenPane?.(evt.content as PaneContent, {
-          title: evt.title,
-          activate: evt.activate,
-        })
+        handleAgentUiOpenPaneEvent(evt as { type: string; content: PaneContent; title?: string; activate: boolean }, onOpenPane)
       },
     },
   )

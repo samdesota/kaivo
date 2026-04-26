@@ -96,17 +96,96 @@ npm run dev
 
 The Vite dev server proxies `/trpc`, `/api`, and `/healthz` to the Fastify backend. Open <http://localhost:5173>.
 
+## Desktop Electron Development
+
+The desktop package lives in `packages/cloud-code-desktop`. It wraps the existing React app as `webframe` chrome and renders browser panes as native Electron `WebContentsView` tabs.
+
+### GitHub Packages Auth
+
+Normal installs consume `@samdesota/webframe` from GitHub Packages. Configure npm auth outside the repo:
+
+```ini
+@samdesota:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+`NODE_AUTH_TOKEN` needs `read:packages` for installs. Publishing `webframe` requires `write:packages` in the `webframe` repo.
+
+### Published Package Workflow
+
+```bash
+npm install
+npm run build:desktop
+npm run test:e2e:desktop:app
+```
+
+Run the desktop app against the local Vite URL:
+
+```bash
+npm run dev:server
+npm run dev:client
+CC_DESKTOP_CHROME_URL=http://127.0.0.1:5180 npm run dev:desktop
+```
+
+Run it against the deployed app:
+
+```bash
+CC_DESKTOP_CHROME_URL=https://code.438d.xyz npm run dev:desktop
+```
+
+### Linked `../webframe` Workflow
+
+For local `webframe` development, keep a sibling checkout at `../webframe` and run its watch build while the desktop app restarts against the linked package output:
+
+```bash
+cd ../webframe
+npm install
+npm link
+npm run build:watch
+```
+
+In this repo:
+
+```bash
+cd packages/cloud-code-desktop
+npm link @samdesota/webframe
+cd ../..
+npm run dev:desktop:stack
+```
+
+If the linked `webframe` package has not been built, `cloud-code-desktop` should fail fast on the missing package output. Re-run `npm run build` or keep `npm run build:watch` running in `../webframe`.
+
+### Desktop Test Harness
+
+Desktop e2e tests use Playwright Electron and write per-test logs under Playwright's `test-results` output. Logs include Electron main messages, chrome renderer console output, browser-tab renderer console output, crashes, uncaught exceptions, and unhandled rejections.
+
+Useful commands:
+
+```bash
+npm run build:desktop
+npm run test:e2e:desktop
+npm run test:e2e:desktop:app
+CC_DESKTOP_MAIN=packages/cloud-code-desktop/dist/main.js npx playwright test -c playwright.desktop.config.ts tests/desktop/agent-browser-open.spec.ts
+```
+
+On failure, Playwright attaches recent desktop log lines and a trace. To run one desktop test, pass its spec path after `playwright.desktop.config.ts` as shown above.
+
 ## Scripts
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | Server + Vite, concurrent. |
 | `npm run build` | Build SPA (`dist/client`) + server bundle (`dist/server`). |
+| `npm run build:desktop` | Build `packages/cloud-code-desktop` main/preload bundles. |
 | `npm start` | Run the production server (expects `dist/` present). |
 | `npm run typecheck` | TypeScript check for server + client. |
+| `npm run dev:desktop` | Build and run the desktop Electron package. |
+| `npm run dev:desktop:stack` | Run server, Vite, `../webframe` watch build, and desktop together. |
 | `npm run lint` | ESLint. |
 | `npm test` | Vitest unit suite. |
 | `npm run test:e2e` | Playwright smoke (requires a reachable Postgres at `PLAYWRIGHT_DATABASE_URL`). |
+| `npm run test:e2e:desktop` | Playwright Electron desktop suite. |
+| `npm run test:e2e:desktop:app` | Desktop smoke against the built `cloud-code-desktop` main process. |
 | `npm run db:migrate` | Apply SQL migrations in `migrations/`. |
 | `npm run docker:sandbox` | Build the `cloud-code-sandbox:dev` base image (required before creating sandboxes). |
 

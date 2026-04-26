@@ -8,18 +8,7 @@ import { config } from '../../config.js'
 import { db } from '../../db/client.js'
 import { agentSessions } from '../../db/schema.js'
 import { terminalService } from '../../terminal/service.js'
-
-const paneContentSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('file'),
-    path: z.string().min(1).max(4096),
-    absolute: z.boolean().optional(),
-  }),
-  z.object({ type: z.literal('shell'), shellId: z.string().min(1) }),
-  z.object({ type: z.literal('preview'), port: z.number().int().min(1).max(65535) }),
-])
-
-export type AgentPaneContent = z.infer<typeof paneContentSchema>
+import { paneContentSchema, type AgentPaneContent } from './agent-ui-schema.js'
 
 export interface AgentUiEvent {
   type: 'open_pane'

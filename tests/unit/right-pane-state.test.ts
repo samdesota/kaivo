@@ -45,6 +45,39 @@ describe('rightPaneReducer', () => {
     expect(kinds).toEqual(['file', 'preview'])
   })
 
+  it('browser tabs open, focus, restore, and close', () => {
+    const browserContent: PaneContent = { type: 'browser', url: 'https://example.com' }
+    const s1 = open(state, browserContent)
+    expect(s1.tabs).toHaveLength(1)
+    expect(s1.tabs[0]?.title).toBe('example.com')
+    expect(s1.activeTabId).toBe(s1.tabs[0]?.id)
+
+    const s2 = rightPaneReducer(s1, { type: 'open', content: browserContent, activate: false })
+    expect(s2.tabs).toHaveLength(1)
+
+    const restored = rightPaneReducer(state, { type: 'hydrate', state: s2 })
+    expect(restored.tabs[0]?.content).toEqual(browserContent)
+    expect(restored.activeTabId).toBe(s1.tabs[0]?.id)
+
+    const closed = rightPaneReducer(restored, { type: 'close', tabId: restored.tabs[0]!.id })
+    expect(closed.tabs).toHaveLength(0)
+    expect(closed.activeTabId).toBe('')
+  })
+
+  it('stores browserTabId on browser content', () => {
+    const s1 = open(state, { type: 'browser', url: 'https://example.com' })
+    const s2 = rightPaneReducer(s1, {
+      type: 'setBrowserTabId',
+      tabId: s1.tabs[0]!.id,
+      browserTabId: 'native-tab-1',
+    })
+    expect(s2.tabs[0]?.content).toEqual({
+      type: 'browser',
+      url: 'https://example.com',
+      browserTabId: 'native-tab-1',
+    })
+  })
+
   it('closing the active tab activates a neighbor', () => {
     let s = open(state, { type: 'shell', shellId: 'a' })
     s = open(s, { type: 'shell', shellId: 'b' })

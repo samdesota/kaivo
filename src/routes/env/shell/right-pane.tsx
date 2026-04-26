@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { envTrpc } from '../../../env-trpc'
 import { FileTabContent } from '../tabs/file-tab'
+import { BrowserTabContent } from '../tabs/browser-tab'
 import { PreviewTabContent } from '../tabs/preview-tab'
 import { ShellTabContent } from '../tabs/shell-tab'
 import {
@@ -87,7 +88,7 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
               aria-hidden={!active}
               className={'h-full min-h-0 ' + (active ? 'block' : 'hidden')}
             >
-              <TabContent content={t.content} />
+              <TabContent tabId={t.id} content={t.content} active={active} dispatch={dispatch} />
             </div>
           )
         })}
@@ -96,10 +97,33 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
   )
 }
 
-function TabContent({ content }: { content: PaneContent }) {
+function TabContent({
+  tabId,
+  content,
+  active,
+  dispatch,
+}: {
+  tabId: string
+  content: PaneContent
+  active: boolean
+  dispatch: React.Dispatch<RightPaneAction>
+}) {
   if (content.type === 'shell') return <ShellTabContent shellId={content.shellId} />
   if (content.type === 'file') return <FileTabContent path={content.path} absolute={content.absolute} />
   if (content.type === 'preview') return <PreviewTabContent port={content.port} />
+  if (content.type === 'browser') {
+    return (
+      <BrowserTabContent
+        paneId={tabId}
+        url={content.url}
+        browserTabId={content.browserTabId}
+        active={active}
+        onBrowserTabId={(browserTabId) =>
+          dispatch({ type: 'setBrowserTabId', tabId, browserTabId })
+        }
+      />
+    )
+  }
   return null
 }
 
@@ -107,5 +131,6 @@ function tabTitleDetail(c: PaneContent): string {
   if (c.type === 'shell') return c.shellId
   if (c.type === 'file') return c.path
   if (c.type === 'preview') return `port ${c.port}`
+  if (c.type === 'browser') return c.url ?? c.browserTabId ?? 'browser'
   return ''
 }

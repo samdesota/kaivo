@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Browser Open Pane Fixture</title>
+  </head>
+  <body class="bg-neutral-950 text-neutral-100">
+    <div id="root"></div>
+    <script type="module">
+      import RefreshRuntime from '/@react-refresh'
+      RefreshRuntime.injectIntoGlobalHook(window)
+      window.$RefreshReg$ = () => {}
+      window.$RefreshSig$ = () => (type) => type
+      window.__vite_plugin_react_preamble_installed__ = true
+    </script>
+    <script type="module" src="/src/browser-open-pane-fixture.tsx"></script>
+  </body>
+</html>

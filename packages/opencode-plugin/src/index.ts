@@ -132,11 +132,11 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       cloud_open_pane: tool({
         description:
-          'Open or focus a right-side pane tab in the Cloud Code UI. Supports the currently available pane types: file, shell, and preview. Use this to show the human relevant context. This tool does not read, write, or execute anything by itself.',
+          'Open or focus a right-side pane tab in the Cloud Code UI. Supports file, shell, preview, and browser panes. Use this to show the human relevant context. This tool does not read, write, or execute anything by itself.',
         args: {
           kind: z
-            .enum(['file', 'shell', 'preview'])
-            .describe('Pane type to open: file, shell, or preview.'),
+            .enum(['file', 'shell', 'preview', 'browser'])
+            .describe('Pane type to open: file, shell, preview, or browser.'),
           path: z
             .string()
             .optional()
@@ -145,6 +145,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
             ),
           shellId: z.string().optional().describe('For kind=shell: shell id to open.'),
           port: z.number().int().optional().describe('For kind=preview: local preview port to open.'),
+          url: z.string().optional().describe('For kind=browser: URL to open.'),
           title: z.string().optional().describe('Optional short tab title.'),
           activate: z
             .boolean()
@@ -370,10 +371,11 @@ function ptyError(shellId: string, err: unknown): { output: string; metadata: Re
 async function runCloudOpenPane(
   client: AgentShellClient,
   args: {
-    kind: 'file' | 'shell' | 'preview'
+    kind: 'file' | 'shell' | 'preview' | 'browser'
     path?: string
     shellId?: string
     port?: number
+    url?: string
     title?: string
     activate?: boolean
   },
@@ -384,15 +386,18 @@ async function runCloudOpenPane(
       | { type: 'file'; path: string }
       | { type: 'shell'; shellId: string }
       | { type: 'preview'; port: number }
+      | { type: 'browser'; url?: string }
     if (args.kind === 'file') {
       if (!args.path) throw new Error('path is required for kind=file')
       content = { type: 'file', path: args.path }
     } else if (args.kind === 'shell') {
       if (!args.shellId) throw new Error('shellId is required for kind=shell')
       content = { type: 'shell', shellId: args.shellId }
-    } else {
+    } else if (args.kind === 'preview') {
       if (!args.port) throw new Error('port is required for kind=preview')
       content = { type: 'preview', port: args.port }
+    } else {
+      content = args.url ? { type: 'browser', url: args.url } : { type: 'browser' }
     }
 
     await client.mutate<{ ok: true }>('agentUi.openPane', {
@@ -407,7 +412,9 @@ async function runCloudOpenPane(
         ? content.path
         : content.type === 'shell'
           ? content.shellId
-          : `:${content.port}`
+          : content.type === 'preview'
+            ? `:${content.port}`
+            : (content.url ?? 'browser')
     ctx.metadata({
       title: `open ${content.type} ${truncateTitle(label)}`,
       metadata: { status: 'success', pane_type: content.type },

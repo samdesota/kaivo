@@ -44,7 +44,7 @@ Create the desktop app package inside `cloud-code-tools` and wire it into the ha
 
 **Steps**
 - Add `packages/cloud-code-desktop` with `src/main.ts`, `src/preload.ts`, package metadata, TypeScript config, and bundling config.
-- Add Electron and `@cloud-code/webframe` dependencies in the right package scope.
+- Add Electron and `@samdesota/webframe` dependencies in the right package scope.
 - Add root scripts for desktop build, typecheck, development startup, and desktop e2e tests.
 - Point the Electron harness at the built desktop main process.
 
@@ -93,39 +93,45 @@ Teach the app and agent UI protocol about browser pane content without rendering
 
 **Depends on:** Task 4
 
-## Task 6: Add Desktop Browser Bridge
+**Status:** done
 
-Expose a narrow preload API that lets the React chrome create, attach, navigate, focus, and close `webframe` tabs.
+## Task 6: Add Browser API Adapter
+
+Expose a narrow browser API adapter that lets the React chrome create, attach, navigate, focus, and close `webframe` tabs without duplicating `webframe`'s shell API.
 
 **Steps**
-- Add `window.cloudCodeDesktop.browser` preload API with availability, tab control, slot updates, and tab-change subscription methods.
-- Implement main-process handlers that call `webframe` window, tab, navigation, and slot APIs.
+- Add a renderer-side browser API module with availability, tab control, slot updates, and tab-change subscription methods.
+- Implement the Electron adapter by delegating to `window.webframe.trpc.windows`, `tabs`, and `navigation` methods; do not add custom main-process IPC for operations webframe already exposes.
 - Add a non-Electron fallback adapter for the web app that reports browser support as unavailable.
-- Add harness helpers for invoking the bridge from the chrome page and inspecting resulting `webframe` main-process state.
+- Add harness helpers for invoking the browser API from the chrome page and inspecting resulting `webframe` main-process state.
 
 **Tests**
-- Unit: bridge adapter reports unavailable outside Electron.
-- Unit: preload API validates request shape before calling main handlers.
-- Integration: desktop harness creates a `webframe` tab through the bridge, navigates it to a local test page, inspects tab state through `app.evaluate`, and captures tab renderer logs.
+- Unit: browser API adapter reports unavailable outside Electron.
+- Unit: Electron browser API maps pane ids, slot rects, tab creation, focus, close, and navigation calls to the expected `window.webframe.trpc` operations.
+- Integration: desktop harness creates a `webframe` tab through the browser API, navigates it to a local test page, inspects tab state through `app.evaluate`, and captures tab renderer logs.
 
 **Depends on:** Task 5
+
+**Status:** done
 
 ## Task 7: Render Browser Panes With Native Slots
 
 Connect the React right pane to Electron slots so browser panes display real `WebContentsView` tabs instead of iframes.
 
 **Steps**
-- Add a browser pane React component that measures its bounds and sends slot updates through the desktop bridge.
+- Add a browser pane React component that measures its bounds and sends slot updates through the browser API adapter.
 - Create or attach the `webframe` tab when the browser pane mounts or becomes active.
 - Detach, hide, or close native tabs when panes unmount, close, or lose their visible slot.
 - Subscribe to browser tab lifecycle updates for title and navigation state where needed.
 
 **Tests**
-- Unit: browser pane component calls bridge methods on mount, resize, activation, and cleanup.
+- Unit: browser pane component calls browser API methods on mount, resize, activation, and cleanup.
 - Integration: desktop harness opens two browser panes, switches active right-pane tabs, and verifies native `WebContentsView` bounds and z-order through main-process inspection.
 - Integration: desktop harness resizes the app window and verifies the active tab follows the pane slot while inactive native content stays hidden.
 
 **Depends on:** Task 6
+
+**Status:** done
 
 ## Task 8: Integrate Agent-Driven Browser Opening
 
@@ -143,6 +149,8 @@ Complete the user-facing flow where an agent opens a full browser tab in the sid
 - Integration: desktop harness captures logs from the opened browser tab and includes them in failure output.
 
 **Depends on:** Task 7
+
+**Status:** done
 
 ## Task 9: Package and Document Desktop Development
 

@@ -11,7 +11,7 @@ Bring the `webframe` project into this codebase and use it as the foundation for
 - App boundary: the existing Vite/React app remains the chrome UI and continues rendering the agent workflow.
 - Pane integration: extend the existing right-pane tab model from `shell | file | preview` to include `browser`.
 - Browser rendering: browser tabs render through `webframe`/Electron views, not iframes or `<webview>`.
-- Control channel: expose browser tab create/focus/navigate/close through the existing agent UI pane-opening path plus a small Electron IPC bridge.
+- Control channel: expose browser tab create/focus/navigate/close through the existing agent UI pane-opening path plus a thin browser API adapter over `window.webframe.trpc`.
 - Runtime boot: Electron starts the existing app URL in development and the built app/server in production.
 - Migration path: keep current preview tabs initially; add real browser tabs as a new pane type, then replace preview behavior where appropriate.
 
@@ -23,7 +23,7 @@ The Electron shell is a local desktop runtime for `cloud-code-tools`. It does no
 
 `webframe` stays in its own repository and is consumed as a package by `cloud-code-tools`.
 
-The `webframe` repo publishes to GitHub Packages under a scoped package name, for example `@cloud-code/webframe`. Its package must keep public exports for the Electron main process and renderer bridge:
+The `webframe` repo publishes to GitHub Packages under a scoped package name. The current package is `@samdesota/webframe`. Its package must keep public exports for the Electron main process and renderer browser API:
 
 ```json
 {
@@ -55,11 +55,11 @@ packages/cloud-code-desktop/
   tsup.config.ts
 ```
 
-The Electron main process owns startup, shutdown, and native browser surfaces. It imports `createApp` from `@cloud-code/webframe`, creates a `webframe` app, and opens one chrome window whose `chromeUrl` is the existing `cloud-code-tools` UI.
+The Electron main process owns startup, shutdown, and native browser surfaces. It imports `createApp` from `@samdesota/webframe`, creates a `webframe` app, and opens one chrome window whose `chromeUrl` is the existing `cloud-code-tools` UI.
 
 In development, the chrome URL points at the Vite dev server. The normal dev loop runs the app server, Vite client, `webframe` watch build, and Electron main process together. In production, Electron starts or connects to the built `cloud-code-tools` server and loads the served client URL.
 
-The preload script exposes only the Electron-specific bridge needed by the React app. If it replaces the default `webframe` chrome preload, it must preserve access to `window.webframe` so the chrome can call `webframe` APIs.
+The desktop app should preserve the default `webframe` chrome preload so the React chrome can call `window.webframe.trpc`. Do not duplicate `webframe`'s tab/window/navigation API in custom main-process IPC unless a concrete missing operation is discovered.
 
 ### Browser Pane Model
 
@@ -77,7 +77,7 @@ type BrowserPaneContent = {
 
 The existing pane state remains the source of truth for the React chrome layout and selected pane. `webframe` remains the source of truth for the native browser tab lifecycle, navigation state, title, favicon, and history.
 
-The browser pane is rendered by a React component that does not iframe content. It reserves a DOM slot in the right pane, observes that slot's bounds, and sends slot updates to Electron. Electron maps that slot to a `webframe` `Slot` and attaches the corresponding `WebContentsView` there.
+The browser pane is rendered by a React component that does not iframe content. It reserves a DOM slot in the right pane, observes that slot's bounds, and sends slot updates through the browser API adapter. The adapter delegates to `window.webframe.trpc.windows.setSlots`; `webframe` maps the named slot to native `WebContentsView` placement.
 
 When a browser pane becomes active, the app focuses or creates the matching `webframe` tab and marks it active. When the pane is hidden, closed, or replaced, the shell detaches or closes the native tab according to the pane action.
 
@@ -96,12 +96,12 @@ Electron converts each update into a `webframe` slot and calls `windows.setSlots
 
 The slot is updated when the right pane resizes, the tab strip changes active tab, the window resizes, or the browser pane mounts/unmounts. A zero-size or unmounted slot hides or detaches the tab instead of leaving stale native content visible.
 
-### Control Channel
+### Browser API Adapter
 
-The React app communicates with Electron through a narrow preload API. The API should cover browser pane behavior only:
+The React app communicates with native browser tabs through a narrow browser API adapter. In Electron, this adapter is implemented in renderer code on top of `window.webframe.trpc`; outside Electron, the adapter reports unavailable. The adapter should cover browser pane behavior only:
 
 ```ts
-type ElectronBrowserApi = {
+type BrowserApi = {
   isAvailable(): boolean
   createTab(input: { paneId: string; url?: string }): Promise<{ browserTabId: string }>
   attachTab(input: { paneId: string; browserTabId: string }): Promise<void>
@@ -113,7 +113,9 @@ type ElectronBrowserApi = {
 }
 ```
 
-The implementation may delegate to `window.webframe.trpc` where that is sufficient. The app should not depend directly on Electron globals outside this bridge.
+The implementation delegates to `window.webframe.trpc` for `windows.setSlots`, `tabs.create`, `tabs.move`, `tabs.setActive`, `tabs.close`, `navigation.goto`, and `tabs.onChange`. The app should not call Electron globals or custom main-process IPC for these operations.
+
+The adapter maps app pane ids to deterministic webframe slot names, converts DOM rects from `{ width, height }` to webframe `{ w, h }`, and resolves the current webframe chrome window id through `window.webframe.identity()` or `window.webframe.trpc.windows.list` as needed.
 
 In a non-Electron browser, `isAvailable()` is false. Browser pane UI should show an explanatory empty state or fall back to the existing preview behavior where that is intentionally supported.
 
@@ -166,6 +168,6 @@ If multiple browser panes exist, each pane owns one named slot and one active `w
 
 `webframe` owns tests for native tab creation, navigation, lifecycle events, slot attachment, and Electron view behavior.
 
-`cloud-code-tools` owns tests for pane state, schema validation, tool input handling, Electron bridge behavior, and the React-to-Electron integration boundary.
+`cloud-code-tools` owns tests for pane state, schema validation, tool input handling, the browser API adapter, and the React-to-webframe integration boundary.
 
 End-to-end verification should cover launching the Electron shell, opening an agent session, calling `cloud_open_pane` with `kind: "browser"`, and observing a real browser tab in the agent side pane.
