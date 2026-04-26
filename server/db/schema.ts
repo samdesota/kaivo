@@ -8,6 +8,20 @@ export type AgentSessionStatus = 'active' | 'archived' | 'unavailable'
 export type ShellOwnerKind = 'human' | 'agent'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
+export type WorkspaceTab =
+  | { id: string; type: 'shell'; envId: string; shellId: string; title: string }
+  | { id: string; type: 'file'; envId: string; path: string; sessionId?: string; title: string }
+  | { id: string; type: 'preview'; envId: string; port: number; title: string }
+  | { id: string; type: 'browser'; url: string; browserTabId?: string; title: string }
+
+export type WorkspaceUiState = {
+  activeAgentSessionId: string | null
+  activeWorkspaceTabId: string | null
+  workspaceTabs: WorkspaceTab[]
+  splitRatio: number | null
+  tabOrder: string[]
+}
+
 export const admin = pgTable(
   'admin',
   {
@@ -33,6 +47,23 @@ export const secrets = pgTable('secrets', {
   iv: text('iv').notNull(),
   authTag: text('auth_tag').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const workspaces = pgTable('workspaces', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  lastOpenedAt: timestamp('last_opened_at', { withTimezone: true }),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+})
+
+export const workspaceUiStates = pgTable('workspace_ui_states', {
+  workspaceId: text('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  state: jsonb('state').$type<WorkspaceUiState>().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const sandboxes = pgTable('sandboxes', {

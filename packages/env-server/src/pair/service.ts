@@ -3,8 +3,9 @@ import { eq, lt } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { pairSessions } from '../db/schema.js'
 import { envMeta } from '../db/schema.js'
-import { hashEnvToken, isPaired, setEnvTokenHash } from '../envmeta/service.js'
+import { addEnvTokenHash, hashEnvToken, isPaired, setEnvTokenHash } from '../envmeta/service.js'
 import { logger } from '../logger.js'
+import { config } from '../config.js'
 
 const PAIR_TTL_MS = 5 * 60 * 1000
 
@@ -38,7 +39,7 @@ export interface PairStartResult {
 }
 
 export function pairStart(): PairStartResult {
-  if (isPaired()) {
+  if (isPaired() && config.CC_KIND !== 'local') {
     throw new PairError('already_paired', 'env is already paired')
   }
   // Clean up expired/dangling pair sessions opportunistically.
@@ -77,7 +78,8 @@ export interface PairConfirmResult {
 }
 
 export function pairConfirm(sessionId: string, code: string): PairConfirmResult {
-  if (isPaired()) {
+  const alreadyPaired = isPaired()
+  if (alreadyPaired && config.CC_KIND !== 'local') {
     throw new PairError('already_paired', 'env is already paired')
   }
   const rows = db
@@ -98,7 +100,9 @@ export function pairConfirm(sessionId: string, code: string): PairConfirmResult 
   if (!ok) throw new PairError('bad_code', 'code did not match')
 
   const envToken = randomEnvToken()
-  setEnvTokenHash(hashEnvToken(envToken))
+  const hash = hashEnvToken(envToken)
+  if (alreadyPaired) addEnvTokenHash(hash)
+  else setEnvTokenHash(hash)
   // Invalidate all pending pair sessions.
   db.delete(pairSessions).run()
   return { envToken }

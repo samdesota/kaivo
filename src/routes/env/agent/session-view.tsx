@@ -21,6 +21,7 @@ import { OpenStateProvider } from './parts/open-state'
 import { SessionTabs } from './session-tabs'
 import { EmptySessionState } from './empty-session-state'
 import { ModelPicker } from './model-picker'
+import { selectActiveWorkspaceSession } from './workspace-session-state'
 
 type Action =
   | { type: 'reset' }
@@ -65,6 +66,7 @@ interface AgentStatus {
 interface SessionSummary {
   id: string
   status: string
+  workspaceId?: string | null
 }
 
 interface SessionStatus {
@@ -91,6 +93,9 @@ interface SessionStatus {
 export function AgentSessionView({
   onOpenPane,
   onActiveSessionChange,
+  workspaceId,
+  activeSessionId,
+  onSessionSelect,
 }: {
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   /**
@@ -99,10 +104,19 @@ export function AgentSessionView({
    * palette so new shells default to the session's cwd.
    */
   onActiveSessionChange?: (sessionId: string | null) => void
+  workspaceId?: string
+  activeSessionId?: string | null
+  onSessionSelect?: (sessionId: string | null) => void
 }) {
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
-  const sessions = envTrpc.agent.sessionList.useQuery(undefined, { refetchInterval: 5_000 })
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const sessionListInput = workspaceId ? { workspaceId } : undefined
+  const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, { refetchInterval: 5_000 })
+  const [internalSessionId, setInternalSessionId] = useState<string | null>(null)
+  const sessionId = activeSessionId !== undefined ? activeSessionId : internalSessionId
+  const setSessionId = (id: string | null) => {
+    if (onSessionSelect) onSessionSelect(id)
+    else setInternalSessionId(id)
+  }
   useEffect(() => {
     onActiveSessionChange?.(sessionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,12 +128,8 @@ export function AgentSessionView({
 
   useEffect(() => {
     if (!sessionsData) return
-    const activeList = sessionsData.filter((s) => s.status !== 'archived')
-    const stillOpen = sessionId && activeList.some((s) => s.id === sessionId)
-    if (!stillOpen) {
-      const first = activeList[0]?.id ?? null
-      if (first !== sessionId) setSessionId(first)
-    }
+    const next = selectActiveWorkspaceSession(sessionsData, sessionId)
+    if (next !== sessionId) setSessionId(next)
   }, [sessionId, sessionsData])
 
   if (status.isLoading) {
@@ -170,6 +180,7 @@ export function AgentSessionView({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-1.5">
         <SessionTabs
+          workspaceId={workspaceId}
           sessionId={sessionId}
           onSelect={(id) => setSessionId(id)}
         />
@@ -182,7 +193,7 @@ export function AgentSessionView({
             onOpenPane={onOpenPane}
           />
         ) : (
-          <EmptySessionState onCreated={(id) => setSessionId(id)} />
+          <EmptySessionState workspaceId={workspaceId} onCreated={(id) => setSessionId(id)} />
         )}
       </div>
     </div>

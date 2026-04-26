@@ -16,7 +16,9 @@ checkout at `/opt/cloud-code-tools`.
 
 ## Deploy the orchestrator + webapp
 
-Migrations run on app boot, so a restart is enough to apply them.
+Migrations run on app boot, so a restart is enough to apply them. Workspace
+identity lives in Postgres (`workspaces`, `workspace_ui_states`), so deploy this
+service before relying on `/w/:workspaceId` routes.
 
 ```bash
 git push origin main
@@ -47,6 +49,10 @@ copy artifacts, restart. The opencode plugin is loaded from a separate
 deployed file (`CC_OPENCODE_PLUGIN_PATH`), so rebuild + copy that too whenever
 `packages/opencode-plugin/src/**` changes — otherwise opencode keeps loading
 the stale bundle and new tools silently don't show up.
+
+Workspace-scoped local chats require the env-server migrations for
+`agent_sessions.workspace_id`, shell workspace metadata, and `recent_folders`;
+keep the `rsync -a --delete migrations/ ...` step in this deploy path.
 
 ```bash
 cd /Users/sam/d/cloud-code-tools/packages/env-server

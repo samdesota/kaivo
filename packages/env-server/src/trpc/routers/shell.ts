@@ -16,15 +16,19 @@ function toTrpcError(err: unknown): TRPCError {
 }
 
 export const shellRouter = router({
-  list: authedProcedure.query(() => terminalService.list()),
+  list: authedProcedure
+    .input(z.object({ workspaceId: z.string().min(1).optional() }).optional())
+    .query(({ input }) => terminalService.list(input ?? {})),
 
   create: authedProcedure
     .input(
       z
         .object({
+          workspaceId: z.string().min(1).optional(),
           cols: z.number().int().positive().max(500).optional(),
           rows: z.number().int().positive().max(200).optional(),
           cwd: z.string().max(1024).optional(),
+          ownerAgentSessionId: z.string().min(1).optional(),
         })
         .optional(),
     )

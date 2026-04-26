@@ -49,7 +49,10 @@ process.on('unhandledRejection', (reason) => {
 
 async function main(): Promise<void> {
   await app.whenReady()
-  const config = resolveDesktopConfig()
+  const config = resolveDesktopConfig({
+    ...process.env,
+    NODE_ENV: app.isPackaged ? 'production' : process.env.NODE_ENV,
+  })
 
   app.on('web-contents-created', (_event, contents) => {
     trackWebContents(contents)
@@ -66,6 +69,7 @@ async function main(): Promise<void> {
     electronWindow: {
       width: 1200,
       height: 800,
+      frame: false,
       webPreferences: {
         nodeIntegration: false,
       },

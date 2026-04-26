@@ -7,7 +7,14 @@ describe('resolveDesktopConfig', () => {
   })
 
   it('uses the app server URL in production', () => {
-    expect(resolveDesktopConfig({ NODE_ENV: 'production', PORT: '3100' })).toEqual({
+    expect(resolveDesktopConfig({ NODE_ENV: 'production' })).toEqual({
+      mode: 'production',
+      chromeUrl: 'https://code.438d.xyz',
+    })
+  })
+
+  it('allows a production URL override', () => {
+    expect(resolveDesktopConfig({ NODE_ENV: 'production', CC_DESKTOP_PROD_URL: 'http://127.0.0.1:3100' })).toEqual({
       mode: 'production',
       chromeUrl: 'http://127.0.0.1:3100',
     })

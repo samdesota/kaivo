@@ -5,7 +5,7 @@ import { EnvContextProvider, type EnvContextValue } from './env-context'
 import { CommandPalette } from './shell/command-palette'
 import { ShellsDropdown, PreviewsDropdown } from './shell/dropdowns'
 import { RightPane } from './shell/right-pane'
-import { SplitPane } from './shell/split-pane'
+import { ShellChrome } from './shell/shell-chrome'
 import { type PaneContent, useRightPaneState } from './shell/tab-state'
 import type { EnvRef } from '../../lib/env-client'
 
@@ -58,18 +58,22 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   )
 
   return (
-    <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
-      <header className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
-        <div className="flex min-w-0 items-center gap-3">
-          <Link to="/" className="text-brand-500 hover:underline" title="Back to dashboard">
-            ←
-          </Link>
-          <h1 className="truncate text-sm font-semibold">{env.label}</h1>
-          <span className="truncate text-xs text-neutral-500">
-            {env.kind} · {env.status}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
+    <>
+      <ShellChrome
+        title={env.label}
+        subtitle={`${env.kind} · ${env.status}`}
+        backTo="/"
+        splitStorageKey={`env.${env.id}.splitRatio`}
+        left={agentSection}
+        right={
+          hasTabs ? (
+            <section className="flex h-full min-h-0 w-full flex-col" aria-label="Tabs">
+              <RightPane state={state} dispatch={dispatch} />
+            </section>
+          ) : undefined
+        }
+        actions={
+          <>
           <button
             onClick={() => setPaletteOpen(true)}
             className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
@@ -85,23 +89,9 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
           >
             Settings
           </Link>
-        </div>
-      </header>
-
-      {hasTabs ? (
-        <SplitPane
-          storageKey={`env.${env.id}.splitRatio`}
-          initialRatio={0.7}
-          left={agentSection}
-          right={
-            <section className="flex h-full min-h-0 w-full flex-col" aria-label="Tabs">
-              <RightPane state={state} dispatch={dispatch} />
-            </section>
-          }
-        />
-      ) : (
-        <div className="flex min-h-0 min-w-0 flex-1">{agentSection}</div>
-      )}
+          </>
+        }
+      />
 
       <CommandPalette
         open={paletteOpen}
@@ -113,7 +103,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
         hasActiveTab={hasTabs}
         activeSessionId={activeSessionId}
       />
-    </div>
+    </>
   )
 }
 

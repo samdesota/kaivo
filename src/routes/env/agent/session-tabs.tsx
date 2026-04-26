@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { envTrpc } from '../../../env-trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { FolderPickerModal } from './folder-picker-modal'
+import { NewAgentChatModal } from './new-agent-chat-modal'
 
 interface SessionSummary {
   id: string
@@ -17,13 +18,16 @@ interface RepoRow {
 }
 
 export function SessionTabs({
+  workspaceId,
   sessionId,
   onSelect,
 }: {
+  workspaceId?: string
   sessionId: string | null
   onSelect: (sessionId: string) => void
 }) {
-  const sessions = envTrpc.agent.sessionList.useQuery(undefined, {
+  const sessionListInput = workspaceId ? { workspaceId } : undefined
+  const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, {
     refetchInterval: 5_000,
   })
   const utils = envTrpc.useUtils()
@@ -45,7 +49,7 @@ export function SessionTabs({
     const others = active.filter((s) => s.id !== id)
     try {
       await close.mutateAsync({ sessionId: id })
-      await utils.agent.sessionList.invalidate()
+      await utils.agent.sessionList.invalidate(sessionListInput)
       if (id === sessionId) {
         const next = others[0]?.id
         if (next) onSelect(next)
@@ -58,7 +62,7 @@ export function SessionTabs({
   async function onReopen(id: string) {
     try {
       await reopen.mutateAsync({ sessionId: id })
-      await utils.agent.sessionList.invalidate()
+      await utils.agent.sessionList.invalidate(sessionListInput)
       onSelect(id)
     } catch {
       /* ignore */
@@ -101,7 +105,7 @@ export function SessionTabs({
           )
         })}
       </div>
-      <NewSessionPopover onCreated={onSelect} />
+      <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} />
       {archived.length > 0 && (
         <ClosedDropdown archived={archived} onReopen={onReopen} />
       )}
@@ -110,10 +114,12 @@ export function SessionTabs({
 }
 
 export function NewSessionPopover({
+  workspaceId,
   onCreated,
   label = '+',
   variant = 'compact',
 }: {
+  workspaceId?: string
   onCreated: (sessionId: string) => void
   label?: string
   variant?: 'compact' | 'cta'
@@ -135,11 +141,33 @@ export function NewSessionPopover({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
 
+  if (workspaceId) {
+    return (
+      <div className="relative shrink-0">
+        <button
+          onClick={() => setOpen(true)}
+          disabled={start.isPending}
+          className="shrink-0 rounded px-2 py-1 text-xs text-brand-400 hover:bg-neutral-900 hover:text-brand-300"
+          title="New agent chat"
+          aria-label="New agent chat"
+        >
+          {label}
+        </button>
+        <NewAgentChatModal
+          open={open}
+          workspaceId={workspaceId}
+          onClose={() => setOpen(false)}
+          onCreated={onCreated}
+        />
+      </div>
+    )
+  }
+
   async function createIn(directory?: string) {
     setErr(null)
     try {
-      const res = (await start.mutateAsync({ directory })) as { id: string }
-      await utils.agent.sessionList.invalidate()
+      const res = (await start.mutateAsync({ workspaceId, directory })) as { id: string }
+      await utils.agent.sessionList.invalidate(workspaceId ? { workspaceId } : undefined)
       onCreated(res.id)
       setOpen(false)
     } catch (e) {

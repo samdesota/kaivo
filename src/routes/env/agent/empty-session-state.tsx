@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { envTrpc } from '../../../env-trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { FolderPickerModal } from './folder-picker-modal'
+import { NewAgentChatModal } from './new-agent-chat-modal'
 
 interface RepoRow {
   id: string
@@ -15,8 +16,10 @@ interface RepoRow {
  * isn't wired up for envs yet — tell the user to clone from a shell.
  */
 export function EmptySessionState({
+  workspaceId,
   onCreated,
 }: {
+  workspaceId?: string
   onCreated: (sessionId: string) => void
 }) {
   const repos = envTrpc.repo.list.useQuery(undefined, { refetchInterval: 5_000 })
@@ -24,10 +27,33 @@ export function EmptySessionState({
   const [err, setErr] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
+  if (workspaceId) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-100">No chats yet</h2>
+          <p className="mt-1 text-sm text-neutral-400">Start a new agent chat from a folder or repo config.</p>
+        </div>
+        <button
+          onClick={() => setPickerOpen(true)}
+          className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600"
+        >
+          Start a new agent chat
+        </button>
+        <NewAgentChatModal
+          open={pickerOpen}
+          workspaceId={workspaceId}
+          onClose={() => setPickerOpen(false)}
+          onCreated={onCreated}
+        />
+      </div>
+    )
+  }
+
   async function createIn(directory?: string) {
     setErr(null)
     try {
-      const res = (await start.mutateAsync({ directory })) as { id: string }
+      const res = (await start.mutateAsync({ workspaceId, directory })) as { id: string }
       onCreated(res.id)
     } catch (e) {
       setErr(extractTrpcMessage(e))

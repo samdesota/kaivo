@@ -37,13 +37,16 @@ export class IdentityUnreachableError extends Error {
 export interface RepoConfigSummary {
   id: string
   name: string
+  source?: 'github' | 'url'
+  originUrl?: string
+  ref?: string | null
   githubFullName: string | null
   [k: string]: unknown
 }
 
 export interface RepoConfigBundle {
   summary: RepoConfigSummary
-  files: Record<string, string>
+  files: Array<{ path: string; contents: string }>
 }
 
 // Superjson wire format matches what the plugin client uses: `{ json: <val> }`.

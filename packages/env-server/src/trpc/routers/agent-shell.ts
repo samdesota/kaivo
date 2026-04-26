@@ -33,9 +33,11 @@ export const agentShellRouter = router({
       z.object({
         cmd: z.string().min(1).max(65536),
         cwd: z.string().optional(),
+        workspaceId: z.string().optional(),
         cols: z.number().int().min(10).max(500).optional(),
         rows: z.number().int().min(2).max(500).optional(),
         opencodeSessionId: z.string().optional(),
+        ownerAgentSessionId: z.string().optional(),
       }),
     )
     .subscription(({ input }) => {
@@ -47,10 +49,12 @@ export const agentShellRouter = router({
         try {
           handle = terminalService.runOnceStream({
             cmd: input.cmd,
+            workspaceId: input.workspaceId ?? null,
             cwd: input.cwd,
             cols: input.cols,
             rows: input.rows,
             ownerSessionId: input.opencodeSessionId ?? null,
+            ownerAgentSessionId: input.ownerAgentSessionId ?? null,
             onStdout: (chunk) =>
               emit.next({ type: 'stdout', b64: chunk.toString('base64') }),
             onStderr: (chunk) =>
@@ -88,19 +92,23 @@ export const agentShellRouter = router({
     .input(
       z.object({
         cwd: z.string().optional(),
+        workspaceId: z.string().optional(),
         cols: z.number().int().min(10).max(500).optional(),
         rows: z.number().int().min(2).max(500).optional(),
         opencodeSessionId: z.string().optional(),
+        ownerAgentSessionId: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
       try {
         const info = await terminalService.create({
+          workspaceId: input.workspaceId ?? null,
           cwd: input.cwd,
           cols: input.cols,
           rows: input.rows,
           ownerKind: 'agent',
           ownerSessionId: input.opencodeSessionId ?? null,
+          ownerAgentSessionId: input.ownerAgentSessionId ?? null,
         })
         return { shellId: info.id }
       } catch (err) {

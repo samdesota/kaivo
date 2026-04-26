@@ -83,18 +83,19 @@ export const agentUiRouter = router({
       z.object({
         opencodeSessionId: z.string().min(1),
         content: paneContentSchema,
-        title: z.string().min(1).max(120).optional(),
+        title: z.string().max(120).optional(),
         activate: z.boolean().optional(),
       }),
     )
     .mutation(({ input }) => {
       const session = resolveSession(input.opencodeSessionId)
       const content = validateContent(input.content, session.workingDir)
+      const title = input.title?.trim() || undefined
       publish({
         type: 'open_pane',
         sessionId: session.id,
         content,
-        title: input.title,
+        title,
         activate: input.activate ?? true,
       })
       return { ok: true as const }

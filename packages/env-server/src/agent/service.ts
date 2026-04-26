@@ -4,6 +4,7 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
 import { db } from '../db/client.js'
 import { agentSessions, agentTranscripts, type AgentSessionStatus } from '../db/schema.js'
 import { logger } from '../logger.js'
+import { recentFolderService } from '../recent-folders/service.js'
 import { getMeta, setDefaultModel as setEnvDefaultModel } from '../envmeta/service.js'
 import {
   OpenCodeError,
@@ -55,6 +56,7 @@ export class AgentError extends Error {
 
 export interface AgentSessionSummary {
   id: string
+  workspaceId: string | null
   opencodeSessionId: string
   title: string | null
   status: AgentSessionStatus
@@ -211,14 +213,17 @@ class AgentService {
     this.client = null
   }
 
-  async sessionList(): Promise<AgentSessionSummary[]> {
-    const rows = db
-      .select()
-      .from(agentSessions)
-      .orderBy(desc(agentSessions.lastActivityAt))
-      .all()
+  async sessionList(input: { workspaceId?: string } = {}): Promise<AgentSessionSummary[]> {
+    const query = db.select().from(agentSessions)
+    const rows = input.workspaceId
+      ? query
+          .where(eq(agentSessions.workspaceId, input.workspaceId))
+          .orderBy(desc(agentSessions.lastActivityAt))
+          .all()
+      : query.orderBy(desc(agentSessions.lastActivityAt)).all()
     return rows.map((r) => ({
       id: r.id,
+      workspaceId: r.workspaceId ?? null,
       opencodeSessionId: r.opencodeSessionId,
       title: r.title,
       status: r.status,
@@ -229,6 +234,7 @@ class AgentService {
   }
 
   async sessionStart(input: {
+    workspaceId?: string
     prompt?: string
     title?: string
     directory?: string
@@ -252,6 +258,7 @@ class AgentService {
     db.insert(agentSessions)
       .values({
         id,
+        workspaceId: input.workspaceId ?? null,
         opencodeSessionId: ocSession.id,
         title: derivedTitle,
         status: 'active',
@@ -262,6 +269,8 @@ class AgentService {
         lastActivityAt: now.toISOString(),
       })
       .run()
+
+    if (input.directory) recentFolderService.upsert(input.directory)
 
     if (input.model) this.sessionModels.set(id, input.model)
 
@@ -284,6 +293,7 @@ class AgentService {
 
     return {
       id,
+      workspaceId: input.workspaceId ?? null,
       opencodeSessionId: ocSession.id,
       title: derivedTitle,
       status: 'active',
@@ -304,6 +314,7 @@ class AgentService {
       .run()
     return {
       id: row.id,
+      workspaceId: row.workspaceId ?? null,
       opencodeSessionId: row.opencodeSessionId,
       title,
       status: row.status,
@@ -463,6 +474,7 @@ class AgentService {
       .run()
     return {
       id: row.id,
+      workspaceId: row.workspaceId ?? null,
       opencodeSessionId: row.opencodeSessionId,
       title: row.title,
       status: input.status,
@@ -657,6 +669,7 @@ class AgentService {
     return {
       session: {
         id: row.id,
+        workspaceId: row.workspaceId ?? null,
         opencodeSessionId: row.opencodeSessionId,
         title: row.title,
         status: row.status,

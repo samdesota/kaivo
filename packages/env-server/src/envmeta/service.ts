@@ -4,7 +4,7 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { config } from '../config.js'
 import { db } from '../db/client.js'
-import { envMeta } from '../db/schema.js'
+import { envMeta, envTokens } from '../db/schema.js'
 import { logger } from '../logger.js'
 
 export interface Secrets {
@@ -78,6 +78,25 @@ export function setEnvTokenHash(hash: string): void {
     .set({ envTokenHash: hash, pairedAt: new Date().toISOString() })
     .where(eq(envMeta.id, 1))
     .run()
+}
+
+export function addEnvTokenHash(hash: string): void {
+  db.insert(envTokens)
+    .values({
+      id: crypto.randomBytes(16).toString('base64url'),
+      tokenHash: hash,
+      createdAt: new Date().toISOString(),
+    })
+    .onConflictDoNothing()
+    .run()
+}
+
+export function hasEnvTokenHash(hash: string): boolean {
+  if (getMeta().envTokenHash === hash) return true
+  return (
+    db.select({ id: envTokens.id }).from(envTokens).where(eq(envTokens.tokenHash, hash)).all()
+      .length > 0
+  )
 }
 
 export function setOpencodePort(port: number): void {

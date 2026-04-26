@@ -1,4 +1,5 @@
 import { createTRPCReact } from '@trpc/react-query'
+import { createContext } from 'react'
 import {
   createWSClient,
   httpBatchLink,
@@ -9,7 +10,11 @@ import superjson from 'superjson'
 import { envWsUrl, resolveEnvUrl, type EnvRef } from './lib/env-client'
 import type { AppRouter as EnvAppRouter } from '../packages/env-server/src/trpc/router'
 
-export const envTrpc = createTRPCReact<EnvAppRouter>()
+const envTrpcContext = createContext(null)
+
+export const envTrpc = createTRPCReact<EnvAppRouter>({
+  context: envTrpcContext,
+})
 
 export function makeEnvReactClient(env: EnvRef, envToken: string) {
   const base = resolveEnvUrl(env)

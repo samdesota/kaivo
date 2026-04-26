@@ -65,11 +65,14 @@ export const agentRouter = router({
     }
   }),
 
-  sessionList: authedProcedure.query(() => agentService.sessionList()),
+  sessionList: authedProcedure
+    .input(z.object({ workspaceId: z.string().min(1).optional() }).optional())
+    .query(({ input }) => agentService.sessionList(input ?? {})),
 
   sessionStart: authedProcedure
     .input(
       z.object({
+        workspaceId: z.string().min(1).optional(),
         prompt: z.string().min(1).max(100_000).optional(),
         title: z.string().min(1).max(200).optional(),
         directory: z.string().min(1).max(4_096).optional(),

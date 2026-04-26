@@ -12,6 +12,7 @@ export function SplitPane({
   maxRatio = 0.85,
   left,
   right,
+  onRatioChange,
 }: {
   storageKey: string
   initialRatio?: number
@@ -19,6 +20,7 @@ export function SplitPane({
   maxRatio?: number
   left: React.ReactNode
   right: React.ReactNode
+  onRatioChange?: (ratio: number) => void
 }) {
   const [ratio, setRatio] = useState<number>(() => {
     if (typeof window === 'undefined') return initialRatio
@@ -36,7 +38,8 @@ export function SplitPane({
     } catch {
       // quota / disabled storage — ignore
     }
-  }, [storageKey, ratio])
+    onRatioChange?.(ratio)
+  }, [storageKey, ratio, onRatioChange])
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()

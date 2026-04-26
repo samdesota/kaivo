@@ -27,8 +27,21 @@ import { logger } from '../logger.js'
  * Without (2), shells opened from a session with a custom picker dir
  * still landed in CC_WORKING_DIR — defeating the per-session picker.
  */
-function resolveCwd(cwd: string | undefined, ownerSessionId: string | null): string {
+function resolveCwd(
+  cwd: string | undefined,
+  ownerAgentSessionId: string | null,
+  ownerSessionId: string | null,
+): string {
   if (cwd && cwd.trim() !== '') return cwd
+  if (ownerAgentSessionId) {
+    const row = db
+      .select({ workingDir: agentSessions.workingDir })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, ownerAgentSessionId))
+      .limit(1)
+      .all()[0]
+    if (row?.workingDir) return row.workingDir
+  }
   if (ownerSessionId) {
     const row = db
       .select({ workingDir: agentSessions.workingDir })
@@ -71,10 +84,12 @@ export class ShellError extends Error {
 
 export interface ShellInfo {
   id: string
+  workspaceId: string | null
   cols: number
   rows: number
   cwd: string
   ownerKind: ShellOwnerKind
+  ownerAgentSessionId: string | null
   ownerSessionId: string | null
   isRunOnce: boolean
   exitCode: number | null
@@ -87,6 +102,7 @@ type Subscriber = (chunk: string) => void
 
 interface ShellHandle {
   id: string
+  workspaceId: string | null
   pty: IPty | null
   child: ChildProcess | null
   term: HeadlessTerminalType
@@ -95,6 +111,7 @@ interface ShellHandle {
   rows: number
   cwd: string
   ownerKind: ShellOwnerKind
+  ownerAgentSessionId: string | null
   ownerSessionId: string | null
   isRunOnce: boolean
   exitCode: number | null
@@ -107,10 +124,12 @@ interface ShellHandle {
 
 export interface RunOnceStreamOpts {
   cmd: string
+  workspaceId?: string | null
   cwd?: string
   cols?: number
   rows?: number
   ownerSessionId?: string | null
+  ownerAgentSessionId?: string | null
   onStdout?: (chunk: Buffer) => void
   onStderr?: (chunk: Buffer) => void
   signal?: AbortSignal
@@ -127,18 +146,22 @@ class TerminalService {
   private runOnceRetentionMs = DEFAULT_RUN_ONCE_RETENTION_MS
 
   async create(opts: {
+    workspaceId?: string | null
     cols?: number
     rows?: number
     cwd?: string
     ownerKind?: ShellOwnerKind
     ownerSessionId?: string | null
+    ownerAgentSessionId?: string | null
   }): Promise<ShellInfo> {
     const id = ulid().toLowerCase()
     const cols = opts.cols ?? DEFAULT_COLS
     const rows = opts.rows ?? DEFAULT_ROWS
     const ownerKind: ShellOwnerKind = opts.ownerKind ?? 'human'
+    const workspaceId = opts.workspaceId ?? null
     const ownerSessionId = opts.ownerSessionId ?? null
-    const cwd = resolveCwd(opts.cwd, ownerSessionId)
+    const ownerAgentSessionId = opts.ownerAgentSessionId ?? null
+    const cwd = resolveCwd(opts.cwd, ownerAgentSessionId, ownerSessionId)
 
     const term = new HeadlessTerminal({
       cols,
@@ -161,6 +184,7 @@ class TerminalService {
     const now = new Date()
     const handle: ShellHandle = {
       id,
+      workspaceId,
       pty,
       child: null,
       term,
@@ -169,6 +193,7 @@ class TerminalService {
       rows,
       cwd,
       ownerKind,
+      ownerAgentSessionId,
       ownerSessionId,
       isRunOnce: false,
       exitCode: null,
@@ -200,10 +225,12 @@ class TerminalService {
     db.insert(shellSessions)
       .values({
         id,
+        workspaceId,
         cwd,
         cols,
         rows,
         ownerKind,
+        ownerAgentSessionId,
         ownerSessionId: ownerSessionId ?? null,
         createdAt: now.toISOString(),
         lastActivityAt: now.toISOString(),
@@ -218,9 +245,10 @@ class TerminalService {
     return h ? toInfo(h) : null
   }
 
-  list(): ShellInfo[] {
+  list(input: { workspaceId?: string } = {}): ShellInfo[] {
     return [...this.shells.values()]
       .filter((h) => !h.isRunOnce)
+      .filter((h) => !input.workspaceId || h.workspaceId === input.workspaceId)
       .map(toInfo)
   }
 
@@ -333,7 +361,9 @@ class TerminalService {
     const cols = opts.cols ?? DEFAULT_COLS
     const rows = opts.rows ?? DEFAULT_ROWS
     const ownerSessionId = opts.ownerSessionId ?? null
-    const cwd = resolveCwd(opts.cwd, ownerSessionId)
+    const workspaceId = opts.workspaceId ?? null
+    const ownerAgentSessionId = opts.ownerAgentSessionId ?? null
+    const cwd = resolveCwd(opts.cwd, ownerAgentSessionId, ownerSessionId)
 
     const term = new HeadlessTerminal({
       cols,
@@ -347,6 +377,7 @@ class TerminalService {
     const now = new Date()
     const handle: ShellHandle = {
       id,
+      workspaceId,
       pty: null,
       child: null,
       term,
@@ -355,6 +386,7 @@ class TerminalService {
       rows,
       cwd,
       ownerKind: 'agent',
+      ownerAgentSessionId,
       ownerSessionId,
       isRunOnce: true,
       exitCode: null,
@@ -390,10 +422,12 @@ class TerminalService {
       db.insert(shellSessions)
         .values({
           id,
+          workspaceId,
           cwd,
           cols,
           rows,
           ownerKind: 'agent',
+          ownerAgentSessionId,
           ownerSessionId,
           createdAt: now.toISOString(),
           lastActivityAt: now.toISOString(),
@@ -476,10 +510,12 @@ class TerminalService {
 function toInfo(h: ShellHandle): ShellInfo {
   return {
     id: h.id,
+    workspaceId: h.workspaceId,
     cols: h.cols,
     rows: h.rows,
     cwd: h.cwd,
     ownerKind: h.ownerKind,
+    ownerAgentSessionId: h.ownerAgentSessionId,
     ownerSessionId: h.ownerSessionId,
     isRunOnce: h.isRunOnce,
     exitCode: h.exitCode,

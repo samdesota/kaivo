@@ -403,7 +403,7 @@ async function runCloudOpenPane(
     await client.mutate<{ ok: true }>('agentUi.openPane', {
       opencodeSessionId: ctx.sessionID,
       content,
-      title: args.title,
+      title: args.title?.trim() || undefined,
       activate: args.activate,
     })
 

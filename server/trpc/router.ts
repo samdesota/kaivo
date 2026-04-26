@@ -16,6 +16,7 @@ import { envAuthRouter } from './routers/env-auth.js'
 import { envApiRouter } from './routers/env-api.js'
 import { envRouter } from './routers/env.js'
 import { logsRouter } from './routers/logs.js'
+import { workspaceRouter } from './routers/workspace.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -35,6 +36,7 @@ export const appRouter = router({
   envApi: envApiRouter,
   env: envRouter,
   logs: logsRouter,
+  workspace: workspaceRouter,
 })
 
 export type AppRouter = typeof appRouter

@@ -17,14 +17,22 @@ export const pairSessions = sqliteTable('pair_sessions', {
   expiresAt: text('expires_at').notNull(),
 })
 
+export const envTokens = sqliteTable('env_tokens', {
+  id: text('id').primaryKey(),
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: text('created_at').notNull(),
+})
+
 export type ShellOwnerKind = 'human' | 'agent'
 
 export const shellSessions = sqliteTable('shell_sessions', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id'),
   cwd: text('cwd').notNull(),
   cols: integer('cols').notNull(),
   rows: integer('rows').notNull(),
   ownerKind: text('owner_kind').$type<ShellOwnerKind>().notNull(),
+  ownerAgentSessionId: text('owner_agent_session_id'),
   ownerSessionId: text('owner_session_id'),
   createdAt: text('created_at').notNull(),
   lastActivityAt: text('last_activity_at').notNull(),
@@ -46,10 +54,17 @@ export const repos = sqliteTable('repos', {
   createdAt: text('created_at').notNull(),
 })
 
+export const recentFolders = sqliteTable('recent_folders', {
+  path: text('path').primaryKey(),
+  label: text('label'),
+  lastOpenedAt: text('last_opened_at').notNull(),
+})
+
 export type AgentSessionStatus = 'active' | 'archived'
 
 export const agentSessions = sqliteTable('agent_sessions', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id'),
   opencodeSessionId: text('opencode_session_id').notNull().unique(),
   title: text('title'),
   status: text('status').$type<AgentSessionStatus>().notNull(),

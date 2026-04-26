@@ -1,0 +1,148 @@
+import { useState } from 'react'
+import { envTrpc } from '../../../env-trpc'
+import { extractTrpcMessage } from '../../../lib/utils'
+import { FolderPickerModal } from './folder-picker-modal'
+import {
+  newAgentChatStartInput,
+  validateNewAgentChatSelection,
+  type NewAgentChatSelection,
+} from './new-agent-chat-state'
+
+type RecentFolder = { path: string; label: string | null; lastOpenedAt: Date | string }
+type RepoConfig = { id: string; name: string; originUrl?: string | null; githubFullName?: string | null }
+
+export function NewAgentChatModal({
+  open,
+  workspaceId,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  workspaceId: string
+  onClose: () => void
+  onCreated: (sessionId: string) => void
+}) {
+  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined, { enabled: open })
+  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open })
+  const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
+  const start = envTrpc.agent.sessionStart.useMutation()
+  const utils = envTrpc.useUtils()
+  const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!open) return null
+
+  const busy = start.isPending || cloneConfig.isPending
+  const validation = validateNewAgentChatSelection(selection)
+
+  async function createChat() {
+    const invalid = validateNewAgentChatSelection(selection)
+    if (invalid || !selection) {
+      setError(invalid)
+      return
+    }
+    setError(null)
+    try {
+      let workingDir: string
+      if (selection.type === 'folder') {
+        workingDir = selection.path
+      } else {
+        const cloned = await cloneConfig.mutateAsync({ configId: selection.configId })
+        workingDir = cloned.workingDir
+      }
+      const session = (await start.mutateAsync(newAgentChatStartInput(workspaceId, workingDir))) as { id: string }
+      await Promise.all([
+        utils.agent.sessionList.invalidate({ workspaceId }),
+        utils.repo.listRecentFolders.invalidate(),
+      ])
+      onCreated(session.id)
+      onClose()
+    } catch (err) {
+      setError(extractTrpcMessage(err))
+    }
+  }
+
+  const folders = (recentFolders.data ?? []) as RecentFolder[]
+  const configs = (repoConfigs.data ?? []) as RepoConfig[]
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-2xl rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+        <div className="border-b border-neutral-800 px-4 py-3">
+          <h2 className="text-sm font-semibold text-neutral-100">New agent chat</h2>
+          <p className="mt-1 text-xs text-neutral-500">Start from a recent folder or clone a repo config.</p>
+        </div>
+        <div className="grid gap-4 p-4 md:grid-cols-2">
+          <section className="space-y-2">
+            <div className="text-[10px] uppercase tracking-wide text-neutral-500">Open folder</div>
+            {recentFolders.isLoading && <div className="text-xs text-neutral-500">Loading recent folders…</div>}
+            {folders.map((folder) => (
+              <button
+                key={folder.path}
+                onClick={() => setSelection({ type: 'folder', path: folder.path })}
+                className={choiceClass(selection?.type === 'folder' && selection.path === folder.path)}
+              >
+                <span className="truncate text-neutral-100">{folder.label ?? folder.path}</span>
+                <span className="truncate font-mono text-[10px] text-neutral-500">{folder.path}</span>
+              </button>
+            ))}
+            {folders.length === 0 && !recentFolders.isLoading && (
+              <div className="rounded border border-neutral-800 p-3 text-xs text-neutral-500">No recent folders yet.</div>
+            )}
+            <button
+              onClick={() => setPickerOpen(true)}
+              className="w-full rounded border border-dashed border-neutral-700 px-3 py-2 text-left text-xs text-neutral-300 hover:border-brand-500/60"
+            >
+              Choose any folder…
+            </button>
+          </section>
+          <section className="space-y-2">
+            <div className="text-[10px] uppercase tracking-wide text-neutral-500">Repo config</div>
+            {repoConfigs.isLoading && <div className="text-xs text-neutral-500">Loading repo configs…</div>}
+            {configs.map((config) => (
+              <button
+                key={config.id}
+                onClick={() => setSelection({ type: 'repoConfig', configId: config.id })}
+                className={choiceClass(selection?.type === 'repoConfig' && selection.configId === config.id)}
+              >
+                <span className="truncate text-neutral-100">{config.name}</span>
+                <span className="truncate text-[10px] text-neutral-500">{config.githubFullName ?? config.originUrl ?? config.id}</span>
+              </button>
+            ))}
+            {configs.length === 0 && !repoConfigs.isLoading && (
+              <div className="rounded border border-neutral-800 p-3 text-xs text-neutral-500">No repo configs yet.</div>
+            )}
+          </section>
+        </div>
+        {error && <div className="mx-4 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>}
+        <div className="flex justify-end gap-2 border-t border-neutral-800 px-4 py-3">
+          <button onClick={onClose} className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900">Cancel</button>
+          <button
+            onClick={() => void createChat()}
+            disabled={busy || !!validation}
+            className="rounded bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          >
+            {busy ? 'Creating…' : 'Create chat'}
+          </button>
+        </div>
+      </div>
+      <FolderPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        busy={busy}
+        onSelect={(path) => {
+          setSelection({ type: 'folder', path })
+          setPickerOpen(false)
+        }}
+      />
+    </div>
+  )
+}
+
+function choiceClass(selected: boolean): string {
+  return (
+    'flex w-full flex-col rounded border px-3 py-2 text-left text-xs hover:border-brand-500/60 hover:bg-neutral-900 ' +
+    (selected ? 'border-brand-500 bg-brand-500/10' : 'border-neutral-800 bg-neutral-900/40')
+  )
+}

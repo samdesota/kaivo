@@ -22,9 +22,10 @@ interface PortRow {
 
 interface ShellsDropdownProps {
   onOpen: (content: PaneContent) => void
+  align?: 'left' | 'right'
 }
 
-export function ShellsDropdown({ onOpen }: ShellsDropdownProps) {
+export function ShellsDropdown({ onOpen, align = 'left' }: ShellsDropdownProps) {
   const shells = envTrpc.shell.list.useQuery(undefined, { refetchInterval: 5_000 })
   const utils = envTrpc.useUtils()
   const dispose = envTrpc.shell.dispose.useMutation()
@@ -42,7 +43,7 @@ export function ShellsDropdown({ onOpen }: ShellsDropdownProps) {
   }
 
   return (
-    <Popover label="Shells" count={list.length}>
+    <Popover label="Shells" count={list.length} align={align}>
       {(close) => (
         <div className="p-1">
           {list.length === 0 ? (
@@ -105,9 +106,10 @@ export function ShellsDropdown({ onOpen }: ShellsDropdownProps) {
 
 interface PreviewsDropdownProps {
   onOpen: (content: PaneContent) => void
+  align?: 'left' | 'right'
 }
 
-export function PreviewsDropdown({ onOpen }: PreviewsDropdownProps) {
+export function PreviewsDropdown({ onOpen, align = 'left' }: PreviewsDropdownProps) {
   const [ports, setPorts] = useState<PortRow[]>([])
   const snapshot = envTrpc.preview.portsSnapshot.useQuery()
 
@@ -124,7 +126,7 @@ export function PreviewsDropdown({ onOpen }: PreviewsDropdownProps) {
   })
 
   return (
-    <Popover label="Previews" count={ports.length}>
+    <Popover label="Previews" count={ports.length} align={align}>
       {(close) => (
         <div className="p-1">
           {ports.length === 0 ? (

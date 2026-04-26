@@ -50,6 +50,9 @@ export function DashboardPage() {
           <h1 className="text-lg font-semibold">Cloud Coding Environment</h1>
         </div>
         <div className="flex items-center gap-3">
+          <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
+            Workspaces
+          </Link>
           <Link to="/settings" className="text-sm text-neutral-400 hover:text-neutral-200">
             Settings
           </Link>

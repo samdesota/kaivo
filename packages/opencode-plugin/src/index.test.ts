@@ -200,6 +200,31 @@ describe('cloud-code opencode plugin', () => {
     expect(result.metadata.pane_type).toBe('browser')
   })
 
+  it('cloud_open_pane: omits empty title', async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      const parsed = JSON.parse(init!.body as string)
+      expect(parsed.json).toEqual({
+        opencodeSessionId: 'oc-empty-title',
+        content: { type: 'file', path: 'src/app.ts' },
+        activate: undefined,
+      })
+      return new Response(JSON.stringify({ result: { data: { json: { ok: true } } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+
+    const hooks = buildHooks({
+      tokenOverride: 't',
+      appUrlOverride: 'http://app:3000',
+      fetchImpl,
+    })
+    await hooks.tool!.cloud_open_pane!.execute(
+      { kind: 'file', path: 'src/app.ts', title: '' },
+      makeCtx('oc-empty-title') as never,
+    )
+  })
+
   it('cloud_pty: structured error on unreachable app', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down')

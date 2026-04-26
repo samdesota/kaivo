@@ -46,6 +46,15 @@ if (!parsed.success) {
 }
 
 export const config = parsed.data
-export const allowedOrigins = config.CC_ALLOWED_ORIGINS.split(',')
+const configuredAllowedOrigins = config.CC_ALLOWED_ORIGINS.split(',')
   .map((s) => s.trim())
   .filter(Boolean)
+
+const localDevOrigins =
+  config.CC_KIND === 'local'
+    ? ['http://localhost:3000', 'http://127.0.0.1:3000']
+    : []
+
+export const allowedOrigins = Array.from(
+  new Set([...configuredAllowedOrigins, ...localDevOrigins]),
+)

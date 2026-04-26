@@ -105,6 +105,11 @@ async function buildServer() {
       root: staticRoot,
       prefix: '/',
       index: ['index.html'],
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-store')
+        }
+      },
     })
     // SPA fallback for client-side routes. Proxy routes (`/preview/...`,
     // `/sandbox/:id/agent/...`) are intercepted by their own onRequest hooks
@@ -124,7 +129,7 @@ async function buildServer() {
       ) {
         return reply.code(404).send({ error: 'not found' })
       }
-      return reply.sendFile('index.html')
+      return reply.header('Cache-Control', 'no-store').sendFile('index.html')
     })
   }
 

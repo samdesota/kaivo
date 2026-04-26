@@ -11,8 +11,10 @@ import { trpc } from './trpc'
 import { LoginPage } from './routes/login'
 import { SetupPage } from './routes/setup'
 import { DashboardPage } from './routes/dashboard'
+import { WorkspaceLandingPage } from './routes/workspace-landing'
 import { SandboxDetailPage } from './routes/sandbox'
 import { EnvDetailPage } from './routes/env'
+import { WorkspacePage } from './routes/workspace'
 import { EnvAuthDevicePage } from './routes/envauth-device'
 import { SettingsPage } from './routes/settings'
 
@@ -65,6 +67,11 @@ const rootRoute = createRootRoute({ component: RootLayout })
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
+  component: WorkspaceLandingPage,
+})
+const dashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/dashboard',
   component: DashboardPage,
 })
 const loginRoute = createRoute({
@@ -90,6 +97,15 @@ const envRoute = createRoute({
   path: '/env/$id',
   component: EnvDetailPage,
 })
+const workspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$workspaceId',
+  component: WorkspacePage,
+  validateSearch: (s: Record<string, unknown>) => ({
+    chat: typeof s.chat === 'string' ? s.chat : undefined,
+    tab: typeof s.tab === 'string' ? s.tab : undefined,
+  }),
+})
 const envAuthDeviceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/envauth/device',
@@ -106,10 +122,12 @@ const settingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  dashboardRoute,
   loginRoute,
   setupRoute,
   sandboxRoute,
   envRoute,
+  workspaceRoute,
   envAuthDeviceRoute,
   settingsRoute,
 ])

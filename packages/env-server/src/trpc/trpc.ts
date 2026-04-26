@@ -1,8 +1,8 @@
-import crypto from 'node:crypto'
 import { initTRPC, TRPCError } from '@trpc/server'
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import superjson from 'superjson'
-import { getMeta, hashEnvToken, isPaired } from '../envmeta/service.js'
+import { hashEnvToken, hasEnvTokenHash, isPaired } from '../envmeta/service.js'
+import { config } from '../config.js'
 import { opencodeSupervisor } from '../agent/opencode.js'
 
 export interface Context {
@@ -42,13 +42,8 @@ export async function createContext({
 
   // Order: check envToken (webapp) first, then agent-shell token (plugin).
   let envTokenPresent = false
-  const meta = getMeta()
-  if (meta.envTokenHash) {
-    const incoming = hashEnvToken(token)
-    const a = Buffer.from(incoming)
-    const b = Buffer.from(meta.envTokenHash)
-    envTokenPresent = a.length === b.length && crypto.timingSafeEqual(a, b)
-  }
+  const incoming = hashEnvToken(token)
+  envTokenPresent = hasEnvTokenHash(incoming)
 
   let agentShellTokenPresent = false
   if (!envTokenPresent) {
@@ -99,7 +94,7 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
  * Pairing-only procedures. Rejected once the env is paired.
  */
 export const pairProcedure = t.procedure.use(({ next }) => {
-  if (isPaired()) {
+  if (isPaired() && config.CC_KIND !== 'local') {
     throw new TRPCError({ code: 'CONFLICT', message: 'env already paired' })
   }
   return next()

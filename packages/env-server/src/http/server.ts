@@ -1,12 +1,12 @@
-import crypto from 'node:crypto'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyWebsocket from '@fastify/websocket'
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify'
-import { allowedOrigins, config } from '../config.js'
+import { config } from '../config.js'
+import { isAllowedOrigin } from './cors.js'
 import { logger } from '../logger.js'
 import { appRouter } from '../trpc/router.js'
 import { createContext } from '../trpc/trpc.js'
-import { getMeta, hashEnvToken, isPaired } from '../envmeta/service.js'
+import { getMeta, hashEnvToken, hasEnvTokenHash, isPaired } from '../envmeta/service.js'
 import { terminalService } from '../terminal/service.js'
 import { opencodeSupervisor } from '../agent/opencode.js'
 import { registerAgentProxy } from '../agent/proxy.js'
@@ -26,7 +26,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   // we never want to echo arbitrary origins.
   app.addHook('onRequest', async (req, reply) => {
     const origin = req.headers.origin
-    if (typeof origin === 'string' && allowedOrigins.includes(origin)) {
+    if (typeof origin === 'string' && isAllowedOrigin(origin)) {
       reply.header('Access-Control-Allow-Origin', origin)
       reply.header('Vary', 'Origin')
       reply.header('Access-Control-Allow-Credentials', 'true')
@@ -129,10 +129,5 @@ export async function buildServer(): Promise<FastifyInstance> {
 }
 
 function verifyEnvToken(token: string): boolean {
-  const meta = getMeta()
-  if (!meta.envTokenHash) return false
-  const incoming = hashEnvToken(token)
-  const a = Buffer.from(incoming)
-  const b = Buffer.from(meta.envTokenHash)
-  return a.length === b.length && crypto.timingSafeEqual(a, b)
+  return hasEnvTokenHash(hashEnvToken(token))
 }
