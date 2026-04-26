@@ -99,9 +99,6 @@ export function XTermAttached({ shellId }: { shellId: string }) {
       }
       const cols = term.cols
       const rows = term.rows
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-      }
       resize.mutate({ id: shellId, cols, rows })
     })
     resizeObserver.observe(el)
