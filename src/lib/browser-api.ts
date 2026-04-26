@@ -18,6 +18,7 @@ export type BrowserTabCreated = {
 
 export type BrowserApi = {
   isAvailable(): boolean
+  getWindowId(): Promise<string>
   createTab(input: { paneId: string; url?: string }): Promise<{ browserTabId: string }>
   attachTab(input: { paneId: string; browserTabId: string }): Promise<void>
   focusTab(input: { browserTabId: string }): Promise<void>
@@ -27,6 +28,10 @@ export type BrowserApi = {
   reload(input: { browserTabId: string; ignoreCache?: boolean }): Promise<void>
   closeTab(input: { browserTabId: string }): Promise<void>
   setSlot(input: BrowserSlotUpdate): Promise<void>
+  createDetachedOverlay(input: { url: string; transparent?: boolean; clickThrough?: boolean }): Promise<{ overlayId: string }>
+  attachOverlay(input: { overlayId: string; placement: { x: number; y: number; w: number; h: number } }): Promise<void>
+  detachOverlay(input: { overlayId: string }): Promise<void>
+  closeOverlay(input: { overlayId: string }): Promise<void>
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
   onWindowTabCreated(handler: (event: BrowserTabCreated) => void): () => void
 }
@@ -67,6 +72,12 @@ type WebframeGlobal = {
       forward: { mutate: (input: unknown) => Promise<unknown> }
       reload: { mutate: (input: unknown) => Promise<unknown> }
     }
+    overlays?: {
+      createDetached?: { mutate: (input: unknown) => Promise<{ id: string }> }
+      attach?: { mutate: (input: unknown) => Promise<unknown> }
+      detach?: { mutate: (input: unknown) => Promise<unknown> }
+      close?: { mutate: (input: unknown) => Promise<unknown> }
+    }
   }
 }
 
@@ -98,6 +109,8 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     isAvailable() {
       return !!win?.webframe?.trpc
     },
+
+    getWindowId,
 
     async createTab(input) {
       const webframe = getWebframe(win)
@@ -168,6 +181,39 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
         },
       })
       await setSlots()
+    },
+
+    async createDetachedOverlay(input) {
+      const webframe = getWebframe(win)
+      if (!webframe.trpc.overlays?.createDetached) throw new Error('webframe detached overlays unavailable')
+      const overlay = await webframe.trpc.overlays.createDetached.mutate({
+        url: input.url,
+        transparent: input.transparent ?? true,
+        clickThrough: input.clickThrough ?? false,
+      })
+      return { overlayId: overlay.id }
+    },
+
+    async attachOverlay(input) {
+      const webframe = getWebframe(win)
+      if (!webframe.trpc.overlays?.attach) throw new Error('webframe overlay attach unavailable')
+      await webframe.trpc.overlays.attach.mutate({
+        overlayId: input.overlayId,
+        windowId: await getWindowId(),
+        placement: input.placement,
+      })
+    },
+
+    async detachOverlay(input) {
+      const webframe = getWebframe(win)
+      if (!webframe.trpc.overlays?.detach) throw new Error('webframe overlay detach unavailable')
+      await webframe.trpc.overlays.detach.mutate({ overlayId: input.overlayId })
+    },
+
+    async closeOverlay(input) {
+      const webframe = getWebframe(win)
+      if (!webframe.trpc.overlays?.close) throw new Error('webframe overlay close unavailable')
+      await webframe.trpc.overlays.close.mutate({ overlayId: input.overlayId })
     },
 
     onTabChange(handler) {

@@ -22,16 +22,28 @@ export function NewAgentChatModal({
   onClose: () => void
   onCreated: (sessionId: string) => void
 }) {
-  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined, { enabled: open })
-  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open })
+  if (!open) return null
+
+  return <NewAgentChatOverlay workspaceId={workspaceId} onClose={onClose} onCreated={onCreated} />
+}
+
+export function NewAgentChatOverlay({
+  workspaceId,
+  onClose,
+  onCreated,
+}: {
+  workspaceId: string
+  onClose: () => void
+  onCreated: (sessionId: string) => void
+}) {
+  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined)
+  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined)
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const start = envTrpc.agent.sessionStart.useMutation()
   const utils = envTrpc.useUtils()
   const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  if (!open) return null
 
   const busy = start.isPending || cloneConfig.isPending
   const validation = validateNewAgentChatSelection(selection)

@@ -16,6 +16,7 @@ import { SandboxDetailPage } from './routes/sandbox'
 import { WorkspacePage } from './routes/workspace'
 import { EnvAuthDevicePage } from './routes/envauth-device'
 import { SettingsPage } from './routes/settings'
+import { OverlayLayerPage } from './routes/internal/overlay-layer'
 
 function RootLayout() {
   const navigate = useNavigate()
@@ -113,6 +114,11 @@ const settingsRoute = createRoute({
   path: '/settings',
   component: SettingsPage,
 })
+const overlayLayerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/internal/overlay-layer',
+  component: OverlayLayerPage,
+})
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -123,6 +129,7 @@ const routeTree = rootRoute.addChildren([
   workspaceRoute,
   envAuthDeviceRoute,
   settingsRoute,
+  overlayLayerRoute,
 ])
 
 export const router = createRouter({ routeTree })

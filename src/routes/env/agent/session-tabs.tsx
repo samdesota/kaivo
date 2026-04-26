@@ -21,10 +21,12 @@ export function SessionTabs({
   workspaceId,
   sessionId,
   onSelect,
+  onOpenNewChat,
 }: {
   workspaceId?: string
   sessionId: string | null
   onSelect: (sessionId: string) => void
+  onOpenNewChat?: () => void | Promise<void>
 }) {
   const sessionListInput = workspaceId ? { workspaceId } : undefined
   const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, {
@@ -105,7 +107,7 @@ export function SessionTabs({
           )
         })}
       </div>
-      <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} />
+      <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />
       {archived.length > 0 && (
         <ClosedDropdown archived={archived} onReopen={onReopen} />
       )}
@@ -118,11 +120,13 @@ export function NewSessionPopover({
   onCreated,
   label = '+',
   variant = 'compact',
+  onOpenNewChat,
 }: {
   workspaceId?: string
   onCreated: (sessionId: string) => void
   label?: string
   variant?: 'compact' | 'cta'
+  onOpenNewChat?: () => void | Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -145,7 +149,10 @@ export function NewSessionPopover({
     return (
       <div className="relative shrink-0">
         <button
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            if (onOpenNewChat) void onOpenNewChat()
+            else setOpen(true)
+          }}
           disabled={start.isPending}
           className="shrink-0 rounded px-2 py-1 text-xs text-brand-400 hover:bg-neutral-900 hover:text-brand-300"
           title="New agent chat"

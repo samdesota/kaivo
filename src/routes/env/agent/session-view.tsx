@@ -98,6 +98,7 @@ export function AgentSessionView({
   activeSessionId,
   onSessionSelect,
   headerTrailing,
+  onOpenNewChat,
 }: {
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   /**
@@ -111,10 +112,12 @@ export function AgentSessionView({
   activeSessionId?: string | null
   onSessionSelect?: (sessionId: string | null) => void
   headerTrailing?: ReactNode
+  onOpenNewChat?: () => Promise<string | null>
 }) {
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
   const sessionListInput = workspaceId ? { workspaceId } : undefined
   const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, { refetchInterval: 5_000 })
+  const utils = envTrpc.useUtils()
   const [internalSessionId, setInternalSessionId] = useState<string | null>(null)
   const sessionId = activeSessionId !== undefined ? activeSessionId : internalSessionId
   const setSessionId = (id: string | null) => {
@@ -191,6 +194,16 @@ export function AgentSessionView({
           workspaceId={workspaceId}
           sessionId={sessionId}
           onSelect={(id) => setSessionId(id)}
+          onOpenNewChat={
+            onOpenNewChat
+              ? async () => {
+                  const id = await onOpenNewChat()
+                  if (!id) return
+                  await utils.agent.sessionList.invalidate(sessionListInput)
+                  setSessionId(id)
+                }
+              : undefined
+          }
         />
         {headerTrailing}
       </div>
