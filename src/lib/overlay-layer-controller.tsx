@@ -66,14 +66,25 @@ async function openElectronOverlay(request: OverlayRequest): Promise<string | nu
 
 async function ensureElectronOverlay(): Promise<void> {
   if (detachedOverlayId) return readyPromise ?? Promise.resolve()
-  readyPromise = waitForOverlayReady()
-  const { overlayId } = await browserApi.createDetachedOverlay({
-    url: `${window.location.origin}/internal/overlay-layer`,
-    transparent: true,
-    clickThrough: false,
-  })
-  detachedOverlayId = overlayId
-  await readyPromise
+  const pendingReady = waitForOverlayReady()
+  readyPromise = pendingReady
+  try {
+    const { overlayId } = await browserApi.createDetachedOverlay({
+      url: `${window.location.origin}/internal/overlay-layer`,
+      transparent: true,
+      clickThrough: false,
+    })
+    detachedOverlayId = overlayId
+    await pendingReady
+  } catch (e) {
+    const overlayId = detachedOverlayId
+    detachedOverlayId = null
+    readyPromise = null
+    if (overlayId) {
+      await browserApi.closeOverlay({ overlayId }).catch(() => undefined)
+    }
+    throw e
+  }
 }
 
 function waitForOverlayReady(): Promise<void> {
