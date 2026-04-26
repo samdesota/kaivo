@@ -12,6 +12,13 @@ type NewAgentChatInput = {
 let detachedOverlayId: string | null = null
 let readyPromise: Promise<void> | null = null
 
+export function prewarmOverlayLayer(): void {
+  if (!browserApi.isAvailable()) return
+  void ensureElectronOverlay().catch((e) => {
+    console.warn('webframe overlay prewarm failed', e)
+  })
+}
+
 export async function openNewAgentChatOverlay(input: NewAgentChatInput): Promise<string | null> {
   const request: OverlayRequest = {
     requestId: `overlay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

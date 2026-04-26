@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { trpc } from '../trpc'
 import { envTrpc, makeEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
-import { openNewAgentChatOverlay } from '../lib/overlay-layer-controller'
+import { openNewAgentChatOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { useLocalEnvIdentity } from '../lib/local-env-discovery'
 import { ShellChrome } from './env/shell/shell-chrome'
@@ -153,6 +153,10 @@ function WorkspaceShell({
       dispatchWorkspaceState({ type: 'closeTab', tabId: ctx.uiState.activeWorkspaceTabId })
     }
   }, [ctx.uiState.activeWorkspaceTabId, dispatchWorkspaceState])
+
+  useEffect(() => {
+    prewarmOverlayLayer()
+  }, [])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
