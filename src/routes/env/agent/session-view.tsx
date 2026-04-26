@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { envTrpc } from '../../../env-trpc'
@@ -97,6 +97,7 @@ export function AgentSessionView({
   workspaceId,
   activeSessionId,
   onSessionSelect,
+  headerTrailing,
 }: {
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   /**
@@ -109,6 +110,7 @@ export function AgentSessionView({
   workspaceId?: string
   activeSessionId?: string | null
   onSessionSelect?: (sessionId: string | null) => void
+  headerTrailing?: ReactNode
 }) {
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
   const sessionListInput = workspaceId ? { workspaceId } : undefined
@@ -190,6 +192,7 @@ export function AgentSessionView({
           sessionId={sessionId}
           onSelect={(id) => setSessionId(id)}
         />
+        {headerTrailing}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {sessionId ? (

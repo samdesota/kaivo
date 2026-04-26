@@ -259,7 +259,7 @@ function WorkspaceAgentPane({
   const collapseButton = (
     <button
       onClick={onToggleCollapsed}
-      className="absolute right-2 top-2 z-10 rounded border border-neutral-800 bg-neutral-950/90 px-1.5 py-0.5 text-[10px] uppercase text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300"
+      className="shrink-0 rounded border border-neutral-800 bg-neutral-950/90 px-1.5 py-0.5 text-[10px] uppercase text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300"
       title="Collapse agent chat (⌘B)"
     >
       ←
@@ -269,23 +269,20 @@ function WorkspaceAgentPane({
   if (!ctx.localEnvTarget?.available) {
     return (
       <AgentPaneFrame>
-        {collapseButton}
-        <AgentPlaceholder message={ctx.localEnvTarget?.unavailableReason ?? 'Local env unavailable'} />
+        <AgentPlaceholder message={ctx.localEnvTarget?.unavailableReason ?? 'Local env unavailable'} trailing={collapseButton} />
       </AgentPaneFrame>
     )
   }
   if (!ctx.localEnvTarget.token) {
     return (
       <AgentPaneFrame>
-        {collapseButton}
-        <AgentPlaceholder message="Local env token unavailable" />
+        <AgentPlaceholder message="Local env token unavailable" trailing={collapseButton} />
       </AgentPaneFrame>
     )
   }
   const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
   return (
     <AgentPaneFrame>
-      {collapseButton}
       <WorkspaceAgentEnvProvider>
         <AgentSessionView
           workspaceId={ctx.workspace.id}
@@ -294,6 +291,7 @@ function WorkspaceAgentPane({
           onActiveSessionChange={(sessionId) => dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })}
           onSessionListChange={onSessionListChange}
           onOpenPane={openPane}
+          headerTrailing={collapseButton}
         />
       </WorkspaceAgentEnvProvider>
     </AgentPaneFrame>
@@ -396,11 +394,12 @@ function WorkspaceAgentEnvProvider({ children }: { children: ReactNode }) {
   )
 }
 
-function AgentPlaceholder({ message = 'Start a new agent chat' }: { message?: string }) {
+function AgentPlaceholder({ message = 'Start a new agent chat', trailing }: { message?: string; trailing?: ReactNode }) {
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <div className="flex items-center gap-1 border-b border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-500">
+      <div className="flex items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-500">
         <button className="rounded border border-neutral-800 px-2 py-1 text-neutral-400">+ chat</button>
+        {trailing}
       </div>
       <div className="flex flex-1 items-center justify-center text-neutral-500">{message}</div>
     </div>

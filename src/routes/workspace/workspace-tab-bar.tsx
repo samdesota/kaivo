@@ -149,7 +149,7 @@ export function WorkspaceTabBar({
   }, [activeWorkspaceId, activeWorkspaceName, list.data, optimisticWorkspace, tabOrder])
 
   return (
-    <div className="no-scrollbar flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-t border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-400">
+    <div className="no-scrollbar flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-t border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-400">
       {workspaces.map((workspace) => {
         const active = workspace.id === activeWorkspaceId
         const editing = edit.editingId === workspace.id
@@ -164,7 +164,7 @@ export function WorkspaceTabBar({
               if (e.key === 'Enter') void saveRename()
               if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
             }}
-            className="min-w-32 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-neutral-100 outline-none"
+            className="min-w-32 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
             aria-label="Workspace name"
           />
         ) : (
@@ -178,18 +178,18 @@ export function WorkspaceTabBar({
               dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
             }}
             className={
-              'group flex shrink-0 items-center gap-1 rounded px-2 py-1 hover:bg-neutral-900 hover:text-neutral-100 ' +
+              'group flex shrink-0 items-center gap-0.5 rounded transition-colors hover:bg-neutral-900 hover:text-neutral-100 ' +
               (active ? 'bg-neutral-800 text-neutral-100' : '')
             }
           >
-            <span className="max-w-48 truncate whitespace-nowrap">{workspace.name}</span>
+            <span className="max-w-48 truncate whitespace-nowrap py-1 pl-2 pr-1 text-xs">{workspace.name}</span>
             <button
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 void closeWorkspace(workspace.id)
               }}
-              className="rounded px-1 text-neutral-600 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 group-hover:opacity-100"
+              className="mr-1 rounded px-1 text-[11px] leading-none text-neutral-600 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 group-hover:opacity-100"
               aria-label={`Close workspace ${workspace.name}`}
               title="Close workspace"
             >
@@ -201,7 +201,7 @@ export function WorkspaceTabBar({
       <button
         onClick={() => void createWorkspace()}
         disabled={create.isPending}
-        className="shrink-0 rounded border border-neutral-800 px-2 py-1 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
+        className="shrink-0 rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
         aria-label="Create new workspace"
       >
         +
