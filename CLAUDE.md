@@ -54,6 +54,7 @@ npm run build
 cp dist/main.js     /Users/sam/.local/share/cc-env/app/main.js
 cp dist/main.js.map /Users/sam/.local/share/cc-env/app/main.js.map
 rsync -a --delete migrations/ /Users/sam/.local/share/cc-env/app/migrations/
+find /Users/sam/.local/share/cc-env/app/node_modules/node-pty/prebuilds -name spawn-helper -type f -exec chmod 755 {} +
 
 cd /Users/sam/d/cloud-code-tools/packages/opencode-plugin
 npm run build

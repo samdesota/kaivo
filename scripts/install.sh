@@ -140,6 +140,13 @@ node --input-type=module -e "
   npm install --omit=dev --no-audit --no-fund --silent
 )
 
+# node-pty's macOS prebuild launches PTYs through spawn-helper. Some package
+# copy/install paths can strip its executable bit, which makes PTY creation fail
+# with the opaque native error "posix_spawnp failed.".
+if [[ -d "$install_dir/app/node_modules/node-pty/prebuilds" ]]; then
+  find "$install_dir/app/node_modules/node-pty/prebuilds" -name spawn-helper -type f -exec chmod 755 {} +
+fi
+
 # Plugin bundle lives next to the binary so the Dockerfile / local install
 # share the same config shape.
 mkdir -p "$install_dir/opencode-plugin"

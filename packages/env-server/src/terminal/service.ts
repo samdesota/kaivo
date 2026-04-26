@@ -220,7 +220,7 @@ class TerminalService {
 
   list(): ShellInfo[] {
     return [...this.shells.values()]
-      .filter((h) => h.ownerKind === 'human' && !h.isRunOnce)
+      .filter((h) => !h.isRunOnce)
       .map(toInfo)
   }
 
