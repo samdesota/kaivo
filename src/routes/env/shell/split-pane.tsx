@@ -10,6 +10,8 @@ export function SplitPane({
   initialRatio = 0.7,
   minRatio = 0.25,
   maxRatio = 0.85,
+  leftCollapsed = false,
+  collapsedLeftWidth = 28,
   left,
   right,
   onRatioChange,
@@ -18,6 +20,8 @@ export function SplitPane({
   initialRatio?: number
   minRatio?: number
   maxRatio?: number
+  leftCollapsed?: boolean
+  collapsedLeftWidth?: number
   left: React.ReactNode
   right: React.ReactNode
   onRatioChange?: (ratio: number) => void
@@ -76,20 +80,26 @@ export function SplitPane({
     <div ref={containerRef} className="flex min-h-0 min-w-0 flex-1">
       <div
         className="flex min-h-0 min-w-0 flex-col"
-        style={{ flex: `0 0 calc(${ratio * 100}% - 2px)` }}
+        style={
+          leftCollapsed
+            ? { flex: `0 0 ${collapsedLeftWidth}px` }
+            : { flex: `0 0 calc(${ratio * 100}% - 2px)` }
+        }
       >
         {left}
       </div>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        onMouseDown={onMouseDown}
-        onDoubleClick={() => setRatio(initialRatio)}
-        className="group relative w-1 shrink-0 cursor-col-resize bg-neutral-800 hover:bg-brand-500/60"
-        title="Drag to resize · double-click to reset"
-      >
-        <div className="pointer-events-none absolute inset-y-0 -left-1 -right-1" />
-      </div>
+      {!leftCollapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onMouseDown={onMouseDown}
+          onDoubleClick={() => setRatio(initialRatio)}
+          className="group relative w-1 shrink-0 cursor-col-resize bg-neutral-800 hover:bg-brand-500/60"
+          title="Drag to resize · double-click to reset"
+        >
+          <div className="pointer-events-none absolute inset-y-0 -left-1 -right-1" />
+        </div>
+      )}
       <div
         className="flex min-h-0 min-w-0 flex-col"
         style={{ flex: `1 1 0` }}

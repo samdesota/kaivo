@@ -9,6 +9,7 @@ export function ShellChrome({
   actions,
   left,
   right,
+  leftCollapsed = false,
   splitStorageKey,
   splitInitialRatio = 0.7,
   onSplitRatioChange,
@@ -20,6 +21,7 @@ export function ShellChrome({
   actions: ReactNode
   left: ReactNode
   right?: ReactNode
+  leftCollapsed?: boolean
   splitStorageKey: string
   splitInitialRatio?: number
   onSplitRatioChange?: (ratio: number) => void
@@ -44,6 +46,7 @@ export function ShellChrome({
         <SplitPane
           storageKey={splitStorageKey}
           initialRatio={splitInitialRatio}
+          leftCollapsed={leftCollapsed}
           onRatioChange={onSplitRatioChange}
           left={left}
           right={right}

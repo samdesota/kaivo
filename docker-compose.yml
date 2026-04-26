@@ -33,6 +33,7 @@ services:
       PORT: "3000"
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
       ADMIN_PASSWORD_BOOTSTRAP: ${ADMIN_PASSWORD_BOOTSTRAP:-}
+      CC_SERVICE_CREDENTIAL: ${CC_SERVICE_CREDENTIAL:-local-dev-service-credential}
       SANDBOX_BASE_IMAGE: cloud-code-sandbox:dev
       DOCKER_NETWORK: cloud-code-net
       # Phase 4 bootstrap — first-start seeding for the encrypted secrets store.

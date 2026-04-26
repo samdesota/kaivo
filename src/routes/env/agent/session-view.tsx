@@ -93,6 +93,7 @@ interface SessionStatus {
 export function AgentSessionView({
   onOpenPane,
   onActiveSessionChange,
+  onSessionListChange,
   workspaceId,
   activeSessionId,
   onSessionSelect,
@@ -104,6 +105,7 @@ export function AgentSessionView({
    * palette so new shells default to the session's cwd.
    */
   onActiveSessionChange?: (sessionId: string | null) => void
+  onSessionListChange?: (count: number) => void
   workspaceId?: string
   activeSessionId?: string | null
   onSessionSelect?: (sessionId: string | null) => void
@@ -125,6 +127,10 @@ export function AgentSessionView({
   const [startError, setStartError] = useState<string | null>(null)
 
   const sessionsData = sessions.data as SessionSummary[] | undefined
+
+  useEffect(() => {
+    if (sessionsData) onSessionListChange?.(sessionsData.length)
+  }, [sessionsData, onSessionListChange])
 
   useEffect(() => {
     if (!sessionsData) return

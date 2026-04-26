@@ -101,6 +101,14 @@ export function CommandPalette({
         }
       },
     })
+    out.push({
+      id: 'action:new-tab',
+      label: 'New tab',
+      detail: 'Open Google in a browser tab',
+      kind: 'action',
+      haystack: 'new tab browser google',
+      run: () => onOpenContent({ type: 'browser', url: 'https://www.google.com' }),
+    })
     if (hasActiveTab) {
       out.push({
         id: 'action:close-tab',

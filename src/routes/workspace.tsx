@@ -132,16 +132,40 @@ function WorkspaceShell({
 }) {
   const ctx = useWorkspaceContext()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [agentCollapsed, setAgentCollapsed] = useState(false)
+  const [agentSessionCount, setAgentSessionCount] = useState(0)
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
     [dispatchWorkspaceState],
   )
-  const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
+  const openWorkspacePane = useWorkspaceOpenPane(dispatchWorkspaceState)
+  const openPane = useCallback(
+    (content: PaneContent, options?: { title?: string; activate?: boolean }) => {
+      openWorkspacePane(content, options)
+      if (agentSessionCount === 0) setAgentCollapsed(true)
+    },
+    [agentSessionCount, openWorkspacePane],
+  )
   const closeActiveTab = useCallback(() => {
     if (ctx.uiState.activeWorkspaceTabId) {
       dispatchWorkspaceState({ type: 'closeTab', tabId: ctx.uiState.activeWorkspaceTabId })
     }
   }, [ctx.uiState.activeWorkspaceTabId, dispatchWorkspaceState])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        setAgentCollapsed((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   return (
     <div className="flex h-screen flex-col">
       <ShellChrome
@@ -150,6 +174,7 @@ function WorkspaceShell({
         subtitle={ctx.localEnvTarget ? `local · ${ctx.localEnvTarget.env.label}` : 'local env unavailable'}
         splitStorageKey={`workspace.${ctx.workspace.id}.splitRatio`}
         splitInitialRatio={ctx.uiState.splitRatio ?? 0.7}
+        leftCollapsed={agentCollapsed}
         onSplitRatioChange={onSplitRatioChange}
         actions={
           <WorkspaceHeaderActions
@@ -157,7 +182,14 @@ function WorkspaceShell({
             onOpenPane={openPane}
           />
         }
-        left={<WorkspaceAgentPane dispatchWorkspaceState={dispatchWorkspaceState} />}
+        left={
+          <WorkspaceAgentPane
+            collapsed={agentCollapsed}
+            onToggleCollapsed={() => setAgentCollapsed((v) => !v)}
+            onSessionListChange={setAgentSessionCount}
+            dispatchWorkspaceState={dispatchWorkspaceState}
+          />
+        }
         right={
           ctx.uiState.workspaceTabs.length > 0 ? (
             <WorkspaceTabPane dispatchWorkspaceState={dispatchWorkspaceState} />
@@ -198,7 +230,7 @@ function WorkspaceHeaderActions({
         <ShellsDropdown align="right" onOpen={(content) => onOpenPane(content)} />
       </WorkspaceEnvTargetProvider>
       <Link to="/dashboard" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
-        Environments
+        Pair local env
       </Link>
       <Link to="/settings" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
         Settings
@@ -208,30 +240,82 @@ function WorkspaceHeaderActions({
 }
 
 function WorkspaceAgentPane({
+  collapsed,
+  onToggleCollapsed,
+  onSessionListChange,
   dispatchWorkspaceState,
 }: {
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  onSessionListChange: (count: number) => void
   dispatchWorkspaceState: WorkspaceUiDispatch
 }) {
   const ctx = useWorkspaceContext()
+  if (collapsed) {
+    return <AgentCollapsedRail onExpand={onToggleCollapsed} />
+  }
+
+  const collapseButton = (
+    <button
+      onClick={onToggleCollapsed}
+      className="absolute right-2 top-2 z-10 rounded border border-neutral-800 bg-neutral-950/90 px-1.5 py-0.5 text-[10px] uppercase text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300"
+      title="Collapse agent chat (⌘B)"
+    >
+      ←
+    </button>
+  )
+
   if (!ctx.localEnvTarget?.available) {
-    return <AgentPlaceholder message={ctx.localEnvTarget?.unavailableReason ?? 'Local env unavailable'} />
+    return (
+      <AgentPaneFrame>
+        {collapseButton}
+        <AgentPlaceholder message={ctx.localEnvTarget?.unavailableReason ?? 'Local env unavailable'} />
+      </AgentPaneFrame>
+    )
   }
   if (!ctx.localEnvTarget.token) {
-    return <AgentPlaceholder message="Local env token unavailable" />
+    return (
+      <AgentPaneFrame>
+        {collapseButton}
+        <AgentPlaceholder message="Local env token unavailable" />
+      </AgentPaneFrame>
+    )
   }
   const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
   return (
-    <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agent Chats">
+    <AgentPaneFrame>
+      {collapseButton}
       <WorkspaceAgentEnvProvider>
         <AgentSessionView
           workspaceId={ctx.workspace.id}
           activeSessionId={ctx.uiState.activeAgentSessionId}
           onSessionSelect={(sessionId) => dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })}
           onActiveSessionChange={(sessionId) => dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })}
+          onSessionListChange={onSessionListChange}
           onOpenPane={openPane}
         />
       </WorkspaceAgentEnvProvider>
+    </AgentPaneFrame>
+  )
+}
+
+function AgentPaneFrame({ children }: { children: ReactNode }) {
+  return (
+    <section className="relative flex h-full min-h-0 w-full flex-col" aria-label="Agent Chats">
+      {children}
     </section>
+  )
+}
+
+function AgentCollapsedRail({ onExpand }: { onExpand: () => void }) {
+  return (
+    <button
+      onClick={onExpand}
+      title="Expand agent chat (⌘B)"
+      className="flex h-full w-7 shrink-0 flex-col items-center justify-start gap-2 border-r border-neutral-800 bg-neutral-950 py-3 text-[10px] uppercase tracking-wider text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+    >
+      <span style={{ writingMode: 'vertical-rl' }}>Agent chat</span>
+    </button>
   )
 }
 
@@ -309,12 +393,12 @@ function WorkspaceAgentEnvProvider({ children }: { children: ReactNode }) {
 
 function AgentPlaceholder({ message = 'Start a new agent chat' }: { message?: string }) {
   return (
-    <section className="flex h-full min-h-0 w-full flex-col" aria-label="Agent Chats">
+    <div className="flex h-full min-h-0 w-full flex-col">
       <div className="flex items-center gap-1 border-b border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-500">
         <button className="rounded border border-neutral-800 px-2 py-1 text-neutral-400">+ chat</button>
       </div>
       <div className="flex flex-1 items-center justify-center text-neutral-500">{message}</div>
-    </section>
+    </div>
   )
 }
 
@@ -442,7 +526,7 @@ function WorkspaceError({ message }: { message: string }) {
       <div className="text-red-400">{message}</div>
       <div className="mt-4">
         <Link to="/" className="text-brand-500 hover:underline">
-          Back to dashboard
+          Back to workspace
         </Link>
       </div>
     </div>
