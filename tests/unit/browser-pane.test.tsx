@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { act, fireEvent, render, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = {
   isAvailable: vi.fn(() => true),
@@ -44,6 +44,8 @@ describe('BrowserPane', () => {
     })
   })
 
+  afterEach(() => cleanup())
+
   it('calls browser API methods on mount, resize activation, and cleanup', async () => {
     const onBrowserTabId = vi.fn()
     const view = render(
@@ -83,11 +85,8 @@ describe('BrowserPane', () => {
     view.rerender(
       <BrowserPane paneId="pane-1" browserTabId="native-tab-1" active={true} />,
     )
-    await waitFor(() => expect(api.attachTab).toHaveBeenCalledWith({
-      paneId: 'pane-1',
-      browserTabId: 'native-tab-1',
-    }))
-    expect(api.focusTab).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
+    await waitFor(() => expect(api.focusTab).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' }))
+    expect(api.attachTab).not.toHaveBeenCalled()
 
     await act(async () => view.unmount())
     expect(api.closeTab).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
@@ -123,5 +122,28 @@ describe('BrowserPane', () => {
       browserTabId: 'native-tab-1',
       url: 'https://example.org/path',
     }))
+  })
+
+  it('does not reattach or refocus a native tab on unrelated parent rerenders', async () => {
+    const view = render(
+      <BrowserPane paneId="pane-1" browserTabId="native-tab-1" url="https://example.com" active={true} />,
+    )
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalledTimes(1))
+    expect(api.focusTab).toHaveBeenCalledTimes(1)
+
+    view.rerender(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        onBrowserTabId={() => undefined}
+      />,
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(api.attachTab).toHaveBeenCalledTimes(1)
+    expect(api.focusTab).toHaveBeenCalledTimes(1)
   })
 })

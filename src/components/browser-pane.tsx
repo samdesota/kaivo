@@ -15,9 +15,13 @@ export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId 
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
   const createdTabIdRef = useRef<string | null>(null)
+  const onBrowserTabIdRef = useRef(onBrowserTabId)
+  const attachedTabKeyRef = useRef<string | null>(null)
+  const focusedTabKeyRef = useRef<string | null>(null)
   const [address, setAddress] = useState(url ?? '')
 
   browserTabIdRef.current = browserTabId
+  onBrowserTabIdRef.current = onBrowserTabId
 
   useEffect(() => {
     setAddress(url ?? '')
@@ -48,14 +52,25 @@ export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId 
   }, [active, paneId])
 
   useEffect(() => {
-    if (!active || !browserApi.isAvailable()) return
+    if (!active || !browserApi.isAvailable()) {
+      focusedTabKeyRef.current = null
+      return
+    }
     let cancelled = false
 
     async function ensureTab() {
       const existingTabId = browserTabIdRef.current
       if (existingTabId) {
-        await browserApi.attachTab({ paneId, browserTabId: existingTabId })
-        await browserApi.focusTab({ browserTabId: existingTabId })
+        const tabKey = `${existingTabId}:${paneId}`
+        if (attachedTabKeyRef.current !== tabKey) {
+          await browserApi.attachTab({ paneId, browserTabId: existingTabId })
+          attachedTabKeyRef.current = tabKey
+          focusedTabKeyRef.current = null
+        }
+        if (focusedTabKeyRef.current !== tabKey) {
+          await browserApi.focusTab({ browserTabId: existingTabId })
+          focusedTabKeyRef.current = tabKey
+        }
         return
       }
 
@@ -66,14 +81,16 @@ export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId 
       }
       createdTabIdRef.current = tab.browserTabId
       browserTabIdRef.current = tab.browserTabId
-      onBrowserTabId?.(tab.browserTabId)
+      attachedTabKeyRef.current = `${tab.browserTabId}:${paneId}`
+      focusedTabKeyRef.current = `${tab.browserTabId}:${paneId}`
+      onBrowserTabIdRef.current?.(tab.browserTabId)
     }
 
     void ensureTab()
     return () => {
       cancelled = true
     }
-  }, [active, onBrowserTabId, paneId, url])
+  }, [active, browserTabId, paneId, url])
 
   useEffect(() => {
     if (!browserApi.isAvailable()) return
