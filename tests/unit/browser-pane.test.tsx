@@ -146,4 +146,27 @@ describe('BrowserPane', () => {
     expect(api.attachTab).toHaveBeenCalledTimes(1)
     expect(api.focusTab).toHaveBeenCalledTimes(1)
   })
+
+  it('replaces a persisted native tab id when the desktop app restarted without that tab', async () => {
+    const onBrowserTabId = vi.fn()
+    api.attachTab.mockRejectedValueOnce(new Error('tab not found'))
+    api.createTab.mockResolvedValueOnce({ browserTabId: 'native-tab-2' })
+
+    render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="stale-native-tab"
+        url="https://example.com"
+        active={true}
+        onBrowserTabId={onBrowserTabId}
+      />,
+    )
+
+    await waitFor(() => expect(api.createTab).toHaveBeenCalledWith({
+      paneId: 'pane-1',
+      url: 'https://example.com',
+    }))
+    expect(api.focusTab).not.toHaveBeenCalledWith({ browserTabId: 'stale-native-tab' })
+    expect(onBrowserTabId).toHaveBeenCalledWith('native-tab-2')
+  })
 })

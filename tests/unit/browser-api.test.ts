@@ -84,4 +84,19 @@ describe('browser API adapter', () => {
     expect(calls.reload).toHaveBeenLastCalledWith({ tabId: 'tab-1', ignoreCache: false })
     expect(calls.close).toHaveBeenLastCalledWith({ tabId: 'tab-1' })
   })
+
+  it('turns webframe tab-not-found results into recoverable client errors', async () => {
+    const { win, calls } = makeWindow()
+    calls.move.mockResolvedValueOnce({ ok: false, code: 'TAB_NOT_FOUND', message: 'Tab tab-1 not found' })
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+
+    try {
+      await expect(createBrowserApi(win).attachTab({ paneId: 'pane-1', browserTabId: 'tab-1' })).rejects.toThrow(
+        'TAB_NOT_FOUND: tab-1',
+      )
+      expect(info).toHaveBeenCalledWith('Native browser tab tab-1 no longer exists; creating a replacement tab')
+    } finally {
+      info.mockRestore()
+    }
+  })
 })

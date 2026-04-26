@@ -126,20 +126,23 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     async attachTab(input) {
       const webframe = getWebframe(win)
       const windowId = await getWindowId()
-      await webframe.trpc.tabs.move.mutate({
+      const moved = await webframe.trpc.tabs.move.mutate({
         tabId: input.browserTabId,
         windowId,
         placement: { slot: paneSlotName(input.paneId) },
       })
-      await webframe.trpc.tabs.setActive.mutate({ tabId: input.browserTabId, windowId })
+      assertTabFound(moved, input.browserTabId)
+      const activated = await webframe.trpc.tabs.setActive.mutate({ tabId: input.browserTabId, windowId })
+      assertTabFound(activated, input.browserTabId)
     },
 
     async focusTab(input) {
       const webframe = getWebframe(win)
-      await webframe.trpc.tabs.setActive.mutate({
+      const result = await webframe.trpc.tabs.setActive.mutate({
         tabId: input.browserTabId,
         windowId: await getWindowId(),
       })
+      assertTabFound(result, input.browserTabId)
     },
 
     async navigate(input) {
@@ -265,4 +268,16 @@ function getWindow(): BrowserWindowLike | undefined {
 function getWebframe(win: BrowserWindowLike | undefined): WebframeGlobal {
   if (!win?.webframe?.trpc) throw new Error('browser API is unavailable outside Electron')
   return win.webframe
+}
+
+function assertTabFound(result: unknown, browserTabId: string): void {
+  if (!isTabNotFoundResult(result)) return
+  console.info(`Native browser tab ${browserTabId} no longer exists; creating a replacement tab`)
+  throw new Error(`TAB_NOT_FOUND: ${browserTabId}`)
+}
+
+function isTabNotFoundResult(result: unknown): result is { ok: false; code: 'TAB_NOT_FOUND' } {
+  return typeof result === 'object' && result !== null && 'ok' in result && 'code' in result
+    && result.ok === false
+    && result.code === 'TAB_NOT_FOUND'
 }

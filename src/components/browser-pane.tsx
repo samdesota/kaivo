@@ -65,16 +65,23 @@ export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId,
       const existingTabId = browserTabIdRef.current
       if (existingTabId) {
         const tabKey = `${existingTabId}:${paneId}`
-        if (attachedTabKeyRef.current !== tabKey) {
-          await browserApi.attachTab({ paneId, browserTabId: existingTabId })
-          attachedTabKeyRef.current = tabKey
+        try {
+          if (attachedTabKeyRef.current !== tabKey) {
+            await browserApi.attachTab({ paneId, browserTabId: existingTabId })
+            attachedTabKeyRef.current = tabKey
+            focusedTabKeyRef.current = null
+          }
+          if (focusedTabKeyRef.current !== tabKey) {
+            await browserApi.focusTab({ browserTabId: existingTabId })
+            focusedTabKeyRef.current = tabKey
+          }
+          return
+        } catch {
+          if (cancelled) return
+          browserTabIdRef.current = undefined
+          attachedTabKeyRef.current = null
           focusedTabKeyRef.current = null
         }
-        if (focusedTabKeyRef.current !== tabKey) {
-          await browserApi.focusTab({ browserTabId: existingTabId })
-          focusedTabKeyRef.current = tabKey
-        }
-        return
       }
 
       const tab = await browserApi.createTab({ paneId, url })
