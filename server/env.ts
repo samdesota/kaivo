@@ -2,7 +2,9 @@ import { z } from 'zod'
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  DATABASE_URL: z.string().min(1),
+  CC_SERVE_CLIENT: z.coerce.boolean().default(false),
+  CC_INSTANCE_ID: z.string().default('default'),
+  APP_SQLITE_PATH: z.string().optional(),
   DATA_DIR: z.string().default('/data'),
   // Host-side path that is bind-mounted to DATA_DIR in the app container.
   // Required when the app runs in a container and spawns sandbox containers
@@ -67,6 +69,11 @@ const schema = z.object({
   // this is essentially a self-check; still required so the wiring mirrors
   // the split-process deployment.
   CC_SERVICE_CREDENTIAL: z.string().min(16),
+}).transform((value) => {
+  return {
+    ...value,
+    APP_SQLITE_PATH: value.APP_SQLITE_PATH ?? `${value.DATA_DIR}/app.db`,
+  }
 })
 
 const parsed = schema.safeParse(process.env)

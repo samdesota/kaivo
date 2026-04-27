@@ -29,6 +29,7 @@ export async function readSecrets(): Promise<Secrets> {
 }
 
 export async function writeSecrets(s: Secrets): Promise<void> {
+  await fs.mkdir(path.dirname(secretsPath), { recursive: true })
   const tmp = `${secretsPath}.tmp`
   await fs.writeFile(tmp, JSON.stringify(s), { mode: 0o600 })
   await fs.rename(tmp, secretsPath)

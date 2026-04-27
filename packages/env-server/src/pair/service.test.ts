@@ -7,16 +7,20 @@ type TokenRow = { id: string; tokenHash: string; createdAt: string }
 const meta: MetaRow = { id: 1, envTokenHash: null, pairedAt: null }
 const pairs: PairRow[] = []
 const tokens: TokenRow[] = []
+let secrets: Record<string, string> = {}
+let identityToken: string | null = null
 
 function resetState() {
   meta.envTokenHash = null
   meta.pairedAt = null
   pairs.length = 0
   tokens.length = 0
+  secrets = {}
+  identityToken = null
 }
 
 vi.mock('../config.js', () => ({
-  config: { CC_KIND: 'local', CC_STATE_DIR: '/tmp/cc-env-state' },
+  config: { CC_KIND: 'local', CC_STATE_DIR: '/tmp/cc-env-state', CC_INSTANCE_ID: 'test-instance' },
 }))
 
 vi.mock('drizzle-orm', () => ({
@@ -102,6 +106,13 @@ vi.mock('../logger.js', () => ({
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 }))
 
+vi.mock('../identity/token.js', () => ({
+  setIdentityToken: (tok: string | null) => {
+    identityToken = tok
+  },
+  getIdentityToken: () => identityToken,
+}))
+
 beforeEach(() => {
   resetState()
   vi.resetModules()
@@ -121,5 +132,20 @@ describe('pair service', () => {
     expect(tokens).toHaveLength(1)
     expect(hasEnvTokenHash(hashEnvToken('first-token'))).toBe(true)
     expect(hasEnvTokenHash(hashEnvToken(envToken))).toBe(true)
+  })
+
+  it('desktop pairing is scoped to the configured instance id', async () => {
+    const { hashEnvToken, hasEnvTokenHash } = await import('../envmeta/service.js')
+    const { PairError, desktopPair } = await import('./service.js')
+
+    await expect(desktopPair('wrong-instance')).rejects.toThrow(PairError)
+
+    const { envToken } = await desktopPair('test-instance', 'identity-token')
+
+    expect(envToken).toBeTruthy()
+    expect(hasEnvTokenHash(hashEnvToken(envToken))).toBe(true)
+    expect(identityToken).toBe('identity-token')
+    const { readSecrets } = await import('../envmeta/service.js')
+    await expect(readSecrets()).resolves.toMatchObject({ identityToken: 'identity-token' })
   })
 })

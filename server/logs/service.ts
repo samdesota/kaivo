@@ -115,5 +115,5 @@ export async function ingestLogs(req: IngestRequest): Promise<IngestResult> {
 export async function purgeExpiredLogs(): Promise<number> {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)
   const result = await db.delete(eventLogs).where(lt(eventLogs.eventTs, cutoff))
-  return result.rowCount ?? 0
+  return result.changes ?? 0
 }

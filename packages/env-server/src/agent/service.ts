@@ -11,6 +11,7 @@ import {
   opencodeBasicAuthHeader,
   opencodeSupervisor,
 } from './opencode.js'
+import { IdentityAuthError, IdentityUnreachableError, resolveProviderKeys } from '../identity/client.js'
 
 const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
 
@@ -164,9 +165,15 @@ class AgentService {
 
   async agentStatus(): Promise<{ ready: boolean; hasProvider: boolean }> {
     const ready = opencodeSupervisor.isReady()
-    // `hasProvider` is now a derived property: opencode only runs if
-    // identity has at least one provider configured.
-    return { ready, hasProvider: ready }
+    try {
+      const providerEnv = await resolveProviderKeys()
+      return { ready, hasProvider: Object.keys(providerEnv).length > 0 }
+    } catch (err) {
+      if (err instanceof IdentityAuthError || err instanceof IdentityUnreachableError) {
+        return { ready, hasProvider: false }
+      }
+      throw err
+    }
   }
 
   /** Explicit user-triggered start (or restart). Propagates errors. */

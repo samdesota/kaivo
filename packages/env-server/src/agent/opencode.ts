@@ -450,6 +450,7 @@ class OpenCodeSupervisor {
   }
 
   private async ensureXdgDirs(): Promise<void> {
+    await fs.mkdir(config.CC_WORKING_DIR, { recursive: true })
     for (const sub of ['config', 'data', 'state', 'cache']) {
       await fs.mkdir(path.join(config.CC_STATE_DIR, 'xdg', sub), { recursive: true })
     }

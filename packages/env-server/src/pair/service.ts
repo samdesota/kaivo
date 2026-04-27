@@ -3,7 +3,8 @@ import { eq, lt } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { pairSessions } from '../db/schema.js'
 import { envMeta } from '../db/schema.js'
-import { addEnvTokenHash, hashEnvToken, isPaired, setEnvTokenHash } from '../envmeta/service.js'
+import { addEnvTokenHash, hashEnvToken, isPaired, readSecrets, setEnvTokenHash, writeSecrets } from '../envmeta/service.js'
+import { setIdentityToken } from '../identity/token.js'
 import { logger } from '../logger.js'
 import { config } from '../config.js'
 
@@ -11,7 +12,7 @@ const PAIR_TTL_MS = 5 * 60 * 1000
 
 export class PairError extends Error {
   constructor(
-    public code: 'already_paired' | 'bad_code' | 'expired' | 'not_found',
+    public code: 'already_paired' | 'bad_code' | 'expired' | 'not_found' | 'instance_mismatch',
     message: string,
   ) {
     super(message)
@@ -31,6 +32,23 @@ function randomSessionId(): string {
 
 function randomEnvToken(): string {
   return crypto.randomBytes(32).toString('base64url')
+}
+
+export async function desktopPair(instanceId: string, identityToken?: string): Promise<PairConfirmResult> {
+  if (config.CC_KIND !== 'local' || instanceId !== config.CC_INSTANCE_ID) {
+    throw new PairError('instance_mismatch', 'desktop pair instance did not match this env')
+  }
+  if (identityToken) {
+    const secrets = await readSecrets()
+    await writeSecrets({ ...secrets, identityToken })
+    setIdentityToken(identityToken)
+  }
+  const envToken = randomEnvToken()
+  const hash = hashEnvToken(envToken)
+  if (isPaired()) addEnvTokenHash(hash)
+  else setEnvTokenHash(hash)
+  db.delete(pairSessions).run()
+  return { envToken }
 }
 
 export interface PairStartResult {

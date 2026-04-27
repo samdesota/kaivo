@@ -14,9 +14,11 @@ describe('desktop documentation scripts', () => {
     const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8')
 
     for (const script of [
+      'dev',
+      'dev:web',
       'build:desktop',
       'dev:desktop',
-      'dev:desktop:stack',
+      'dev:desktop:external',
       'test:e2e:desktop',
       'test:e2e:desktop:app',
     ]) {

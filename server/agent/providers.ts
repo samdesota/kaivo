@@ -59,6 +59,19 @@ export function rewriteLoopbackForSandbox(url: string): string {
   }
 }
 
+export function normalizeOpenAIBaseUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.pathname === '' || u.pathname === '/') {
+      u.pathname = '/v1'
+      return u.toString().replace(/\/$/, '')
+    }
+    return url.replace(/\/$/, '')
+  } catch {
+    return url
+  }
+}
+
 /**
  * Is a row already present under this secret name? We check the `secrets`
  * table directly to avoid needing to decrypt on the read path for the
@@ -159,7 +172,7 @@ export async function buildProviderEnv(): Promise<Record<string, string>> {
       if (cfg.baseUrl) out.ANTHROPIC_BASE_URL = rewriteLoopbackForSandbox(cfg.baseUrl)
     } else if (provider === 'openai') {
       out.OPENAI_API_KEY = apiKey
-      if (cfg.baseUrl) out.OPENAI_BASE_URL = rewriteLoopbackForSandbox(cfg.baseUrl)
+      if (cfg.baseUrl) out.OPENAI_BASE_URL = rewriteLoopbackForSandbox(normalizeOpenAIBaseUrl(cfg.baseUrl))
     }
   }
   return out
@@ -183,7 +196,7 @@ export async function buildProviderEnvRaw(): Promise<Record<string, string>> {
       if (cfg.baseUrl) out.ANTHROPIC_BASE_URL = cfg.baseUrl
     } else if (provider === 'openai') {
       out.OPENAI_API_KEY = apiKey
-      if (cfg.baseUrl) out.OPENAI_BASE_URL = cfg.baseUrl
+      if (cfg.baseUrl) out.OPENAI_BASE_URL = normalizeOpenAIBaseUrl(cfg.baseUrl)
     }
   }
   return out

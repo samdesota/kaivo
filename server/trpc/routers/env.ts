@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { protectedProcedure, router } from '../trpc.js'
 import { EnvError, envManager } from '../../env-orchestrator/manager.js'
+import { listLocalEnvRegistrations } from '../../db/local-env-list.js'
 
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof EnvError) {
@@ -26,7 +27,7 @@ function toTrpcError(err: unknown): TRPCError {
 export const envRouter = router({
   list: protectedProcedure
     .input(z.object({ localIdentityLabel: z.string().min(1).max(200).optional() }).optional())
-    .query(async ({ input }) => envManager.list(input ?? {})),
+    .query(async () => listLocalEnvRegistrations()),
 
   get: protectedProcedure
     .input(z.object({ id: z.string().min(1), localIdentityLabel: z.string().min(1).max(200).optional() }))
@@ -34,16 +35,6 @@ export const envRouter = router({
       const row = await envManager.get(input.id, input)
       if (!row) throw new TRPCError({ code: 'NOT_FOUND' })
       return row
-    }),
-
-  createContainer: protectedProcedure
-    .input(z.object({ label: z.string().min(1).max(80) }))
-    .mutation(async ({ input }) => {
-      try {
-        return await envManager.createContainer({ label: input.label })
-      } catch (err) {
-        throw toTrpcError(err)
-      }
     }),
 
   registerLocal: protectedProcedure

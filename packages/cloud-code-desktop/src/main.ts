@@ -3,6 +3,7 @@ import path from 'node:path'
 import { app, type BrowserWindow, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
+import { ensureDesktopServices, type ServiceSupervisor } from './service-supervisor'
 
 type DesktopLogKind = 'main' | 'chrome-renderer' | 'tab-renderer' | 'crash' | 'exception'
 
@@ -10,6 +11,7 @@ const logPath = process.env.CC_DESKTOP_TEST_LOG
 const stateDir = process.env.CC_DESKTOP_TEST_STATE_DIR
 
 let webframeApp: WebframeApp | undefined
+let serviceSupervisor: ServiceSupervisor | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 
@@ -53,6 +55,9 @@ async function main(): Promise<void> {
     ...process.env,
     NODE_ENV: app.isPackaged ? 'production' : process.env.NODE_ENV,
   })
+  if (config.manageServices) {
+    serviceSupervisor = await ensureDesktopServices(config.instance)
+  }
 
   app.on('web-contents-created', (_event, contents) => {
     trackWebContents(contents)
@@ -115,6 +120,11 @@ async function main(): Promise<void> {
 
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
+  void serviceSupervisor?.stop().catch((error) => {
+    writeLog('exception', 'error', 'service supervisor shutdown failed', {
+      message: error instanceof Error ? error.message : String(error),
+    })
+  })
   void webframeApp?.stop().catch((error) => {
     writeLog('exception', 'error', 'webframe shutdown failed', {
       message: error instanceof Error ? error.message : String(error),

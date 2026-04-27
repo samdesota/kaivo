@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { rewriteLoopbackForSandbox } from './providers.js'
+import { normalizeOpenAIBaseUrl, rewriteLoopbackForSandbox } from './providers.js'
 
 describe('rewriteLoopbackForSandbox', () => {
   it('rewrites localhost to host.docker.internal', () => {
@@ -28,5 +28,15 @@ describe('rewriteLoopbackForSandbox', () => {
   it('passes junk through unchanged', () => {
     const input = 'not a url'
     expect(rewriteLoopbackForSandbox(input)).toBe(input)
+  })
+})
+
+describe('normalizeOpenAIBaseUrl', () => {
+  it('adds /v1 when only an origin is configured', () => {
+    expect(normalizeOpenAIBaseUrl('https://llm.438d.xyz')).toBe('https://llm.438d.xyz/v1')
+  })
+
+  it('leaves explicit OpenAI-compatible paths intact', () => {
+    expect(normalizeOpenAIBaseUrl('https://llm.438d.xyz/v1')).toBe('https://llm.438d.xyz/v1')
   })
 })

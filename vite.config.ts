@@ -22,12 +22,10 @@ export default defineConfig({
       '/ws': { target: 'http://localhost:3000', ws: true },
       '/api': 'http://localhost:3000',
       '/healthz': 'http://localhost:3000',
-      // Preview + agent proxies live on the API server, not vite — otherwise
-      // unknown `/preview/:id/:port/*` paths fall through to the SPA and look
-      // like "Not Found". `/sandbox/:id` itself is an SPA route, so only
-      // `/sandbox/:id/agent/*` goes to the backend.
+      // Preview proxies live on the API server, not vite — otherwise unknown
+      // `/preview/:id/:port/*` paths fall through to the SPA and look like
+      // "Not Found".
       '/preview': { target: 'http://localhost:3000', ws: true },
-      '^/sandbox/[^/]+/agent': { target: 'http://localhost:3000', ws: true },
     },
   },
   build: {

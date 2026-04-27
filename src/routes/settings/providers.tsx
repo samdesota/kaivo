@@ -26,7 +26,7 @@ export function ProvidersSection() {
       <h2 className="mb-1 text-lg font-medium">AI provider keys</h2>
       <p className="mb-4 text-sm text-neutral-400">
         Keys are stored encrypted on disk. The built-in agent (OpenCode) uses
-        these to talk to the provider from inside each sandbox.
+        these from the local cc-env runtime.
       </p>
       {list.isLoading ? (
         <p className="text-neutral-500">Loading…</p>
@@ -145,8 +145,6 @@ function ProviderRow({
           />
           <p className="mt-1 text-xs text-neutral-500">
             For local proxies, use <code className="font-mono">http://localhost:&lt;port&gt;</code>.
-            It gets rewritten to <code className="font-mono">host.docker.internal</code> inside the
-            sandbox automatically.
           </p>
         </div>
         {error && <FormError>{error}</FormError>}

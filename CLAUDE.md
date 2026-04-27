@@ -1,111 +1,72 @@
 # Cloud Code Tools — operator notes
 
-Three services, deployed independently. There is no CI; every change ships
-by hand from this repo.
+Cloud Code is currently local-first. The default product path is the Electron desktop app, which starts a local identity/app server and a matching local `cc-env`, then auto-pairs them.
 
-| Service       | What it is                                  | Where it runs                               |
-| ------------- | ------------------------------------------- | ------------------------------------------- |
-| Identity      | Orchestrator + webapp (`cloud-code-app`)    | Box, in docker, fronted by Caddy            |
-| Sandbox env   | `cc-env` inside `cloud-code-sandbox` image  | Box, per-user docker container              |
-| Local env     | `cc-env` as a launchd service               | The operator's mac                          |
+Remote Docker sandboxes/orchestrator are legacy for now. The production box still has old data that will be exported into local SQLite at the final migration step of the current Fractal plan.
 
-Production box: `root@161.35.136.150` → `https://code.438d.xyz`.
+Production box: `root@161.35.136.150` → legacy `https://code.438d.xyz`.
 
-Local repo lives at `/Users/sam/d/cloud-code-tools`. The box has its own
-checkout at `/opt/cloud-code-tools`.
+Local repo lives at `/Users/sam/d/cloud-code-tools`. The box has its own checkout at `/opt/cloud-code-tools`.
 
-## Deploy the orchestrator + webapp
-
-Migrations run on app boot, so a restart is enough to apply them. Workspace
-identity lives in Postgres (`workspaces`, `workspace_ui_states`), so deploy this
-service before relying on `/w/:workspaceId` routes.
+## Default Local Desktop
 
 ```bash
-git push origin main
-ssh root@161.35.136.150 'cd /opt/cloud-code-tools \
-  && git pull --ff-only \
-  && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build app'
+cd /Users/sam/d/cloud-code-tools
+npm run dev
 ```
 
-Verify:
+This runs Electron with `CC_DESKTOP_MANAGE_SERVICES=true`. Electron starts/discovers:
+
+- identity/app server, SQLite app DB under `.cloud-code/instances/<id>/app/app.db`
+- `cc-env`, SQLite env DB under `.cloud-code/instances/<id>/env-state/env.db`
+- instance-scoped ports, logs, labels, and pairing token
+
+Multiple worktrees can run together because the default instance id is derived from the worktree path. Override with `CC_INSTANCE_ID`, `CC_INSTANCE_ROOT`, `CC_APP_PORT`, and `CC_ENV_PORT` when needed.
+
+## Browser-Only Development
 
 ```bash
-ssh root@161.35.136.150 'docker logs cloud-code-app-1 2>&1 | tail -20'
+npm run dev:web
 ```
 
-## Deploy the sandbox image (cc-env for container envs)
+Open <http://127.0.0.1:5180>. Manual local env pairing remains available from the dashboard for browser-only or externally managed `cc-env` flows.
 
-Rebuilds `cloud-code-sandbox:dev` on the box. Existing sandboxes are not
-recreated — only spinups *after* the rebuild pick up the change.
+## External Desktop Debugging
 
 ```bash
-ssh root@161.35.136.150 'cd /opt/cloud-code-tools && npm run docker:sandbox'
+CC_DESKTOP_CHROME_URL=http://127.0.0.1:5180 npm run dev:desktop:external
 ```
 
-## Deploy local cc-env (mac)
+Use this only when another server/Vite stack is already running.
 
-The launchd service runs from a deployed bundle, not from the repo. Build,
-copy artifacts, restart. The opencode plugin is loaded from a separate
-deployed file (`CC_OPENCODE_PLUGIN_PATH`), so rebuild + copy that too whenever
-`packages/opencode-plugin/src/**` changes — otherwise opencode keeps loading
-the stale bundle and new tools silently don't show up.
+## Legacy Docker
 
-Workspace-scoped local chats require the env-server migrations for
-`agent_sessions.workspace_id`, shell workspace metadata, and `recent_folders`;
-keep the `rsync -a --delete migrations/ ...` step in this deploy path.
+These are retained temporarily for reference and migration work, not the default path:
 
 ```bash
-cd /Users/sam/d/cloud-code-tools/packages/env-server
-npm run build
-cp dist/main.js     /Users/sam/.local/share/cc-env/app/main.js
-cp dist/main.js.map /Users/sam/.local/share/cc-env/app/main.js.map
-rsync -a --delete migrations/ /Users/sam/.local/share/cc-env/app/migrations/
-find /Users/sam/.local/share/cc-env/app/node_modules/node-pty/prebuilds -name spawn-helper -type f -exec chmod 755 {} +
-
-cd /Users/sam/d/cloud-code-tools/packages/opencode-plugin
-npm run build
-cp dist/index.js /Users/sam/.local/share/cc-env/opencode-plugin/index.js
-
-launchctl kickstart -k gui/$(id -u)/com.cloudcode.env
+docker compose up
+npm run docker:sandbox
 ```
 
-Service settings live in `~/Library/LaunchAgents/com.cloudcode.env.plist`
-(env vars: `CC_KIND`, `CC_LABEL`, `CC_WORKING_DIR`, `CC_PORT`, `CC_STATE_DIR`,
-`CC_IDENTITY_URL`, `CC_OPENCODE_PLUGIN_PATH`, `PATH`).
-
-## Caddyfile
-
-Source of truth: `docker/Caddyfile` in this repo. Production copy lives at
-`/etc/caddy/Caddyfile` on the box; ship with `scp` then reload.
-
-```bash
-scp docker/Caddyfile root@161.35.136.150:/etc/caddy/Caddyfile
-ssh root@161.35.136.150 'caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy'
-```
+Do not add new default workflows that require Docker, Postgres, sandbox image builds, or fixed `cc-env` port `47821`.
 
 ## Logs
 
-- **Centralized** `event_logs` table (Postgres on the box). Every Node service
-  + the browser ships entries here:
-  ```bash
-  ssh root@161.35.136.150 'docker exec cloud-code-postgres-1 sh -c \
-    "psql -U \$POSTGRES_USER \$POSTGRES_DB -c \"SELECT event_ts, source, level, msg, ctx \
-    FROM event_logs ORDER BY event_ts DESC LIMIT 50;\""'
-  ```
-- **Local cc-env stdout**: `~/.local/share/cc-env/state/log/cc-env.log` (pino JSON).
-- **Local opencode**: `~/.local/share/cc-env/state/xdg/data/opencode/log/` (one
-  file per opencode start). Useful for debugging tool calls / model errors.
+- Desktop-managed app log: `.cloud-code/instances/<id>/logs/app.log`
+- Desktop-managed cc-env log: `.cloud-code/instances/<id>/logs/cc-env.log`
+- Desktop harness log when set: `CC_DESKTOP_TEST_LOG`
+- Legacy local cc-env launchd log: `~/.local/share/cc-env/state/log/cc-env.log`
+- Legacy opencode logs: `~/.local/share/cc-env/state/xdg/data/opencode/log/`
 
 ## Databases
 
-- **Identity** (Postgres, on the box): exec `psql` inside `cloud-code-postgres-1`.
-- **Local cc-env** (sqlite): `~/.local/share/cc-env/state/env.db`. Tables:
-  `agent_sessions`, `agent_transcripts`, `shell_sessions`, `env_meta`, …
+- Local identity/app SQLite: `.cloud-code/instances/<id>/app/app.db`
+- Local cc-env SQLite: `.cloud-code/instances/<id>/env-state/env.db`
+- Legacy production export source: Postgres on the box, via `cloud-code-postgres-1`
 
 ## LLM proxy
 
-`cli-proxy-api` on the box, exposed at `https://llm.438d.xyz`. Models
-auto-discovered from upstream login. To add a provider:
+`cli-proxy-api` on the box, exposed at `https://llm.438d.xyz`. Models auto-discovered from upstream login. To add a provider:
 
 ```bash
 # 1. SSH tunnel for the OAuth callback (run on your mac, leave open):
@@ -115,19 +76,4 @@ docker exec -it cli-proxy-api /CLIProxyAPI/CLIProxyAPI -<provider>-login -no-bro
 # (-claude-login, -codex-login, -gemini-login, …)
 ```
 
-Open the printed OAuth URL in your local browser. Auth files persist in
-`/root/.config/cli-proxy/auths/` on the box.
-
-API key for the proxy is in `/root/.config/cli-proxy/config/config.yaml`
-under `api-keys`.
-
-## Quick sanity test against the proxy
-
-```bash
-curl -sS https://llm.438d.xyz/v1/messages \
-  -H "Authorization: Bearer <key>" \
-  -H "anthropic-version: 2023-06-01" \
-  -H "content-type: application/json" \
-  -d '{"model":"claude-opus-4-7","max_tokens":32,
-       "messages":[{"role":"user","content":"hi"}]}'
-```
+Open the printed OAuth URL in your local browser. Auth files persist in `/root/.config/cli-proxy/auths/` on the box.

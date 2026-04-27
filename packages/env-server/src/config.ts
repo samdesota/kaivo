@@ -22,6 +22,10 @@ const schema = z.object({
 
   CC_KIND: z.enum(['container', 'local']).default('local'),
 
+  // Stable identity for a desktop-managed local runtime. Electron uses this
+  // to distinguish its matching cc-env from another worktree's cc-env.
+  CC_INSTANCE_ID: z.string().default('default'),
+
   // Human label; shown in meta.info. Orchestrator/install.sh writes this.
   CC_LABEL: z.string().default('unnamed env'),
 

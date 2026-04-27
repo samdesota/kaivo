@@ -41,10 +41,8 @@ vi.mock('drizzle-orm', () => ({
       (r[col._col] as Date).getTime() < val.getTime(),
 }))
 
-vi.mock('../db/schema.js', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>
+vi.mock('../db/schema.js', () => {
   return {
-    ...actual,
     envAuthTokens: {
       _table: 'env_auth_tokens',
       tokenHash: { _col: 'tokenHash' },

@@ -6,7 +6,6 @@ import { envTrpc, makeEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
 import { openNewAgentChatOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
-import { useLocalEnvIdentity } from '../lib/local-env-discovery'
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
@@ -39,13 +38,9 @@ export function WorkspacePage() {
   const search = useSearch({ from: '/w/$workspaceId' })
   const navigate = useNavigate({ from: '/w/$workspaceId' })
   const utils = trpc.useUtils()
-  const localIdentity = useLocalEnvIdentity()
   const workspace = trpc.workspace.get.useQuery({ id: workspaceId })
   const uiState = trpc.workspace.getUiState.useQuery({ workspaceId })
-  const envs = trpc.env.list.useQuery(
-    localIdentity.label ? { localIdentityLabel: localIdentity.label } : {},
-    { refetchInterval: 10_000 },
-  )
+  const envs = trpc.env.list.useQuery({}, { refetchInterval: 10_000 })
   const markOpened = trpc.workspace.markOpened.useMutation({
     onSuccess: () => utils.workspace.list.invalidate(),
   })
@@ -102,7 +97,7 @@ export function WorkspacePage() {
     [envTargets],
   )
 
-  if (workspace.isLoading || uiState.isLoading || envs.isLoading || localIdentity.loading) {
+  if (workspace.isLoading || uiState.isLoading || envs.isLoading) {
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
@@ -235,13 +230,21 @@ function WorkspaceHeaderActions({
       <WorkspaceEnvTargetProvider>
         <ShellsDropdown align="right" onOpen={(content) => onOpenPane(content)} />
       </WorkspaceEnvTargetProvider>
-      <Link to="/dashboard" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
-        Pair local env
-      </Link>
+      <EnvStatusLink />
       <Link to="/settings" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
         Settings
       </Link>
     </>
+  )
+}
+
+function EnvStatusLink() {
+  const ctx = useWorkspaceContext()
+  const label = ctx.localEnvTarget?.available ? ctx.localEnvTarget.env.label : 'Env unavailable'
+  return (
+    <Link to="/dashboard" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
+      {label}
+    </Link>
   )
 }
 

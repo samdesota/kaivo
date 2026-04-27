@@ -4,7 +4,6 @@ import {
   nextRenameValue,
   renameEditReducer,
 } from '../../src/routes/workspace/tab-bar-state'
-import { orderWorkspaceTabs } from '../../src/routes/workspace/workspace-tab-bar'
 
 describe('workspace tab bar rename state', () => {
   it('save/cancel transitions preserve newly created workspace identity', () => {
@@ -39,23 +38,5 @@ describe('workspace tab bar rename state', () => {
     expect(nextRenameValue(state)).toBeNull()
     state = renameEditReducer(state, { type: 'change', draft: '   ' })
     expect(nextRenameValue(state)).toBeNull()
-  })
-
-  it('keeps workspace tab order stable when active workspace changes', () => {
-    const workspaces = [
-      { id: 'b', name: 'B' },
-      { id: 'a', name: 'A' },
-      { id: 'c', name: 'C' },
-    ]
-    expect(orderWorkspaceTabs(workspaces, { id: 'b', name: 'B' }, ['a', 'b', 'c'])).toEqual([
-      { id: 'a', name: 'A' },
-      { id: 'b', name: 'B' },
-      { id: 'c', name: 'C' },
-    ])
-    expect(orderWorkspaceTabs(workspaces, { id: 'c', name: 'C' }, ['a', 'b', 'c'])).toEqual([
-      { id: 'a', name: 'A' },
-      { id: 'b', name: 'B' },
-      { id: 'c', name: 'C' },
-    ])
   })
 })

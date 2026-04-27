@@ -7,6 +7,7 @@ import { logger } from '../logger.js'
 import { appRouter } from '../trpc/router.js'
 import { createContext } from '../trpc/trpc.js'
 import { getMeta, hashEnvToken, hasEnvTokenHash, isPaired } from '../envmeta/service.js'
+import { desktopPair, PairError } from '../pair/service.js'
 import { terminalService } from '../terminal/service.js'
 import { opencodeSupervisor } from '../agent/opencode.js'
 import { registerAgentProxy } from '../agent/proxy.js'
@@ -50,9 +51,32 @@ export async function buildServer(): Promise<FastifyInstance> {
       ok: true,
       paired: isPaired(),
       kind: config.CC_KIND,
+      instanceId: config.CC_INSTANCE_ID,
       label: config.CC_LABEL,
       identityReady: getIdentityToken() !== null,
       opencodeReady: opencodeSupervisor.isReady(),
+    }
+  })
+
+  app.get('/auth/check', async (req, reply) => {
+    const headerVal = req.headers.authorization
+    const header = Array.isArray(headerVal) ? headerVal[0] : headerVal
+    const token = typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
+      ? header.slice(7).trim()
+      : ''
+    if (!token || !hasEnvTokenHash(hashEnvToken(token))) return reply.code(401).send({ ok: false })
+    return { ok: true }
+  })
+
+  app.post('/pair/desktop', async (req, reply) => {
+    const body = req.body as { instanceId?: string; identityToken?: string } | undefined
+    try {
+      return await desktopPair(body?.instanceId ?? '', body?.identityToken)
+    } catch (err) {
+      if (err instanceof PairError && err.code === 'instance_mismatch') {
+        return reply.code(409).send({ error: err.message })
+      }
+      throw err
     }
   })
 

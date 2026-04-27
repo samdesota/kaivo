@@ -1,6 +1,5 @@
 import { router } from './trpc.js'
 import { authRouter } from './routers/auth.js'
-import { sandboxRouter } from './routers/sandbox.js'
 import { fsRouter } from './routers/fs.js'
 import { shellRouter } from './routers/shell.js'
 import { repoRouter } from './routers/repo.js'
@@ -20,7 +19,6 @@ import { workspaceRouter } from './routers/workspace.js'
 
 export const appRouter = router({
   auth: authRouter,
-  sandbox: sandboxRouter,
   fs: fsRouter,
   shell: shellRouter,
   repo: repoRouter,

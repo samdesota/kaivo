@@ -34,7 +34,7 @@ function makeWindow() {
         },
       },
     },
-  } as unknown as Window & { webframe: unknown }
+  } as unknown as Parameters<typeof createBrowserApi>[0]
   return { win, calls }
 }
 
@@ -87,7 +87,7 @@ describe('browser API adapter', () => {
 
   it('turns webframe tab-not-found results into recoverable client errors', async () => {
     const { win, calls } = makeWindow()
-    calls.move.mockResolvedValueOnce({ ok: false, code: 'TAB_NOT_FOUND', message: 'Tab tab-1 not found' })
+    calls.move!.mockResolvedValueOnce({ ok: false, code: 'TAB_NOT_FOUND', message: 'Tab tab-1 not found' })
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
 
     try {

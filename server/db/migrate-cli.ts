@@ -1,7 +1,6 @@
-import { pool } from './client.js'
-import { runMigrations } from './migrate.js'
+import { env } from '../env.js'
+import { runLocalAppMigrations } from './local-migrate.js'
 import { logger } from '../logger.js'
 
-await runMigrations(pool)
-logger.info('migrations applied')
-await pool.end()
+const result = runLocalAppMigrations(env.APP_SQLITE_PATH)
+logger.info(result, 'sqlite migrations applied')

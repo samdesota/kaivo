@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import Fastify from 'fastify'
 import fastifyCookie from '@fastify/cookie'
 import fastifyStatic from '@fastify/static'
@@ -10,28 +10,22 @@ import {
 } from '@trpc/server/adapters/fastify'
 import { env, isProd } from './env.js'
 import { logger } from './logger.js'
-import { pool } from './db/client.js'
-import { runMigrations } from './db/migrate.js'
+import { runLocalAppMigrations } from './db/local-migrate.js'
+import { getLocalEnvRegistration, upsertLocalEnvRegistration } from './db/local-env-store.js'
 import { loadMasterKey } from './secrets/index.js'
 import { seedAdminFromEnv, purgeExpiredSessions } from './auth/service.js'
 import { appRouter, type AppRouter } from './trpc/router.js'
 import { createContext } from './trpc/context.js'
-import { dockerPing, ensureNetwork } from './docker/client.js'
-import { sandboxManager } from './sandbox/manager.js'
 import { registerShellWsRoutes } from './ws/shell.js'
 import { registerGitHubRoutes } from './http/github.js'
 import { registerPreviewProxy } from './preview/proxy.js'
 import { registerAgentProxy } from './agent/proxy.js'
-import { registerEnvProxy } from './env-orchestrator/proxy.js'
-import { envReconciler } from './env-orchestrator/reconciler.js'
-import { agentService } from './agent/service.js'
-import { bootstrapProvidersFromEnv } from './agent/providers.js'
 import { purgeExpiredLogs } from './logs/service.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 async function resolveStaticRoot(): Promise<string | null> {
-  if (!isProd) return null
+  if (!isProd && !env.CC_SERVE_CLIENT) return null
   const candidates = [
     path.resolve(HERE, '../client'),
     path.resolve(HERE, '../../dist/client'),
@@ -48,7 +42,7 @@ async function resolveStaticRoot(): Promise<string | null> {
   return null
 }
 
-async function buildServer() {
+export async function buildServer() {
   const server = Fastify({
     loggerInstance: logger,
     trustProxy: true,
@@ -63,10 +57,35 @@ async function buildServer() {
   await registerShellWsRoutes(server)
   registerPreviewProxy(server)
   registerAgentProxy(server)
-  registerEnvProxy(server)
   registerGitHubRoutes(server)
 
-  server.get('/healthz', async () => ({ ok: true }))
+  server.get('/healthz', async () => ({ ok: true, instanceId: env.CC_INSTANCE_ID }))
+
+  server.get<{ Params: { id: string } }>('/internal/local-env/:id', async (req, reply) => {
+    const row = getLocalEnvRegistration(req.params.id)
+    if (!row) return reply.code(404).send({ error: 'not found' })
+    return row
+  })
+
+  server.post('/internal/local-env/register', async (req, reply) => {
+    const body = req.body as Partial<{
+      id: string
+      label: string
+      url: string
+      envToken: string
+      localIdentityLabel: string
+    }>
+    if (!body.id || !body.label || !body.url || !body.envToken || !body.localIdentityLabel) {
+      return reply.code(400).send({ error: 'missing fields' })
+    }
+    return upsertLocalEnvRegistration({
+      id: body.id,
+      label: body.label,
+      url: body.url,
+      envToken: body.envToken,
+      localIdentityLabel: body.localIdentityLabel,
+    })
+  })
 
   // Caddy on-demand TLS gate: returns 200 only for hostnames that parse as
   // a valid preview subdomain (existing or otherwise — we don't hit the DB
@@ -138,28 +157,8 @@ async function buildServer() {
 
 async function main() {
   await loadMasterKey()
-  await runMigrations(pool)
+  runLocalAppMigrations(env.APP_SQLITE_PATH)
   await seedAdminFromEnv()
-  await bootstrapProvidersFromEnv()
-
-  agentService.wireSandboxLifecycle()
-
-  const dockerOk = await dockerPing()
-  if (dockerOk) {
-    try {
-      await ensureNetwork(env.DOCKER_NETWORK)
-      await sandboxManager.reconcile()
-      // Kick off opencode on any surviving sandboxes. Non-fatal on failure.
-      await agentService.reconcile()
-      await envReconciler.reconcile()
-    } catch (err) {
-      logger.warn({ err }, 'sandbox reconcile failed')
-    }
-  } else {
-    logger.warn(
-      'docker daemon not reachable — sandbox create/list will fail until /var/run/docker.sock is mounted',
-    )
-  }
 
   const server = await buildServer()
   await server.listen({ port: env.PORT, host: env.HOST })
@@ -169,28 +168,6 @@ async function main() {
     purgeExpiredSessions().catch((err) => logger.warn({ err }, 'session purge failed'))
   }, 60_000)
   purgeTimer.unref()
-
-  const reconcileTimer = setInterval(() => {
-    sandboxManager.reconcile().catch((err) => logger.warn({ err }, 'reconcile failed'))
-  }, 10_000)
-  reconcileTimer.unref()
-
-  const envReconcileTimer = setInterval(() => {
-    envReconciler
-      .reconcile()
-      .catch((err) => logger.warn({ err }, 'env reconcile failed'))
-  }, 15_000)
-  envReconcileTimer.unref()
-
-  // Re-bootstrap opencode on any sandbox where the process has died; longer
-  // interval than the sandbox reconcile because the ready-probe inside each
-  // call is an HTTP round-trip per sandbox.
-  const agentReconcileTimer = setInterval(() => {
-    agentService
-      .reconcile()
-      .catch((err) => logger.warn({ err }, 'agent reconcile failed'))
-  }, 30_000)
-  agentReconcileTimer.unref()
 
   // event_logs retention sweep. Daily is plenty given the table is
   // append-only and the index on event_ts makes the range delete cheap.
@@ -206,12 +183,8 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'shutting down')
     clearInterval(purgeTimer)
-    clearInterval(reconcileTimer)
-    clearInterval(envReconcileTimer)
-    clearInterval(agentReconcileTimer)
     try {
       await server.close()
-      await pool.end()
     } catch (err) {
       logger.error({ err }, 'error during shutdown')
     } finally {
@@ -222,7 +195,9 @@ async function main() {
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
 }
 
-main().catch((err) => {
-  logger.error({ err }, 'fatal startup error')
-  process.exit(1)
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    logger.error({ err }, 'fatal startup error')
+    process.exit(1)
+  })
+}

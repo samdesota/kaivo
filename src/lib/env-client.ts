@@ -9,8 +9,8 @@ import superjson from 'superjson'
 
 /**
  * Webapp-facing view of a cc-env endpoint. Container envs store a
- * relative URL (`/env/<id>`) that the orchestrator's reverse proxy
- * resolves; local envs store an absolute `http://127.0.0.1:47821`.
+ * relative URL (`/env/<id>`) that legacy orchestrator paths resolved;
+ * local envs store an instance-scoped absolute loopback URL.
  */
 export interface EnvRef {
   id: string

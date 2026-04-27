@@ -72,6 +72,15 @@ describe('workspace env targets', () => {
     expect(() => getEnvClient('dead-1')).toThrow(/unreachable/)
   })
 
+  it('selects the paired local env and reports missing local env state', () => {
+    const paired = resolveWorkspaceEnvTarget(env({ id: 'local-paired', kind: 'local', url: 'http://127.0.0.1:48981', envToken: 'paired-token' }))
+    const missingToken = resolveWorkspaceEnvTarget(env({ id: 'local-missing', kind: 'local', url: 'http://127.0.0.1:48982', envToken: null }))
+
+    expect(selectLocalEnvTarget([missingToken, paired])).toBe(paired)
+    expect(missingToken.available).toBe(false)
+    expect(missingToken.unavailableReason).toBe('env token unavailable')
+  })
+
   it('unavailable env target renders as per-tab state instead of failing workspace', () => {
     const targets = [
       resolveWorkspaceEnvTarget(env({ id: 'local-1', kind: 'local', url: 'http://127.0.0.1:47821', envToken: 'local-token' })),

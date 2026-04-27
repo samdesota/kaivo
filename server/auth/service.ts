@@ -137,4 +137,3 @@ export async function purgeExpiredSessions(): Promise<number> {
     .returning({ id: webSessions.id })
   return result.length
 }
-

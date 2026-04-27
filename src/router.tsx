@@ -12,7 +12,6 @@ import { LoginPage } from './routes/login'
 import { SetupPage } from './routes/setup'
 import { DashboardPage } from './routes/dashboard'
 import { WorkspaceLandingPage } from './routes/workspace-landing'
-import { SandboxDetailPage } from './routes/sandbox'
 import { WorkspacePage } from './routes/workspace'
 import { EnvAuthDevicePage } from './routes/envauth-device'
 import { SettingsPage } from './routes/settings'
@@ -87,11 +86,6 @@ const setupRoute = createRoute({
   path: '/setup',
   component: SetupPage,
 })
-const sandboxRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/sandbox/$id',
-  component: SandboxDetailPage,
-})
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/w/$workspaceId',
@@ -125,7 +119,6 @@ const routeTree = rootRoute.addChildren([
   dashboardRoute,
   loginRoute,
   setupRoute,
-  sandboxRoute,
   workspaceRoute,
   envAuthDeviceRoute,
   settingsRoute,

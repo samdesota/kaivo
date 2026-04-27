@@ -1,16 +1,13 @@
 import { Link } from '@tanstack/react-router'
 import { trpc } from '../trpc'
-import { Card, FormError } from '../components/ui'
+import { Button, Card, FormError } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
-import { useLocalEnvIdentity } from '../lib/local-env-discovery'
 import { AddLocalEnvForm } from './local-env-pairing'
+import { useState } from 'react'
 
 export function DashboardPage() {
-  const localIdentity = useLocalEnvIdentity()
-  const envs = trpc.env.list.useQuery(
-    localIdentity.label ? { localIdentityLabel: localIdentity.label } : {},
-    { refetchInterval: 5_000, refetchOnWindowFocus: true },
-  )
+  const [manualPairingOpen, setManualPairingOpen] = useState(false)
+  const envs = trpc.env.list.useQuery({}, { refetchInterval: 5_000, refetchOnWindowFocus: true })
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
@@ -31,16 +28,30 @@ export function DashboardPage() {
 
       <main className="mx-auto max-w-3xl space-y-6 p-8">
         <Card className="max-w-none">
-          <h2 className="mb-2 text-lg font-medium">Pair local env</h2>
-          <p className="mb-4 text-sm text-neutral-500">
-            Register the local cc-env process so workspaces can run agents and shells on this machine.
-          </p>
-          <AddLocalEnvForm onDone={() => envs.refetch().then(() => undefined)} />
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="mb-2 text-lg font-medium">Desktop runtime</h2>
+              <p className="text-sm text-neutral-500">
+                The desktop app starts and pairs its local cc-env automatically. Manual pairing is only needed for browser-only or externally managed envs.
+              </p>
+            </div>
+            <Button
+              className="bg-neutral-800 text-neutral-100 hover:bg-neutral-700"
+              onClick={() => setManualPairingOpen((open) => !open)}
+            >
+              {manualPairingOpen ? 'Hide manual pairing' : 'Manual pairing'}
+            </Button>
+          </div>
+          {manualPairingOpen && (
+            <div className="mt-5 border-t border-neutral-800 pt-5">
+              <AddLocalEnvForm onDone={() => envs.refetch().then(() => undefined)} />
+            </div>
+          )}
         </Card>
 
         <section>
           <h2 className="mb-3 text-lg font-medium">Registered local envs</h2>
-          {localIdentity.loading || envs.isLoading ? (
+          {envs.isLoading ? (
             <p className="text-neutral-500">Loading…</p>
           ) : envs.error ? (
             <FormError>{extractTrpcMessage(envs.error)}</FormError>
@@ -65,7 +76,7 @@ export function DashboardPage() {
               ))}
             </ul>
           ) : (
-            <p className="text-neutral-500">No local env registered yet.</p>
+            <p className="text-neutral-500">No local env registered yet. If you are in desktop mode, restart the app to auto-pair cc-env.</p>
           )}
         </section>
       </main>
