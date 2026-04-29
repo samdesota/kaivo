@@ -19,7 +19,16 @@ export const EMPTY_WORKSPACE_UI_STATE: WorkspaceUiState = {
   activeWorkspaceTabId: null,
   workspaceTabs: [],
   splitRatio: null,
+  agentCollapsed: false,
   tabOrder: [],
+}
+
+function normalizeWorkspaceUiState(state: WorkspaceUiState): WorkspaceUiState {
+  return {
+    ...EMPTY_WORKSPACE_UI_STATE,
+    ...state,
+    agentCollapsed: state.agentCollapsed ?? false,
+  }
 }
 
 export function normalizeWorkspaceName(name: string | undefined): string {
@@ -57,7 +66,7 @@ export function createWorkspaceService(database: Db = db) {
       .from(workspaceUiStates)
       .where(eq(workspaceUiStates.workspaceId, workspaceId))
       .limit(1)
-    return rows[0]?.state ?? EMPTY_WORKSPACE_UI_STATE
+    return rows[0]?.state ? normalizeWorkspaceUiState(rows[0].state) : EMPTY_WORKSPACE_UI_STATE
   }
 
   return {
@@ -130,14 +139,15 @@ export function createWorkspaceService(database: Db = db) {
     async saveUiState(workspaceId: string, state: WorkspaceUiState): Promise<WorkspaceUiState> {
       await get(workspaceId)
       const now = new Date()
+      const normalized = normalizeWorkspaceUiState(state)
       await database
         .insert(workspaceUiStates)
-        .values({ workspaceId, state, updatedAt: now })
+        .values({ workspaceId, state: normalized, updatedAt: now })
         .onConflictDoUpdate({
           target: workspaceUiStates.workspaceId,
-          set: { state, updatedAt: now },
+          set: { state: normalized, updatedAt: now },
         })
-      return state
+      return normalized
     },
   }
 }

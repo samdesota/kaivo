@@ -50,7 +50,15 @@ export function WorkspacePage() {
     emptyWorkspaceUiState(),
   )
   const [hydrated, setHydrated] = useState(false)
+  const [hydratedStateWorkspaceId, setHydratedStateWorkspaceId] = useState<string | null>(null)
   const hydratedWorkspaceId = useRef<string | null>(null)
+
+  useEffect(() => {
+    hydratedWorkspaceId.current = null
+    setHydratedStateWorkspaceId(null)
+    setHydrated(false)
+    dispatchWorkspaceState({ type: 'hydrate', state: emptyWorkspaceUiState() })
+  }, [workspaceId])
 
   useEffect(() => {
     if (workspace.data?.id) markOpened.mutate({ id: workspace.data.id })
@@ -69,11 +77,20 @@ export function WorkspacePage() {
         activeWorkspaceTabId: search.tab ?? uiState.data.activeWorkspaceTabId,
       },
     })
+    setHydratedStateWorkspaceId(workspaceId)
     setHydrated(true)
-  }, [uiState.data, search.chat, search.tab])
+  }, [uiState.data, workspaceId, search.chat, search.tab])
 
   useEffect(() => {
-    if (!workspace.data || !hydrated) return
+    if (
+      !workspace.data ||
+      workspace.data.id !== workspaceId ||
+      !hydrated ||
+      hydratedWorkspaceId.current !== workspaceId ||
+      hydratedStateWorkspaceId !== workspaceId
+    ) {
+      return
+    }
     saveUiState.mutate({ workspaceId, state: workspaceState })
     if (workspaceState.activeWorkspaceTabId !== search.tab) {
       void navigate({
@@ -86,7 +103,7 @@ export function WorkspacePage() {
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceState, workspace.data?.id, hydrated])
+  }, [workspaceState, workspace.data?.id, workspaceId, hydrated, hydratedStateWorkspaceId])
 
   const envTargets = useMemo(() => {
     return ((envs.data ?? []) as WorkspaceEnvRow[]).map(resolveWorkspaceEnvTarget)
@@ -129,10 +146,14 @@ function WorkspaceShell({
 }) {
   const ctx = useWorkspaceContext()
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [agentCollapsed, setAgentCollapsed] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
+  const agentCollapsed = ctx.uiState.agentCollapsed
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
+    [dispatchWorkspaceState],
+  )
+  const setAgentCollapsed = useCallback(
+    (collapsed: boolean) => dispatchWorkspaceState({ type: 'setAgentCollapsed', collapsed }),
     [dispatchWorkspaceState],
   )
   const openWorkspacePane = useWorkspaceOpenPane(dispatchWorkspaceState)
@@ -141,13 +162,12 @@ function WorkspaceShell({
       openWorkspacePane(content, options)
       if (agentSessionCount === 0) setAgentCollapsed(true)
     },
-    [agentSessionCount, openWorkspacePane],
+    [agentSessionCount, openWorkspacePane, setAgentCollapsed],
   )
   const closeActiveTab = useCallback(() => {
-    if (ctx.uiState.activeWorkspaceTabId) {
-      dispatchWorkspaceState({ type: 'closeTab', tabId: ctx.uiState.activeWorkspaceTabId })
-    }
-  }, [ctx.uiState.activeWorkspaceTabId, dispatchWorkspaceState])
+    const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
+    if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
+  }, [ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState])
 
   useEffect(() => {
     prewarmOverlayLayer()
@@ -160,12 +180,12 @@ function WorkspaceShell({
         setPaletteOpen((v) => !v)
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        setAgentCollapsed((v) => !v)
+        setAgentCollapsed(!agentCollapsed)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [agentCollapsed, setAgentCollapsed])
 
   return (
     <div className="flex h-screen flex-col">
@@ -186,7 +206,7 @@ function WorkspaceShell({
         left={
           <WorkspaceAgentPane
             collapsed={agentCollapsed}
-            onToggleCollapsed={() => setAgentCollapsed((v) => !v)}
+            onToggleCollapsed={() => setAgentCollapsed(!agentCollapsed)}
             onSessionListChange={setAgentSessionCount}
             dispatchWorkspaceState={dispatchWorkspaceState}
           />
@@ -488,7 +508,7 @@ function WorkspaceTabPane({
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                dispatchWorkspaceState({ type: 'closeTab', tabId: tab.id })
+                closeWorkspaceTab(tab, dispatchWorkspaceState)
               }}
               className="mr-1 rounded px-1 text-[11px] leading-none text-neutral-500 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 hover:opacity-100"
               aria-label="Close tab"
@@ -509,7 +529,7 @@ function WorkspaceTabPane({
         ) : activeTab ? (
           <WorkspaceTabContent
             tab={activeTab}
-            onClose={() => dispatchWorkspaceState({ type: 'closeTab', tabId: activeTab.id })}
+            onClose={() => closeWorkspaceTab(activeTab, dispatchWorkspaceState)}
             onBrowserTabId={(browserTabId) =>
               dispatchWorkspaceState({ type: 'setBrowserTabId', tabId: activeTab.id, browserTabId })
             }
@@ -571,11 +591,19 @@ function WorkspaceTabContent({
           active
           onBrowserTabId={onBrowserTabId}
           onTitleChange={onTitleChange}
+          closeOnUnmount={false}
         />
       </div>
     )
   }
   return <span>{workspaceTabLabel(tab)}</span>
+}
+
+function closeWorkspaceTab(tab: WorkspaceTab, dispatchWorkspaceState: WorkspaceUiDispatch): void {
+  if (tab.type === 'browser' && tab.browserTabId && browserApi.isAvailable()) {
+    void browserApi.closeTab({ browserTabId: tab.browserTabId })
+  }
+  dispatchWorkspaceState({ type: 'closeTab', tabId: tab.id })
 }
 
 function truncateTabTitle(title: string): string {

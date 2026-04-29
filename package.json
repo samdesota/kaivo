@@ -27,6 +27,7 @@
     "test:e2e:desktop": "playwright test -c playwright.desktop.config.ts",
     "test:e2e:desktop:app": "CC_DESKTOP_MAIN=packages/cloud-code-desktop/dist/main.js playwright test -c playwright.desktop.config.ts tests/desktop/skeleton.spec.ts",
     "db:migrate": "tsx server/db/migrate-cli.ts",
+    "db:seed:dev": "tsx scripts/seed-dev.ts",
     "test:e2e:live": "tsx scripts/live-e2e.ts",
     "test:e2e:stack": "scripts/e2e-stack.sh",
     "build:plugin": "cd packages/opencode-plugin && npm install --no-audit --no-fund --silent && npm run build",

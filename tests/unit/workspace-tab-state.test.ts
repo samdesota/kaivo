@@ -29,7 +29,7 @@ describe('workspace tab state', () => {
     )
   })
 
-  it('restores active chat, active workspace tab, and split ratio from persisted state', () => {
+  it('restores active chat, active workspace tab, split ratio, and agent collapsed state from persisted state', () => {
     const state = workspaceUiReducer(emptyWorkspaceUiState(), {
       type: 'hydrate',
       state: {
@@ -37,6 +37,7 @@ describe('workspace tab state', () => {
         activeWorkspaceTabId: 'tab-1',
         workspaceTabs: [{ id: 'tab-1', type: 'browser', url: 'https://example.com', title: 'Example' }],
         splitRatio: 0.42,
+        agentCollapsed: true,
         tabOrder: ['tab-1'],
       },
     })
@@ -44,6 +45,17 @@ describe('workspace tab state', () => {
     expect(state.activeAgentSessionId).toBe('agent-1')
     expect(state.activeWorkspaceTabId).toBe('tab-1')
     expect(state.splitRatio).toBe(0.42)
+    expect(state.agentCollapsed).toBe(true)
+  })
+
+  it('updates agent collapsed state independently from tab state', () => {
+    const state = workspaceUiReducer(emptyWorkspaceUiState(), {
+      type: 'setAgentCollapsed',
+      collapsed: true,
+    })
+
+    expect(state.agentCollapsed).toBe(true)
+    expect(state.workspaceTabs).toEqual([])
   })
 
   it('stores native browser tab id for browser workspace tabs', () => {

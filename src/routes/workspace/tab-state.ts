@@ -9,6 +9,7 @@ export type WorkspaceUiState = {
   activeWorkspaceTabId: string | null
   workspaceTabs: WorkspaceTab[]
   splitRatio: number | null
+  agentCollapsed: boolean
   tabOrder: string[]
 }
 
@@ -21,6 +22,7 @@ export type WorkspaceUiAction =
   | { type: 'setTabTitle'; tabId: string; title: string }
   | { type: 'setActiveAgentSession'; sessionId: string | null }
   | { type: 'setSplitRatio'; splitRatio: number | null }
+  | { type: 'setAgentCollapsed'; collapsed: boolean }
 
 export function emptyWorkspaceUiState(): WorkspaceUiState {
   return {
@@ -28,6 +30,7 @@ export function emptyWorkspaceUiState(): WorkspaceUiState {
     activeWorkspaceTabId: null,
     workspaceTabs: [],
     splitRatio: null,
+    agentCollapsed: false,
     tabOrder: [],
   }
 }
@@ -48,6 +51,7 @@ export function workspaceUiReducer(
     return { ...state, activeAgentSessionId: action.sessionId }
   }
   if (action.type === 'setSplitRatio') return { ...state, splitRatio: action.splitRatio }
+  if (action.type === 'setAgentCollapsed') return { ...state, agentCollapsed: action.collapsed }
   if (action.type === 'activateTab') {
     return state.workspaceTabs.some((tab) => tab.id === action.tabId)
       ? { ...state, activeWorkspaceTabId: action.tabId }
@@ -99,6 +103,7 @@ function normalizeState(state: WorkspaceUiState): WorkspaceUiState {
     activeWorkspaceTabId,
     workspaceTabs: state.workspaceTabs,
     splitRatio: state.splitRatio,
+    agentCollapsed: state.agentCollapsed ?? false,
     tabOrder: state.workspaceTabs.map((tab) => tab.id),
   }
 }

@@ -6,13 +6,14 @@ interface BrowserPaneProps {
   url?: string
   browserTabId?: string
   active: boolean
+  closeOnUnmount?: boolean
   onBrowserTabId?: (browserTabId: string) => void
   onTitleChange?: (title: string) => void
 }
 
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 }
 
-export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId, onTitleChange }: BrowserPaneProps) {
+export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount = true, onBrowserTabId, onTitleChange }: BrowserPaneProps) {
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
   const createdTabIdRef = useRef<string | null>(null)
@@ -113,12 +114,13 @@ export function BrowserPane({ paneId, url, browserTabId, active, onBrowserTabId,
 
   useEffect(() => {
     return () => {
+      if (!closeOnUnmount) return
       const ownedTabId = browserTabIdRef.current ?? createdTabIdRef.current
       if (ownedTabId && browserApi.isAvailable()) {
         void browserApi.closeTab({ browserTabId: ownedTabId })
       }
     }
-  }, [])
+  }, [closeOnUnmount])
 
   if (!browserApi.isAvailable()) {
     return (

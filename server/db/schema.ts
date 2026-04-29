@@ -19,6 +19,7 @@ export type WorkspaceUiState = {
   activeWorkspaceTabId: string | null
   workspaceTabs: WorkspaceTab[]
   splitRatio: number | null
+  agentCollapsed: boolean
   tabOrder: string[]
 }
 

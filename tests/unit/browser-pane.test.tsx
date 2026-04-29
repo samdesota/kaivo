@@ -169,4 +169,24 @@ describe('BrowserPane', () => {
     expect(api.focusTab).not.toHaveBeenCalledWith({ browserTabId: 'stale-native-tab' })
     expect(onBrowserTabId).toHaveBeenCalledWith('native-tab-2')
   })
+
+  it('can preserve native tabs across React unmounts', async () => {
+    const view = render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        closeOnUnmount={false}
+      />,
+    )
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalledWith({
+      paneId: 'pane-1',
+      browserTabId: 'native-tab-1',
+    }))
+
+    await act(async () => view.unmount())
+    expect(api.closeTab).not.toHaveBeenCalled()
+  })
 })

@@ -15,6 +15,7 @@ const uiStateSchema = z.object({
   activeWorkspaceTabId: z.string().min(1).nullable(),
   workspaceTabs: z.array(workspaceTabSchema),
   splitRatio: z.number().min(0).max(1).nullable(),
+  agentCollapsed: z.boolean(),
   tabOrder: z.array(z.string().min(1)),
 })
 

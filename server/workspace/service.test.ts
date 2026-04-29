@@ -14,6 +14,7 @@ type WorkspaceUiState = {
   activeWorkspaceTabId: string | null
   workspaceTabs: Array<Record<string, unknown>>
   splitRatio: number | null
+  agentCollapsed: boolean
   tabOrder: string[]
 }
 
@@ -162,6 +163,7 @@ describe('workspace router', () => {
       activeWorkspaceTabId: 'tab-1',
       workspaceTabs: [{ id: 'tab-1', type: 'browser' as const, url: 'https://example.com', title: 'Example' }],
       splitRatio: 0.42,
+      agentCollapsed: true,
       tabOrder: ['tab-1'],
     }
 
