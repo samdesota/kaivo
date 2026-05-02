@@ -135,6 +135,16 @@ export const agentRouter = router({
       }
     }),
 
+  transcriptReplay: authedProcedure
+    .input(z.object({ sessionId: z.string().min(1), sinceSeq: z.number().int().min(0).default(0) }))
+    .query(async ({ input }) => {
+      try {
+        return await agentService.transcriptReplay(input.sessionId, input.sinceSeq)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionApprove: authedProcedure
     .input(
       z.object({
@@ -330,11 +340,13 @@ export const agentRouter = router({
     }),
 
   transcript: authedProcedure
-    .input(z.object({ sessionId: z.string().min(1) }))
+    .input(z.object({ sessionId: z.string().min(1), sinceSeq: z.number().int().min(0).default(0) }))
     .subscription(({ input }) => {
       return observable<TranscriptEvent>((emit) => {
-        const unsub = agentService.subscribeTranscript(input.sessionId, (evt) =>
-          emit.next(evt),
+        const unsub = agentService.subscribeTranscript(
+          input.sessionId,
+          (evt) => emit.next(evt),
+          input.sinceSeq,
         )
         return () => unsub()
       })

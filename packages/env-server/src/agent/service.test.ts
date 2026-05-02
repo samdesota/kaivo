@@ -13,17 +13,28 @@ type AgentRow = {
   lastActivityAt: string
 }
 
+type TranscriptRow = {
+  sessionId: string
+  seq: number
+  role: string
+  contentJson: string
+  createdAt: string
+}
+
 const agentRows: AgentRow[] = []
+const transcriptRows: TranscriptRow[] = []
 const recentRows: Array<{ path: string; label: string | null; lastOpenedAt: string }> = []
 let opencodeSessionSeq = 0
 
 function resetState() {
   agentRows.length = 0
+  transcriptRows.length = 0
   recentRows.length = 0
   opencodeSessionSeq = 0
 }
 
 vi.mock('drizzle-orm', () => ({
+  asc: () => ({}),
   desc: () => ({}),
   eq:
     (col: { _col: string }, val: unknown) =>
@@ -45,7 +56,14 @@ vi.mock('../db/schema.js', () => ({
     createdAt: { _col: 'createdAt' },
     lastActivityAt: { _col: 'lastActivityAt' },
   },
-  agentTranscripts: { _table: 'agent_transcripts' },
+  agentTranscripts: {
+    _table: 'agent_transcripts',
+    sessionId: { _col: 'sessionId' },
+    seq: { _col: 'seq' },
+    role: { _col: 'role' },
+    contentJson: { _col: 'contentJson' },
+    createdAt: { _col: 'createdAt' },
+  },
   recentFolders: {
     _table: 'recent_folders',
     path: { _col: 'path' },
@@ -57,16 +75,31 @@ vi.mock('../db/schema.js', () => ({
 vi.mock('../db/client.js', () => ({
   db: {
     select: () => ({
-      from: () => {
-        const ordered = () =>
-          [...agentRows].sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
+      from: (table: { _table: string }) => {
+        const source = () => (table._table === 'agent_transcripts' ? transcriptRows : agentRows)
+        const ordered = () => {
+          const rows = [...source()]
+          if (table._table === 'agent_transcripts') {
+            return rows.sort((a, b) => (a as TranscriptRow).seq - (b as TranscriptRow).seq)
+          }
+          return (rows as AgentRow[]).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
+        }
         return {
-          orderBy: () => ({ all: () => ordered() }),
+          orderBy: () => ({
+            all: () => ordered(),
+            limit: (n: number) => ({ all: () => ordered().slice(0, n) }),
+          }),
           where: (pred: (r: Record<string, unknown>) => boolean) => ({
             orderBy: () => ({
               all: () => ordered().filter((r) => pred(r as unknown as Record<string, unknown>)),
+              limit: (n: number) => ({
+                all: () => ordered().filter((r) => pred(r as unknown as Record<string, unknown>)).slice(0, n),
+              }),
             }),
-            get: () => agentRows.find((r) => pred(r as unknown as Record<string, unknown>)),
+            limit: (n: number) => ({
+              all: () => ordered().filter((r) => pred(r as unknown as Record<string, unknown>)).slice(0, n),
+            }),
+            get: () => source().find((r) => pred(r as unknown as Record<string, unknown>)),
           }),
         }
       },
@@ -75,6 +108,7 @@ vi.mock('../db/client.js', () => ({
       values: (value: Record<string, unknown>) => ({
         run: () => {
           if ('opencodeSessionId' in value) agentRows.push(value as AgentRow)
+          else if ('contentJson' in value) transcriptRows.push(value as TranscriptRow)
           else recentRows.push(value as { path: string; label: string | null; lastOpenedAt: string })
         },
         onConflictDoUpdate: ({ set }: { set: Record<string, unknown> }) => ({
@@ -176,5 +210,32 @@ describe('agent service workspace sessions', () => {
 
     const all = await agentService.sessionList()
     expect(all).toHaveLength(3)
+  })
+
+  it('persists transcript events with replay sequence cursors', async () => {
+    const { agentService } = await import('./service.js')
+
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    await (agentService as unknown as {
+      handleEvent(raw: unknown): Promise<void>
+    }).handleEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'msg-1',
+          role: 'assistant',
+          sessionID: session.opencodeSessionId,
+        },
+      },
+    })
+
+    const replay = await agentService.transcriptReplay(session.id, 0)
+    expect(replay).toHaveLength(1)
+    expect(replay[0]).toMatchObject({
+      seq: 1,
+      type: 'message.updated',
+      sessionId: session.opencodeSessionId,
+    })
+    expect(await agentService.transcriptReplay(session.id, 1)).toEqual([])
   })
 })

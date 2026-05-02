@@ -92,7 +92,10 @@ export function WorkspacePage() {
       return
     }
     saveUiState.mutate({ workspaceId, state: workspaceState })
-    if (workspaceState.activeWorkspaceTabId !== search.tab) {
+    if (
+      workspaceState.activeWorkspaceTabId !== (search.tab ?? null) ||
+      workspaceState.activeAgentSessionId !== (search.chat ?? null)
+    ) {
       void navigate({
         search: (prev) => ({
           ...prev,

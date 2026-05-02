@@ -498,6 +498,7 @@ class AgentService {
   }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient(row.sandboxId)
+    this.ensureSubscription(row.sandboxId)
     await client.session.command({
       path: { id: row.opencodeSessionId },
       body: {
@@ -537,6 +538,7 @@ class AgentService {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient(row.sandboxId)
     const model = (await this.getSessionModel(row.id)) ?? await this.getDefaultModel()
+    this.ensureSubscription(row.sandboxId)
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
       body: {
@@ -888,9 +890,17 @@ class AgentService {
       const stream = await client.event.subscribe({
         signal: controller.signal,
       })
+      let endedCleanly = true
       for await (const evt of stream.stream) {
-        if (controller.signal.aborted) break
+        if (controller.signal.aborted) {
+          endedCleanly = false
+          break
+        }
         await this.handleEvent(sandboxId, evt)
+      }
+      if (endedCleanly && !controller.signal.aborted) {
+        logger.warn({ sandboxId }, 'agent event stream ended')
+        this.scheduleRestart(sandboxId)
       }
     } catch (err) {
       if (!controller.signal.aborted) {

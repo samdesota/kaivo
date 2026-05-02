@@ -1,4 +1,4 @@
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, asc } from 'drizzle-orm'
 import { ulid } from 'ulid'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
 import { db } from '../db/client.js'
@@ -109,6 +109,7 @@ export interface TodoItem {
 }
 
 export interface TranscriptEvent {
+  seq?: number
   type:
     | 'message.updated'
     | 'message.part.updated'
@@ -149,6 +150,20 @@ export interface ModelInfo {
 
 function dbDate(iso: string): Date {
   return new Date(iso)
+}
+
+function parseReplayEvent(raw: unknown, seq: number): TranscriptEvent | null {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!value || typeof value !== 'object') return null
+    const evt = value as Partial<TranscriptEvent>
+    if (typeof evt.type !== 'string') return null
+    if (typeof evt.sessionId !== 'string') return null
+    if (!evt.payload || typeof evt.payload !== 'object') return null
+    return { ...(evt as TranscriptEvent), seq: typeof evt.seq === 'number' ? evt.seq : seq }
+  } catch {
+    return null
+  }
 }
 
 class AgentService {
@@ -453,6 +468,7 @@ class AgentService {
 
   async runCommand(input: { sessionId: string; command: string; arguments: string }): Promise<void> {
     const { row, client, model, dirOpts } = await this.sessionContext(input.sessionId)
+    this.ensureSubscription(row.workingDir ?? '')
     await client.session.command({
       path: { id: row.opencodeSessionId },
       body: {
@@ -493,6 +509,7 @@ class AgentService {
 
   async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
     const { row, client, model, dirOpts } = await this.sessionContext(input.sessionId)
+    this.ensureSubscription(row.workingDir ?? '')
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
       body: {
@@ -783,7 +800,12 @@ class AgentService {
     this.pending.get(row.opencodeSessionId)?.delete(input.permissionId)
   }
 
-  subscribeTranscript(sessionId: string, fn: TranscriptListener): () => void {
+  async transcriptReplay(sessionId: string, sinceSeq = 0): Promise<TranscriptEvent[]> {
+    const row = await this.requireSession(sessionId)
+    return this.transcriptReplayRows(row.id, sinceSeq)
+  }
+
+  subscribeTranscript(sessionId: string, fn: TranscriptListener, sinceSeq = 0): () => void {
     let unsubscribed = false
     let innerUnsub: (() => void) | null = null
     void (async () => {
@@ -793,13 +815,24 @@ class AgentService {
       const state = this.getOrCreateSubState(directory)
       state.listenerCount++
       this.ensureSubscription(directory)
+      let replaying = true
+      const pending: TranscriptEvent[] = []
+      const emittedSeqs = new Set<number>()
+      const emit = (evt: TranscriptEvent) => {
+        if (evt.seq !== undefined) {
+          if (emittedSeqs.has(evt.seq)) return
+          emittedSeqs.add(evt.seq)
+        }
+        if (replaying) pending.push(evt)
+        else fn(evt)
+      }
       const wrapper: TranscriptListener = (evt) => {
         if (evt.sessionId === row.opencodeSessionId) {
-          fn(evt)
+          emit(evt)
           return
         }
         if (this.parentByChild.get(evt.sessionId) === row.opencodeSessionId) {
-          fn({ ...evt, parentSessionId: row.opencodeSessionId })
+          emit({ ...evt, parentSessionId: row.opencodeSessionId })
         }
       }
       this.listeners.add(wrapper)
@@ -809,6 +842,13 @@ class AgentService {
         if (!s) return
         s.listenerCount--
         if (s.listenerCount <= 0) this.stopSubscription(directory)
+      }
+      for (const evt of this.transcriptReplayRows(row.id, sinceSeq)) emit(evt)
+      replaying = false
+      pending.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+      for (const evt of pending) {
+        if (unsubscribed) return
+        fn(evt)
       }
       if (unsubscribed) innerUnsub()
     })()
@@ -894,9 +934,17 @@ class AgentService {
         signal: controller.signal,
         ...(directory ? { query: { directory } } : {}),
       })
+      let endedCleanly = true
       for await (const evt of stream.stream) {
-        if (controller.signal.aborted) break
+        if (controller.signal.aborted) {
+          endedCleanly = false
+          break
+        }
         await this.handleEvent(evt)
+      }
+      if (endedCleanly && !controller.signal.aborted) {
+        logger.warn({ directory }, 'agent event stream ended')
+        this.scheduleRestart(directory)
       }
     } catch (err) {
       if (!controller.signal.aborted) {
@@ -968,12 +1016,12 @@ class AgentService {
             list.push(childId)
             this.childrenByParent.set(parentId, list)
           }
-          const fanout: TranscriptEvent = {
+          const fanout = this.recordReplayEvent(parentId, {
             type: 'child.session.created',
             sessionId: childId,
             parentSessionId: parentId,
             payload: { info: info as Record<string, unknown> },
-          }
+          })
           for (const l of this.listeners) {
             try {
               l(fanout)
@@ -1061,15 +1109,11 @@ class AgentService {
       if (q.requestID) this.pendingQuestions.get(ocSessionId)?.delete(q.requestID)
     }
 
-    if (type === 'message.updated') {
-      await this.recordTranscript(ocSessionId, props)
-    }
-
-    const evt: TranscriptEvent = {
+    const evt = await this.recordReplayEvent(ocSessionId, {
       type: type as TranscriptEvent['type'],
       sessionId: ocSessionId,
       payload: props,
-    }
+    })
     for (const l of this.listeners) {
       try {
         l(evt)
@@ -1079,20 +1123,16 @@ class AgentService {
     }
   }
 
-  private async recordTranscript(
-    opencodeSessionId: string,
-    props: Record<string, unknown>,
-  ): Promise<void> {
-    const info = (props as { info?: { id?: string; role?: string } }).info
-    if (!info?.id || !info.role) return
+  private recordReplayEvent(opencodeSessionId: string, evt: TranscriptEvent): TranscriptEvent {
+    const rootOpencodeSessionId = this.parentByChild.get(opencodeSessionId) ?? opencodeSessionId
     const rows = db
       .select()
       .from(agentSessions)
-      .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+      .where(eq(agentSessions.opencodeSessionId, rootOpencodeSessionId))
       .limit(1)
       .all()
     const row = rows[0]
-    if (!row) return
+    if (!row) return evt
     // seqCounters is in-memory and resets on restart; seed from the DB max
     // on first use of a session this process to avoid colliding with rows
     // written by a previous run.
@@ -1109,13 +1149,18 @@ class AgentService {
     }
     const nextSeq = prevSeq + 1
     this.seqCounters.set(row.id, nextSeq)
+    const replayEvent: TranscriptEvent = {
+      ...evt,
+      parentSessionId: evt.parentSessionId ?? this.parentByChild.get(evt.sessionId),
+      seq: nextSeq,
+    }
     try {
       db.insert(agentTranscripts)
         .values({
           sessionId: row.id,
           seq: nextSeq,
-          role: info.role,
-          contentJson: JSON.stringify(props),
+          role: evt.type,
+          contentJson: JSON.stringify(replayEvent),
           createdAt: new Date().toISOString(),
         })
         .run()
@@ -1126,6 +1171,23 @@ class AgentService {
     } catch (err) {
       logger.warn({ err, id: row.id }, 'transcript insert failed')
     }
+    return replayEvent
+  }
+
+  private transcriptReplayRows(sessionId: string, sinceSeq: number): TranscriptEvent[] {
+    const rows = db
+      .select()
+      .from(agentTranscripts)
+      .where(eq(agentTranscripts.sessionId, sessionId))
+      .orderBy(asc(agentTranscripts.seq))
+      .all()
+    const out: TranscriptEvent[] = []
+    for (const row of rows) {
+      if (row.seq <= sinceSeq) continue
+      const parsed = parseReplayEvent(row.contentJson, row.seq)
+      if (parsed) out.push(parsed)
+    }
+    return out
   }
 
   private async requireSession(id: string) {

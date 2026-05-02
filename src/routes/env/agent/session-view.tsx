@@ -38,6 +38,8 @@ type Action =
       evt: { type: string; parentSessionId?: string; payload: Record<string, unknown> }
     }
 
+const transcriptStateCache = new Map<string, TranscriptState>()
+
 interface OpenPaneOptions {
   title?: string
   activate?: boolean
@@ -296,8 +298,17 @@ function SessionPane({
   sessionId: string
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
 }) {
-  const [state, dispatch] = useReducer(reducer, undefined as unknown as TranscriptState, emptyTranscript)
+  const [state, dispatch] = useReducer(
+    reducer,
+    sessionId,
+    (id) => transcriptStateCache.get(id) ?? emptyTranscript(),
+  )
   const [reconnecting, setReconnecting] = useState(false)
+  const utils = envTrpc.useUtils()
+
+  useEffect(() => {
+    transcriptStateCache.set(sessionId, state)
+  }, [sessionId, state])
 
   const messages = envTrpc.agent.sessionMessages.useQuery(
     { sessionId },
@@ -309,12 +320,8 @@ function SessionPane({
     { staleTime: 0, refetchOnWindowFocus: false },
   )
 
-  const hydrated = useRef<string | null>(null)
   useEffect(() => {
     if (!messages.data) return
-    if (hydrated.current === sessionId) return
-    hydrated.current = sessionId
-    dispatch({ type: 'reset' })
     dispatch({
       type: 'hydrate',
       msgs: messages.data as Array<{
@@ -326,7 +333,6 @@ function SessionPane({
 
   useEffect(() => {
     if (!childMsgs.data) return
-    if (hydrated.current !== sessionId) return
     dispatch({
       type: 'hydrate-children',
       children: childMsgs.data as Array<{
@@ -337,16 +343,26 @@ function SessionPane({
   }, [sessionId, childMsgs.data])
 
   const [running, setRunning] = useState(false)
+  const seenSeqs = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    seenSeqs.current = new Set()
+  }, [sessionId])
 
   envTrpc.agent.transcript.useSubscription(
-    { sessionId },
+    { sessionId, sinceSeq: 0 },
     {
       onData(evt: unknown) {
         setReconnecting(false)
         const e = evt as {
+          seq?: number
           type: string
           parentSessionId?: string
           payload: Record<string, unknown>
+        }
+        if (typeof e.seq === 'number') {
+          if (seenSeqs.current.has(e.seq)) return
+          seenSeqs.current.add(e.seq)
         }
         if (e.type === 'session.idle' || e.type === 'session.error') {
           if ((e.payload as { sessionID?: string })?.sessionID && !e.parentSessionId) {
@@ -359,6 +375,11 @@ function SessionPane({
       },
       onError() {
         setReconnecting(true)
+        void Promise.all([
+          utils.agent.sessionMessages.invalidate({ sessionId }),
+          utils.agent.childTranscripts.invalidate({ sessionId }),
+          utils.agent.sessionStatus.invalidate({ sessionId }),
+        ])
       },
     },
   )
@@ -535,7 +556,7 @@ function SessionPane({
         )}
         <OpenStateProvider>
           <div ref={scrollRef} className="flex-1 overflow-auto">
-            {messages.isLoading ? (
+            {messages.isLoading && renderables.length === 0 ? (
               <div className="flex h-full items-center justify-center text-xs text-neutral-500">Loading…</div>
             ) : messages.error ? (
               <div className="p-4 text-xs text-red-400">
