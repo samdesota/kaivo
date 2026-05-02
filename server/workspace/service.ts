@@ -9,6 +9,7 @@ import {
   type WorkspaceTab,
   type WorkspaceTabRow,
   type WorkspaceUiState,
+  type WorkspaceViewState,
 } from '../db/schema.js'
 
 export type Workspace = typeof workspaces.$inferSelect
@@ -29,6 +30,24 @@ export const EMPTY_WORKSPACE_UI_STATE: WorkspaceUiState = {
   splitRatio: null,
   agentCollapsed: false,
   tabOrder: [],
+}
+
+export type WorkspaceViewStateInput = {
+  activeAgentSessionId?: string | null
+  activeWorkspaceTabId?: string | null
+  splitRatio?: number | null
+  agentCollapsed?: boolean
+}
+
+function emptyWorkspaceViewState(workspaceId: string, updatedAt = new Date()): WorkspaceViewState {
+  return {
+    workspaceId,
+    activeAgentSessionId: null,
+    activeWorkspaceTabId: null,
+    splitRatio: null,
+    agentCollapsed: false,
+    updatedAt,
+  }
 }
 
 function normalizeWorkspaceUiState(state: WorkspaceUiState): WorkspaceUiState {
@@ -139,6 +158,49 @@ export function createWorkspaceService(database: Db = db) {
     })
   }
 
+  async function getViewState(workspaceId: string): Promise<WorkspaceViewState> {
+    await get(workspaceId)
+    const rows = await database
+      .select()
+      .from(workspaceViewStates)
+      .where(eq(workspaceViewStates.workspaceId, workspaceId))
+      .limit(1)
+    if (rows[0]) return rows[0]
+    const legacy = await getUiState(workspaceId)
+    return {
+      ...emptyWorkspaceViewState(workspaceId),
+      activeAgentSessionId: legacy.activeAgentSessionId,
+      activeWorkspaceTabId: legacy.activeWorkspaceTabId,
+      splitRatio: legacy.splitRatio,
+      agentCollapsed: legacy.agentCollapsed,
+    }
+  }
+
+  async function saveViewState(workspaceId: string, state: WorkspaceViewStateInput): Promise<WorkspaceViewState> {
+    const current = await getViewState(workspaceId)
+    const now = new Date()
+    const next: WorkspaceViewState = {
+      ...current,
+      ...state,
+      workspaceId,
+      updatedAt: now,
+    }
+    await database
+      .insert(workspaceViewStates)
+      .values(next)
+      .onConflictDoUpdate({
+        target: workspaceViewStates.workspaceId,
+        set: {
+          activeAgentSessionId: next.activeAgentSessionId,
+          activeWorkspaceTabId: next.activeWorkspaceTabId,
+          splitRatio: next.splitRatio,
+          agentCollapsed: next.agentCollapsed,
+          updatedAt: next.updatedAt,
+        },
+      })
+    return next
+  }
+
   return {
     async list(): Promise<Workspace[]> {
       const rows = await database
@@ -208,6 +270,10 @@ export function createWorkspaceService(database: Db = db) {
     },
 
     getUiState,
+
+    getViewState,
+
+    saveViewState,
 
     async saveUiState(workspaceId: string, state: WorkspaceUiState): Promise<WorkspaceUiState> {
       await get(workspaceId)

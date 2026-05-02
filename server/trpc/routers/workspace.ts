@@ -19,6 +19,13 @@ const uiStateSchema = z.object({
   tabOrder: z.array(z.string().min(1)),
 })
 
+const viewStatePatchSchema = z.object({
+  activeAgentSessionId: z.string().min(1).nullable().optional(),
+  activeWorkspaceTabId: z.string().min(1).nullable().optional(),
+  splitRatio: z.number().min(0).max(1).nullable().optional(),
+  agentCollapsed: z.boolean().optional(),
+})
+
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof WorkspaceError) {
     return new TRPCError({
@@ -86,6 +93,26 @@ export const workspaceRouter = router({
     .query(async ({ input }) => {
       try {
         return await workspaceService.getUiState(input.workspaceId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  getViewState: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await workspaceService.getViewState(input.workspaceId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  saveViewState: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1), state: viewStatePatchSchema }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.saveViewState(input.workspaceId, input.state)
       } catch (err) {
         throw toTrpcError(err)
       }

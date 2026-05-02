@@ -23,6 +23,7 @@ import {
   type WorkspaceEnvRow,
 } from './workspace/env-targets'
 import { WorkspaceContextProvider, useWorkspaceContext } from './workspace/context'
+import { useWorkspaceViewStateStore } from './workspace/view-state-store'
 import {
   emptyWorkspaceUiState,
   workspaceUiReducer,
@@ -45,6 +46,7 @@ export function WorkspacePage() {
     onSuccess: () => utils.workspace.list.invalidate(),
   })
   const saveUiState = trpc.workspace.saveUiState.useMutation()
+  const viewStateStore = useWorkspaceViewStateStore(workspaceId)
   const [workspaceState, dispatchWorkspaceState] = useReducer(
     workspaceUiReducer,
     emptyWorkspaceUiState(),
@@ -108,6 +110,27 @@ export function WorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceState, workspace.data?.id, workspaceId, hydrated, hydratedStateWorkspaceId])
 
+  const dispatchSyncedWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
+    dispatchWorkspaceState(action)
+    if (action.type === 'setActiveAgentSession') {
+      viewStateStore.setActiveAgentSession(action.sessionId)
+    } else if (action.type === 'activateTab') {
+      viewStateStore.setActiveWorkspaceTab(action.tabId)
+    } else if (action.type === 'openTab' && action.activate !== false) {
+      viewStateStore.setActiveWorkspaceTab(action.tab.id)
+    } else if (action.type === 'closeTab') {
+      const idx = workspaceState.workspaceTabs.findIndex((tab) => tab.id === action.tabId)
+      if (idx !== -1 && workspaceState.activeWorkspaceTabId === action.tabId) {
+        const tabs = workspaceState.workspaceTabs.filter((tab) => tab.id !== action.tabId)
+        viewStateStore.setActiveWorkspaceTab(tabs[idx]?.id ?? tabs[idx - 1]?.id ?? null)
+      }
+    } else if (action.type === 'setSplitRatio') {
+      viewStateStore.setSplitRatio(action.splitRatio)
+    } else if (action.type === 'setAgentCollapsed') {
+      viewStateStore.setAgentCollapsed(action.collapsed)
+    }
+  }, [viewStateStore, workspaceState.activeWorkspaceTabId, workspaceState.workspaceTabs])
+
   const envTargets = useMemo(() => {
     return ((envs.data ?? []) as WorkspaceEnvRow[]).map(resolveWorkspaceEnvTarget)
   }, [envs.data])
@@ -117,30 +140,39 @@ export function WorkspacePage() {
     [envTargets],
   )
 
-  if (workspace.isLoading || uiState.isLoading || envs.isLoading) {
+  if (workspace.isLoading || uiState.isLoading || envs.isLoading || viewStateStore.isLoading) {
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
   if (uiState.error) return <WorkspaceError message={extractTrpcMessage(uiState.error)} />
   if (envs.error) return <WorkspaceError message={extractTrpcMessage(envs.error)} />
+  if (viewStateStore.isError) return <WorkspaceError message="Workspace view state did not load." />
   if (!workspace.data || !uiState.data) {
     return <WorkspaceError message="Workspace did not load." />
   }
-  if (!hydrated || hydratedStateWorkspaceId !== workspaceId) {
+  if (!hydrated || hydratedStateWorkspaceId !== workspaceId || !viewStateStore.viewState) {
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
+  }
+
+  const syncedWorkspaceState: WorkspaceUiState = {
+    ...workspaceState,
+    activeAgentSessionId: search.chat ?? viewStateStore.viewState.activeAgentSessionId,
+    activeWorkspaceTabId: search.tab ?? viewStateStore.viewState.activeWorkspaceTabId,
+    splitRatio: viewStateStore.viewState.splitRatio,
+    agentCollapsed: viewStateStore.viewState.agentCollapsed,
   }
 
   return (
     <WorkspaceContextProvider
       value={{
         workspace: workspace.data,
-        uiState: workspaceState,
+        uiState: syncedWorkspaceState,
         envTargets,
         localEnvTarget,
         getEnvClient,
       }}
     >
-      <WorkspaceShell dispatchWorkspaceState={dispatchWorkspaceState} />
+      <WorkspaceShell dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
     </WorkspaceContextProvider>
   )
 }

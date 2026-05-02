@@ -240,4 +240,38 @@ describe('workspace router', () => {
     await caller.saveUiState({ workspaceId: workspace.id, state })
     await expect(caller.getUiState({ workspaceId: workspace.id })).resolves.toEqual(state)
   })
+
+  it('persists workspace view state without rewriting tabs', async () => {
+    const { workspaceRouter } = await import('../trpc/routers/workspace.js')
+    const caller = workspaceRouter.createCaller(makeCtx())
+    const workspace = await caller.create({ name: 'View state workspace' })
+
+    await caller.saveUiState({
+      workspaceId: workspace.id,
+      state: {
+        activeAgentSessionId: null,
+        activeWorkspaceTabId: 'tab-1',
+        workspaceTabs: [{ id: 'tab-1', type: 'browser' as const, url: 'https://example.com', title: 'Example' }],
+        splitRatio: 0.5,
+        agentCollapsed: false,
+        tabOrder: ['tab-1'],
+      },
+    })
+
+    await caller.saveViewState({
+      workspaceId: workspace.id,
+      state: { activeAgentSessionId: 'agent-1', splitRatio: 0.42, agentCollapsed: true },
+    })
+
+    await expect(caller.getViewState({ workspaceId: workspace.id })).resolves.toMatchObject({
+      workspaceId: workspace.id,
+      activeAgentSessionId: 'agent-1',
+      activeWorkspaceTabId: 'tab-1',
+      splitRatio: 0.42,
+      agentCollapsed: true,
+    })
+    await expect(caller.getUiState({ workspaceId: workspace.id })).resolves.toMatchObject({
+      workspaceTabs: [{ id: 'tab-1', type: 'browser', url: 'https://example.com', title: 'Example' }],
+    })
+  })
 })
