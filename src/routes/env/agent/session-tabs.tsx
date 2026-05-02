@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { envTrpc } from '../../../env-trpc'
 import { extractTrpcMessage } from '../../../lib/utils'
+import { useWorkspaceAgentTabsStore } from '../../workspace/agent-tabs-store'
 import { FolderPickerModal } from './folder-picker-modal'
 import { NewAgentChatModal } from './new-agent-chat-modal'
 
@@ -8,6 +9,7 @@ interface SessionSummary {
   id: string
   title: string | null
   status: string
+  createdAt: Date | string
   lastActivityAt: Date | string
 }
 
@@ -35,6 +37,7 @@ export function SessionTabs({
   const utils = envTrpc.useUtils()
   const close = envTrpc.agent.sessionClose.useMutation()
   const reopen = envTrpc.agent.sessionReopen.useMutation()
+  const agentTabs = useWorkspaceAgentTabsStore(workspaceId)
 
   const sessionsData = sessions.data as SessionSummary[] | undefined
   const { active, archived } = useMemo(() => {
@@ -44,14 +47,35 @@ export function SessionTabs({
       if (s.status === 'archived') arc.push(s)
       else act.push(s)
     }
-    return { active: act, archived: arc }
-  }, [sessionsData])
+    if (!workspaceId) return { active: act, archived: arc }
+
+    const byId = new Map(act.map((session) => [session.id, session]))
+    const ordered: SessionSummary[] = []
+    for (const tab of agentTabs.records) {
+      const session = byId.get(tab.sessionId)
+      if (!session) continue
+      ordered.push(session)
+      byId.delete(tab.sessionId)
+    }
+    const missing = [...byId.values()].sort((a, b) => {
+      const created = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      return created || a.id.localeCompare(b.id)
+    })
+    return { active: [...ordered, ...missing], archived: arc }
+  }, [agentTabs.records, sessionsData, workspaceId])
+
+  useEffect(() => {
+    if (!workspaceId) return
+    for (const session of active) agentTabs.ensureSession(session.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, workspaceId])
 
   async function onClose(id: string) {
     const others = active.filter((s) => s.id !== id)
     try {
       await close.mutateAsync({ sessionId: id })
       await utils.agent.sessionList.invalidate(sessionListInput)
+      agentTabs.deleteSession(id)
       if (id === sessionId) {
         const next = others[0]?.id
         if (next) onSelect(next)
@@ -65,6 +89,7 @@ export function SessionTabs({
     try {
       await reopen.mutateAsync({ sessionId: id })
       await utils.agent.sessionList.invalidate(sessionListInput)
+      agentTabs.ensureSession(id)
       onSelect(id)
     } catch {
       /* ignore */

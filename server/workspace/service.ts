@@ -1,13 +1,15 @@
-import { asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { ulid } from 'ulid'
 import { db, type Db } from '../db/client.js'
 import {
+  workspaceAgentTabs,
   workspaceTabs,
   workspaceUiStates,
   workspaceViewStates,
   workspaces,
   type WorkspaceTab,
   type WorkspaceTabRow,
+  type WorkspaceAgentTabRow,
   type WorkspaceUiState,
   type WorkspaceViewState,
 } from '../db/schema.js'
@@ -37,6 +39,16 @@ export type WorkspaceViewStateInput = {
   activeWorkspaceTabId?: string | null
   splitRatio?: number | null
   agentCollapsed?: boolean
+}
+
+export type WorkspaceTabInput = {
+  tab: WorkspaceTab
+  position: number
+}
+
+export type WorkspaceAgentTabInput = {
+  sessionId: string
+  position: number
 }
 
 function emptyWorkspaceViewState(workspaceId: string, updatedAt = new Date()): WorkspaceViewState {
@@ -201,6 +213,84 @@ export function createWorkspaceService(database: Db = db) {
     return next
   }
 
+  async function listTabs(workspaceId: string): Promise<WorkspaceTabRow[]> {
+    await get(workspaceId)
+    return await database
+      .select()
+      .from(workspaceTabs)
+      .where(eq(workspaceTabs.workspaceId, workspaceId))
+      .orderBy(asc(workspaceTabs.position), asc(workspaceTabs.id))
+  }
+
+  async function upsertTab(workspaceId: string, input: WorkspaceTabInput): Promise<WorkspaceTabRow> {
+    await get(workspaceId)
+    const now = new Date()
+    const row = tabToRow(workspaceId, input.tab, input.position, now)
+    await database
+      .insert(workspaceTabs)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [workspaceTabs.workspaceId, workspaceTabs.id],
+        set: {
+          type: sql`excluded.type`,
+          title: sql`excluded.title`,
+          position: sql`excluded.position`,
+          envId: sql`excluded.env_id`,
+          shellId: sql`excluded.shell_id`,
+          path: sql`excluded.path`,
+          sessionId: sql`excluded.session_id`,
+          port: sql`excluded.port`,
+          url: sql`excluded.url`,
+          browserTabId: sql`excluded.browser_tab_id`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      })
+    const rows = await database
+      .select()
+      .from(workspaceTabs)
+      .where(eq(workspaceTabs.workspaceId, workspaceId))
+      .orderBy(asc(workspaceTabs.position), asc(workspaceTabs.id))
+    return rows.find((tab) => tab.id === input.tab.id) ?? row
+  }
+
+  async function deleteTab(workspaceId: string, tabId: string): Promise<void> {
+    await get(workspaceId)
+    await database.delete(workspaceTabs).where(and(eq(workspaceTabs.workspaceId, workspaceId), eq(workspaceTabs.id, tabId)))
+  }
+
+  async function listAgentTabs(workspaceId: string): Promise<WorkspaceAgentTabRow[]> {
+    await get(workspaceId)
+    return await database
+      .select()
+      .from(workspaceAgentTabs)
+      .where(eq(workspaceAgentTabs.workspaceId, workspaceId))
+      .orderBy(asc(workspaceAgentTabs.position), asc(workspaceAgentTabs.sessionId))
+  }
+
+  async function upsertAgentTab(workspaceId: string, input: WorkspaceAgentTabInput): Promise<WorkspaceAgentTabRow> {
+    await get(workspaceId)
+    const now = new Date()
+    const row = { workspaceId, sessionId: input.sessionId, position: input.position, updatedAt: now }
+    await database
+      .insert(workspaceAgentTabs)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [workspaceAgentTabs.workspaceId, workspaceAgentTabs.sessionId],
+        set: {
+          position: input.position,
+          updatedAt: now,
+        },
+      })
+    return row
+  }
+
+  async function deleteAgentTab(workspaceId: string, sessionId: string): Promise<void> {
+    await get(workspaceId)
+    await database
+      .delete(workspaceAgentTabs)
+      .where(and(eq(workspaceAgentTabs.workspaceId, workspaceId), eq(workspaceAgentTabs.sessionId, sessionId)))
+  }
+
   return {
     async list(): Promise<Workspace[]> {
       const rows = await database
@@ -274,6 +364,18 @@ export function createWorkspaceService(database: Db = db) {
     getViewState,
 
     saveViewState,
+
+    listTabs,
+
+    upsertTab,
+
+    deleteTab,
+
+    listAgentTabs,
+
+    upsertAgentTab,
+
+    deleteAgentTab,
 
     async saveUiState(workspaceId: string, state: WorkspaceUiState): Promise<WorkspaceUiState> {
       await get(workspaceId)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { trpc } from '../trpc'
@@ -25,14 +25,14 @@ import {
 import { WorkspaceContextProvider, useWorkspaceContext } from './workspace/context'
 import { useWorkspaceViewStateStore } from './workspace/view-state-store'
 import {
-  emptyWorkspaceUiState,
-  workspaceUiReducer,
   type WorkspaceTab,
+  type WorkspaceUiAction,
   type WorkspaceUiState,
 } from './workspace/tab-state'
+import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { WorkspaceTabBar } from './workspace/workspace-tab-bar'
 
-type WorkspaceUiDispatch = Dispatch<Parameters<typeof workspaceUiReducer>[1]>
+type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 
 export function WorkspacePage() {
   const { workspaceId } = useParams({ from: '/w/$workspaceId' })
@@ -40,27 +40,13 @@ export function WorkspacePage() {
   const navigate = useNavigate({ from: '/w/$workspaceId' })
   const utils = trpc.useUtils()
   const workspace = trpc.workspace.get.useQuery({ id: workspaceId })
-  const uiState = trpc.workspace.getUiState.useQuery({ workspaceId })
   const envs = trpc.env.list.useQuery({}, { refetchInterval: 10_000 })
   const markOpened = trpc.workspace.markOpened.useMutation({
     onSuccess: () => utils.workspace.list.invalidate(),
   })
-  const saveUiState = trpc.workspace.saveUiState.useMutation()
   const viewStateStore = useWorkspaceViewStateStore(workspaceId)
-  const [workspaceState, dispatchWorkspaceState] = useReducer(
-    workspaceUiReducer,
-    emptyWorkspaceUiState(),
-  )
-  const [hydrated, setHydrated] = useState(false)
-  const [hydratedStateWorkspaceId, setHydratedStateWorkspaceId] = useState<string | null>(null)
-  const hydratedWorkspaceId = useRef<string | null>(null)
-
-  useEffect(() => {
-    hydratedWorkspaceId.current = null
-    setHydratedStateWorkspaceId(null)
-    setHydrated(false)
-    dispatchWorkspaceState({ type: 'hydrate', state: emptyWorkspaceUiState() })
-  }, [workspaceId])
+  const tabsStore = useWorkspaceTabsStore(workspaceId)
+  const appliedSearchWorkspaceId = useRef<string | null>(null)
 
   useEffect(() => {
     if (workspace.data?.id) markOpened.mutate({ id: workspace.data.id })
@@ -68,68 +54,71 @@ export function WorkspacePage() {
   }, [workspace.data?.id])
 
   useEffect(() => {
-    if (!uiState.data) return
-    if (hydratedWorkspaceId.current === workspaceId) return
-    hydratedWorkspaceId.current = workspaceId
-    dispatchWorkspaceState({
-      type: 'hydrate',
-      state: {
-        ...(uiState.data as WorkspaceUiState),
-        activeAgentSessionId: search.chat ?? uiState.data.activeAgentSessionId,
-        activeWorkspaceTabId: search.tab ?? uiState.data.activeWorkspaceTabId,
-      },
-    })
-    setHydratedStateWorkspaceId(workspaceId)
-    setHydrated(true)
-  }, [uiState.data, workspaceId, search.chat, search.tab])
-
-  useEffect(() => {
-    if (
-      !workspace.data ||
-      workspace.data.id !== workspaceId ||
-      !hydrated ||
-      hydratedWorkspaceId.current !== workspaceId ||
-      hydratedStateWorkspaceId !== workspaceId
-    ) {
+    if (!workspace.data || workspace.data.id !== workspaceId || !viewStateStore.viewState) return
+    if (appliedSearchWorkspaceId.current !== workspaceId) {
+      appliedSearchWorkspaceId.current = workspaceId
+      if (search.chat && search.chat !== viewStateStore.viewState.activeAgentSessionId) {
+        viewStateStore.setActiveAgentSession(search.chat)
+      }
+      if (
+        search.tab &&
+        search.tab !== viewStateStore.viewState.activeWorkspaceTabId &&
+        tabsStore.tabs.some((tab) => tab.id === search.tab)
+      ) {
+        viewStateStore.setActiveWorkspaceTab(search.tab)
+      }
       return
     }
-    saveUiState.mutate({ workspaceId, state: workspaceState })
     if (
-      workspaceState.activeWorkspaceTabId !== (search.tab ?? null) ||
-      workspaceState.activeAgentSessionId !== (search.chat ?? null)
+      viewStateStore.viewState.activeWorkspaceTabId &&
+      !tabsStore.tabs.some((tab) => tab.id === viewStateStore.viewState?.activeWorkspaceTabId)
+    ) {
+      viewStateStore.setActiveWorkspaceTab(tabsStore.tabs[0]?.id ?? null)
+      return
+    }
+    if (
+      viewStateStore.viewState.activeWorkspaceTabId !== (search.tab ?? null) ||
+      viewStateStore.viewState.activeAgentSessionId !== (search.chat ?? null)
     ) {
       void navigate({
         search: (prev) => ({
           ...prev,
-          chat: workspaceState.activeAgentSessionId ?? undefined,
-          tab: workspaceState.activeWorkspaceTabId ?? undefined,
+          chat: viewStateStore.viewState?.activeAgentSessionId ?? undefined,
+          tab: viewStateStore.viewState?.activeWorkspaceTabId ?? undefined,
         }),
         replace: true,
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceState, workspace.data?.id, workspaceId, hydrated, hydratedStateWorkspaceId])
+  }, [search.chat, search.tab, tabsStore.tabs, viewStateStore.viewState, workspace.data?.id, workspaceId])
 
   const dispatchSyncedWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
-    dispatchWorkspaceState(action)
     if (action.type === 'setActiveAgentSession') {
       viewStateStore.setActiveAgentSession(action.sessionId)
     } else if (action.type === 'activateTab') {
       viewStateStore.setActiveWorkspaceTab(action.tabId)
     } else if (action.type === 'openTab' && action.activate !== false) {
-      viewStateStore.setActiveWorkspaceTab(action.tab.id)
+      const tab = tabsStore.openTab(action.tab, true)
+      viewStateStore.setActiveWorkspaceTab(tab.id)
+    } else if (action.type === 'openTab') {
+      tabsStore.openTab(action.tab, false)
     } else if (action.type === 'closeTab') {
-      const idx = workspaceState.workspaceTabs.findIndex((tab) => tab.id === action.tabId)
-      if (idx !== -1 && workspaceState.activeWorkspaceTabId === action.tabId) {
-        const tabs = workspaceState.workspaceTabs.filter((tab) => tab.id !== action.tabId)
+      const idx = tabsStore.tabs.findIndex((tab) => tab.id === action.tabId)
+      if (idx !== -1 && viewStateStore.viewState?.activeWorkspaceTabId === action.tabId) {
+        const tabs = tabsStore.tabs.filter((tab) => tab.id !== action.tabId)
         viewStateStore.setActiveWorkspaceTab(tabs[idx]?.id ?? tabs[idx - 1]?.id ?? null)
       }
+      tabsStore.closeTab(action.tabId)
+    } else if (action.type === 'setBrowserTabId') {
+      tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
+    } else if (action.type === 'setTabTitle') {
+      tabsStore.setTabTitle(action.tabId, action.title)
     } else if (action.type === 'setSplitRatio') {
       viewStateStore.setSplitRatio(action.splitRatio)
     } else if (action.type === 'setAgentCollapsed') {
       viewStateStore.setAgentCollapsed(action.collapsed)
     }
-  }, [viewStateStore, workspaceState.activeWorkspaceTabId, workspaceState.workspaceTabs])
+  }, [tabsStore, viewStateStore])
 
   const envTargets = useMemo(() => {
     return ((envs.data ?? []) as WorkspaceEnvRow[]).map(resolveWorkspaceEnvTarget)
@@ -140,26 +129,27 @@ export function WorkspacePage() {
     [envTargets],
   )
 
-  if (workspace.isLoading || uiState.isLoading || envs.isLoading || viewStateStore.isLoading) {
+  if (workspace.isLoading || envs.isLoading || viewStateStore.isLoading || tabsStore.isLoading) {
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
-  if (uiState.error) return <WorkspaceError message={extractTrpcMessage(uiState.error)} />
   if (envs.error) return <WorkspaceError message={extractTrpcMessage(envs.error)} />
   if (viewStateStore.isError) return <WorkspaceError message="Workspace view state did not load." />
-  if (!workspace.data || !uiState.data) {
+  if (tabsStore.isError) return <WorkspaceError message="Workspace tabs did not load." />
+  if (!workspace.data) {
     return <WorkspaceError message="Workspace did not load." />
   }
-  if (!hydrated || hydratedStateWorkspaceId !== workspaceId || !viewStateStore.viewState) {
+  if (!viewStateStore.viewState || !tabsStore.data) {
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
 
   const syncedWorkspaceState: WorkspaceUiState = {
-    ...workspaceState,
-    activeAgentSessionId: search.chat ?? viewStateStore.viewState.activeAgentSessionId,
-    activeWorkspaceTabId: search.tab ?? viewStateStore.viewState.activeWorkspaceTabId,
+    workspaceTabs: tabsStore.tabs,
+    activeAgentSessionId: viewStateStore.viewState.activeAgentSessionId,
+    activeWorkspaceTabId: viewStateStore.viewState.activeWorkspaceTabId,
     splitRatio: viewStateStore.viewState.splitRatio,
     agentCollapsed: viewStateStore.viewState.agentCollapsed,
+    tabOrder: tabsStore.tabs.map((tab) => tab.id),
   }
 
   return (

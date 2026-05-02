@@ -49,19 +49,32 @@ type WorkspaceTabRow = {
   updatedAt: Date
 }
 
+type WorkspaceAgentTabRow = {
+  workspaceId: string
+  sessionId: string
+  position: number
+  updatedAt: Date
+}
+
 const workspaceRows: WorkspaceRow[] = []
 const uiStateRows: UiStateRow[] = []
 const viewStateRows: WorkspaceViewStateRow[] = []
 const tabRows: WorkspaceTabRow[] = []
+const agentTabRows: WorkspaceAgentTabRow[] = []
 
 function resetState() {
   workspaceRows.length = 0
   uiStateRows.length = 0
   viewStateRows.length = 0
   tabRows.length = 0
+  agentTabRows.length = 0
 }
 
 vi.mock('drizzle-orm', () => ({
+  and:
+    (...preds: Array<(r: Record<string, unknown>) => boolean>) =>
+    (r: Record<string, unknown>) =>
+      preds.every((pred) => pred(r)),
   asc: () => ({}),
   desc: () => ({}),
   sql: (strings: TemplateStringsArray) => strings.join(''),
@@ -106,12 +119,19 @@ vi.mock('../db/schema.js', () => ({
     id: { _col: 'id' },
     position: { _col: 'position' },
   },
+  workspaceAgentTabs: {
+    _table: 'workspace_agent_tabs',
+    workspaceId: { _col: 'workspaceId' },
+    sessionId: { _col: 'sessionId' },
+    position: { _col: 'position' },
+  },
 }))
 
 function rowsFor(table: { _table: string }) {
   if (table._table === 'workspaces') return workspaceRows
   if (table._table === 'workspace_ui_states') return uiStateRows
   if (table._table === 'workspace_view_states') return viewStateRows
+  if (table._table === 'workspace_agent_tabs') return agentTabRows
   return tabRows
 }
 
@@ -134,12 +154,24 @@ vi.mock('../db/client.js', () => ({
             if (idx >= 0) viewStateRows[idx] = row
             else viewStateRows.push(row)
           }
+        } else if (table._table === 'workspace_tabs') {
+          for (const row of values as WorkspaceTabRow[]) {
+            const idx = tabRows.findIndex((r) => r.workspaceId === row.workspaceId && r.id === row.id)
+            if (idx >= 0) tabRows[idx] = row
+            else tabRows.push(row)
+          }
         } else {
-          tabRows.push(...(values as WorkspaceTabRow[]))
+          for (const row of values as WorkspaceAgentTabRow[]) {
+            const idx = agentTabRows.findIndex((r) => r.workspaceId === row.workspaceId && r.sessionId === row.sessionId)
+            if (idx >= 0) agentTabRows[idx] = row
+            else agentTabRows.push(row)
+          }
         }
         return {
-          onConflictDoUpdate: async ({ set }: { set: Partial<UiStateRow | WorkspaceViewStateRow> }) => {
-            if (table._table === 'workspace_tabs') return
+          onConflictDoUpdate: async ({ set }: { set: Partial<UiStateRow | WorkspaceViewStateRow | WorkspaceTabRow | WorkspaceAgentTabRow> }) => {
+            if (table._table === 'workspace_tabs' || table._table === 'workspace_agent_tabs') {
+              return
+            }
             const row = values[0] as UiStateRow | WorkspaceViewStateRow
             const rows = rowsFor(table) as Array<UiStateRow | WorkspaceViewStateRow>
             const existing = rows.find((r) => r.workspaceId === row.workspaceId)
@@ -154,10 +186,19 @@ vi.mock('../db/client.js', () => ({
           const rows = rowsFor(table) as unknown as Record<string, unknown>[]
           return pred ? rows.filter(pred) : rows
         }
+        const ordered = (pred?: (r: Record<string, unknown>) => boolean) => {
+          const rows = apply(pred)
+          if (table._table !== 'workspace_tabs' && table._table !== 'workspace_agent_tabs') return rows
+          return [...rows].sort((a, b) => {
+            const pos = Number(a.position ?? 0) - Number(b.position ?? 0)
+            if (pos !== 0) return pos
+            return String(a.id ?? a.sessionId ?? '').localeCompare(String(b.id ?? b.sessionId ?? ''))
+          })
+        }
         return {
           where: (pred: (r: Record<string, unknown>) => boolean) => ({
             limit: async (n: number) => apply(pred).slice(0, n),
-            orderBy: async () => apply(pred),
+            orderBy: async () => ordered(pred),
           }),
         }
       },
@@ -273,5 +314,57 @@ describe('workspace router', () => {
     await expect(caller.getUiState({ workspaceId: workspace.id })).resolves.toMatchObject({
       workspaceTabs: [{ id: 'tab-1', type: 'browser', url: 'https://example.com', title: 'Example' }],
     })
+  })
+
+  it('persists workspace tabs through granular endpoints', async () => {
+    const { workspaceRouter } = await import('../trpc/routers/workspace.js')
+    const caller = workspaceRouter.createCaller(makeCtx())
+    const workspace = await caller.create({ name: 'Tabs workspace' })
+
+    await caller.upsertTab({
+      workspaceId: workspace.id,
+      position: 0,
+      tab: { id: 'tab-1', type: 'browser', url: 'https://example.com', title: 'Example' },
+    })
+    await caller.upsertTab({
+      workspaceId: workspace.id,
+      position: 1,
+      tab: { id: 'tab-2', type: 'shell', envId: 'env-1', shellId: 'shell-1', title: 'Shell' },
+    })
+    await caller.upsertTab({
+      workspaceId: workspace.id,
+      position: 0,
+      tab: { id: 'tab-1', type: 'browser', url: 'https://example.com', browserTabId: 'browser-1', title: 'Updated' },
+    })
+
+    await expect(caller.listTabs({ workspaceId: workspace.id })).resolves.toMatchObject([
+      { id: 'tab-1', title: 'Updated', position: 0, browserTabId: 'browser-1' },
+      { id: 'tab-2', title: 'Shell', position: 1, shellId: 'shell-1' },
+    ])
+
+    await caller.deleteTab({ workspaceId: workspace.id, tabId: 'tab-1' })
+    await expect(caller.listTabs({ workspaceId: workspace.id })).resolves.toMatchObject([
+      { id: 'tab-2', title: 'Shell' },
+    ])
+  })
+
+  it('persists workspace agent tab order through granular endpoints', async () => {
+    const { workspaceRouter } = await import('../trpc/routers/workspace.js')
+    const caller = workspaceRouter.createCaller(makeCtx())
+    const workspace = await caller.create({ name: 'Agent tabs workspace' })
+
+    await caller.upsertAgentTab({ workspaceId: workspace.id, sessionId: 'session-1', position: 0 })
+    await caller.upsertAgentTab({ workspaceId: workspace.id, sessionId: 'session-2', position: 1 })
+    await caller.upsertAgentTab({ workspaceId: workspace.id, sessionId: 'session-1', position: 2 })
+
+    await expect(caller.listAgentTabs({ workspaceId: workspace.id })).resolves.toMatchObject([
+      { workspaceId: workspace.id, sessionId: 'session-2', position: 1 },
+      { workspaceId: workspace.id, sessionId: 'session-1', position: 2 },
+    ])
+
+    await caller.deleteAgentTab({ workspaceId: workspace.id, sessionId: 'session-2' })
+    await expect(caller.listAgentTabs({ workspaceId: workspace.id })).resolves.toMatchObject([
+      { workspaceId: workspace.id, sessionId: 'session-1', position: 2 },
+    ])
   })
 })

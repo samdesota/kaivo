@@ -90,6 +90,20 @@ async function pickEphemeralPort(): Promise<number> {
   })
 }
 
+async function isPortFree(host: string, port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const srv = net.createServer()
+    srv.unref()
+    srv.once('error', () => resolve(false))
+    srv.once('listening', () => srv.close(() => resolve(true)))
+    try {
+      srv.listen(port, host)
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
 async function probeReady(host: string, port: number, password: string): Promise<boolean> {
   try {
     const res = await undiciRequest(`http://${host}:${port}/config`, {
@@ -166,17 +180,7 @@ async function waitPortFree(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const free = await new Promise<boolean>((resolve) => {
-      const srv = net.createServer()
-      srv.unref()
-      srv.once('error', () => resolve(false))
-      srv.once('listening', () => srv.close(() => resolve(true)))
-      try {
-        srv.listen(port, host)
-      } catch {
-        resolve(false)
-      }
-    })
+    const free = await isPortFree(host, port)
     if (free) return
     await sleep(100)
   }
@@ -284,6 +288,11 @@ class OpenCodeSupervisor {
     if (!port) {
       port = await pickEphemeralPort()
       setOpencodePort(port)
+    } else if (!(await isPortFree('127.0.0.1', port))) {
+      const stalePort = port
+      port = await pickEphemeralPort()
+      setOpencodePort(port)
+      logger.warn({ stalePort, port }, 'persisted opencode port is occupied; rotating port')
     }
 
     // Password: fresh per process. Stored in memory only — not persisted.

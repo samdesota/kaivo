@@ -11,7 +11,10 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0001_local_app_schema', '0002_normalized_workspace_state'] })
+    expect(result).toEqual({
+      sqlitePath,
+      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs'],
+    })
     const sqlite = new Database(sqlitePath, { readonly: true })
     try {
       const rows = sqlite
@@ -74,7 +77,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT * FROM workspace_view_states').get()).toMatchObject({
@@ -95,6 +98,7 @@ describe('runLocalAppMigrations', () => {
         browser_tab_id: 'browser-1',
         updated_at: 1234,
       })
+      expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_agent_tabs'").get()).toBeTruthy()
     } finally {
       migrated.close()
     }

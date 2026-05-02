@@ -118,6 +118,68 @@ export const workspaceRouter = router({
       }
     }),
 
+  listTabs: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await workspaceService.listTabs(input.workspaceId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  upsertTab: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1), tab: workspaceTabSchema, position: z.number().int().min(0) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.upsertTab(input.workspaceId, { tab: input.tab, position: input.position })
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  deleteTab: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1), tabId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        await workspaceService.deleteTab(input.workspaceId, input.tabId)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  listAgentTabs: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await workspaceService.listAgentTabs(input.workspaceId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  upsertAgentTab: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1), sessionId: z.string().min(1), position: z.number().int().min(0) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.upsertAgentTab(input.workspaceId, { sessionId: input.sessionId, position: input.position })
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  deleteAgentTab: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1), sessionId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        await workspaceService.deleteAgentTab(input.workspaceId, input.sessionId)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   saveUiState: protectedProcedure
     .input(z.object({ workspaceId: z.string().min(1), state: uiStateSchema }))
     .mutation(async ({ input }) => {

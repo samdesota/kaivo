@@ -6,8 +6,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsup",
-    "dev": "npm run build && electron dist/main.js",
-    "dev:managed": "npm run build && CC_DESKTOP_MANAGE_SERVICES=true electron dist/main.js",
+    "dev": "npm run build && env -u CC_INSTANCE_ID -u CC_INSTANCE_ROOT -u CC_APP_PORT -u CC_ENV_PORT -u CC_APP_URL -u CC_APP_SQLITE_PATH -u CC_APP_LOG_PATH -u CC_APP_DATA_DIR -u CC_ENV_URL -u CC_ENV_STATE_DIR -u CC_ENV_WORKING_DIR -u CC_ENV_LABEL -u CC_ALLOWED_ORIGINS -u CC_IDENTITY_URL -u CC_HOST -u CC_KIND -u CC_LABEL -u CC_OPENCODE_PLUGIN_PATH -u CC_PORT -u CC_STATE_DIR -u CC_WORKING_DIR NODE_ENV=development electron dist/main.js",
+    "dev:managed": "npm run build && env -u CC_INSTANCE_ID -u CC_INSTANCE_ROOT -u CC_APP_PORT -u CC_ENV_PORT -u CC_APP_URL -u CC_APP_SQLITE_PATH -u CC_APP_LOG_PATH -u CC_APP_DATA_DIR -u CC_ENV_URL -u CC_ENV_STATE_DIR -u CC_ENV_WORKING_DIR -u CC_ENV_LABEL -u CC_ALLOWED_ORIGINS -u CC_IDENTITY_URL -u CC_HOST -u CC_KIND -u CC_LABEL -u CC_OPENCODE_PLUGIN_PATH -u CC_PORT -u CC_STATE_DIR -u CC_WORKING_DIR NODE_ENV=development CC_DESKTOP_MANAGE_SERVICES=true electron dist/main.js",
     "package:mac": "npm run build && electron-packager . \"Cloud Code Desktop\" --platform=darwin --arch=arm64 --out=release --overwrite --ignore='^/src($|/)' --ignore='^/dist/.*\\.map$' --ignore='^/\\.cloud-code($|/)' --ignore='^/release($|/)'",
     "install:mac": "rm -rf '/Applications/Cloud Code Desktop.app' && cp -R 'release/Cloud Code Desktop-darwin-arm64/Cloud Code Desktop.app' /Applications/ && codesign --force --deep --sign - '/Applications/Cloud Code Desktop.app'",
     "typecheck": "tsc --noEmit"

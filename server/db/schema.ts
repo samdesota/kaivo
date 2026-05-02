@@ -48,6 +48,13 @@ export type WorkspaceTabRow = {
   updatedAt: Date
 }
 
+export type WorkspaceAgentTabRow = {
+  workspaceId: string
+  sessionId: string
+  position: number
+  updatedAt: Date
+}
+
 const nowMs = sql`(unixepoch() * 1000)`
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' })
 const jsonText = <T>(name: string) => text(name, { mode: 'json' }).$type<T>()
@@ -125,6 +132,19 @@ export const workspaceTabs = sqliteTable(
     updatedAt: timestamp('updated_at').notNull().default(nowMs),
   },
   (t) => ({ pk: primaryKey({ columns: [t.workspaceId, t.id] }) }),
+)
+
+export const workspaceAgentTabs = sqliteTable(
+  'workspace_agent_tabs',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    position: integer('position').notNull(),
+    updatedAt: timestamp('updated_at').notNull().default(nowMs),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.workspaceId, t.sessionId] }) }),
 )
 
 export const sandboxes = sqliteTable('sandboxes', {

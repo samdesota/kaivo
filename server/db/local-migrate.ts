@@ -72,6 +72,14 @@ CREATE TABLE IF NOT EXISTS workspace_tabs (
   PRIMARY KEY (workspace_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_agent_tabs (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+  PRIMARY KEY (workspace_id, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS sandboxes (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -294,6 +302,14 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
       updated_at INTEGER NOT NULL DEFAULT ${nowMs},
       PRIMARY KEY (workspace_id, id)
     );
+
+    CREATE TABLE IF NOT EXISTS workspace_agent_tabs (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+      PRIMARY KEY (workspace_id, session_id)
+    );
   `)
 
   if (!tableExists(sqlite, 'workspace_ui_states')) return
@@ -360,6 +376,18 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
   }
 }
 
+function migrateWorkspaceAgentTabs(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_agent_tabs (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+      PRIMARY KEY (workspace_id, session_id)
+    );
+  `)
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
@@ -392,6 +420,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(workspaceStateMigrationName)
     }
 
+    const workspaceAgentTabsMigrationName = '0003_workspace_agent_tabs'
+    const workspaceAgentTabsMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceAgentTabsMigrationName)
+    if (!workspaceAgentTabsMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceAgentTabs(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceAgentTabsMigrationName)
+      })()
+      applied.push(workspaceAgentTabsMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -406,6 +446,7 @@ export const localAppTables = [
   'workspace_ui_states',
   'workspace_view_states',
   'workspace_tabs',
+  'workspace_agent_tabs',
   'sandboxes',
   'github_install',
   'github_token_cache',
