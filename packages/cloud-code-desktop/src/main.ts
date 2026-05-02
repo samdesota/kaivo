@@ -7,7 +7,7 @@ import { ensureDesktopServices, type ServiceSupervisor } from './service-supervi
 
 type DesktopLogKind = 'main' | 'chrome-renderer' | 'tab-renderer' | 'crash' | 'exception'
 
-const logPath = process.env.CC_DESKTOP_TEST_LOG
+const logPath = process.env.CC_DESKTOP_TEST_LOG ?? path.join(app.getPath('logs'), 'desktop.log')
 const stateDir = process.env.CC_DESKTOP_TEST_STATE_DIR
 
 let webframeApp: WebframeApp | undefined

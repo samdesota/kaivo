@@ -33,7 +33,9 @@
     "build:plugin": "cd packages/opencode-plugin && npm install --no-audit --no-fund --silent && npm run build",
     "build:env-server": "cd packages/env-server && npm install --no-audit --no-fund --silent && npm run build",
     "prepare:sandbox-image": "npm run build:plugin && npm run build:env-server && bash scripts/prepare-sandbox-image.sh",
-    "docker:sandbox": "npm run prepare:sandbox-image && docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox"
+    "docker:sandbox": "npm run prepare:sandbox-image && docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox",
+    "package:everything": "scripts/package-everything.sh",
+    "package:desktop": "scripts/package-desktop.sh"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { app } from 'electron'
 import type { InstanceRuntimeConfig } from './instance-runtime'
 import { ensureDesktopPairing, type DesktopPairingResult } from './desktop-pairing'
 
@@ -52,17 +53,17 @@ export async function ensureDesktopServices(
 ): Promise<ServiceSupervisor> {
   const fetchHealth = options.fetchHealth ?? defaultFetchHealth
   const launch = options.launch ?? defaultLaunch
-  const cwd = options.cwd ?? findWorkspaceRoot(process.cwd())
+  const cwd = options.cwd ?? resolveServiceRoot()
   const started: ManagedService[] = []
 
-  const app = await ensureService('app', config, {
+  const appSvc = await ensureService('app', config, {
     cwd,
     fetchHealth,
     launch,
     waitMs: options.waitMs ?? defaultWaitMs,
     pollMs: options.pollMs ?? defaultPollMs,
   })
-  started.push(app)
+  started.push(appSvc)
 
   const env = await ensureService('env', config, {
     cwd,
@@ -75,7 +76,7 @@ export async function ensureDesktopServices(
   const pairing = await (options.pair ?? ensureDesktopPairing)(config)
 
   return {
-    app,
+    app: appSvc,
     env,
     pairing,
     stop: async () => {
@@ -136,7 +137,77 @@ async function waitForService(
   throw lastError instanceof Error ? lastError : new Error(`${service} service did not become healthy`)
 }
 
+function bundleDir(): string {
+  return path.join(app.getAppPath(), 'bundle')
+}
+
+function isPackagedBundle(): boolean {
+  return app.isPackaged && fs.existsSync(path.join(bundleDir(), 'app-server', 'index.js'))
+}
+
 function serviceLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, cwd: string): ServiceLaunchSpec {
+  if (isPackagedBundle()) {
+    return packagedLaunchSpec(service, config)
+  }
+  return devLaunchSpec(service, config, cwd)
+}
+
+function packagedLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig): ServiceLaunchSpec {
+  const bundle = bundleDir()
+  const node = nodeCommand()
+  const nodeBinDir = path.dirname(node)
+  const envPath = [nodeBinDir, '/usr/local/bin', '/opt/homebrew/bin', '/usr/bin', '/bin'].join(':')
+
+  if (service === 'app') {
+    const serverDir = path.join(bundle, 'app-server')
+    return {
+      command: node,
+      args: [path.join(serverDir, 'index.js')],
+      cwd: serverDir,
+      env: {
+        ...process.env,
+        PATH: envPath,
+        NODE_ENV: 'production',
+        APP_SQLITE_PATH: config.app.sqlitePath,
+        CC_INSTANCE_ID: config.instanceId,
+        CC_SERVE_CLIENT: 'true',
+        DATA_DIR: config.app.dataDir,
+        PORT: String(config.app.port),
+        HOST: config.app.host,
+        PUBLIC_URL: config.app.url,
+        CC_SERVICE_CREDENTIAL: process.env.CC_SERVICE_CREDENTIAL ?? 'local-desktop-service-credential',
+      },
+      logPath: config.app.logPath,
+    }
+  }
+
+  const envDir = path.join(bundle, 'env-server')
+  const pluginPath = `file://${path.join(bundle, 'opencode-plugin', 'index.js')}`
+
+  return {
+    command: node,
+    args: [path.join(envDir, 'main.js')],
+    cwd: envDir,
+    env: {
+      ...process.env,
+      PATH: envPath,
+      NODE_ENV: 'production',
+      CC_KIND: 'local',
+      CC_INSTANCE_ID: config.instanceId,
+      CC_LABEL: config.env.label,
+      CC_PORT: String(config.env.port),
+      CC_HOST: config.env.host,
+      CC_STATE_DIR: config.env.stateDir,
+      CC_WORKING_DIR: config.env.workingDir,
+      CC_IDENTITY_URL: config.app.url,
+      CC_ALLOWED_ORIGINS: config.app.url,
+      CC_OPENCODE_PLUGIN_PATH: pluginPath,
+    },
+    logPath: config.env.logPath,
+  }
+}
+
+function devLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, cwd: string): ServiceLaunchSpec {
   if (service === 'app') {
     return {
       command: nodeCommand(),
@@ -158,6 +229,8 @@ function serviceLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, 
     }
   }
 
+  const pluginPath = `file://${path.join(cwd, 'packages/opencode-plugin/dist/index.js')}`
+
   return {
     command: nodeCommand(),
     args: ['node_modules/.bin/tsx', 'packages/env-server/src/main.ts'],
@@ -174,23 +247,47 @@ function serviceLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, 
       CC_WORKING_DIR: config.env.workingDir,
       CC_IDENTITY_URL: config.app.url,
       CC_ALLOWED_ORIGINS: config.app.url,
+      CC_OPENCODE_PLUGIN_PATH: pluginPath,
     },
     logPath: config.env.logPath,
   }
 }
 
 function nodeCommand(): string {
-  return process.env.CC_NODE_BIN ?? 'node'
+  if (process.env.CC_NODE_BIN) return process.env.CC_NODE_BIN
+  const candidates = [
+    '/usr/local/bin/node',
+    '/opt/homebrew/bin/node',
+    `${process.env.HOME}/.nvm/versions/node`,
+  ]
+  for (const c of candidates) {
+    if (c.includes('.nvm')) {
+      try {
+        const versions = fs.readdirSync(c)
+        const latest = versions.sort().reverse()[0]
+        if (latest) {
+          const p = path.join(c, latest, 'bin/node')
+          if (fs.existsSync(p)) return p
+        }
+      } catch { /* ignore */ }
+    } else if (fs.existsSync(c)) {
+      return c
+    }
+  }
+  return 'node'
 }
 
-function findWorkspaceRoot(start: string): string {
-  let current = path.resolve(start)
+function resolveServiceRoot(): string {
+  let current = path.resolve(process.cwd())
   for (;;) {
-    if (fs.existsSync(path.join(current, 'server/index.ts')) && fs.existsSync(path.join(current, 'packages/env-server/src/main.ts'))) {
+    if (
+      fs.existsSync(path.join(current, 'server/index.ts')) &&
+      fs.existsSync(path.join(current, 'packages/env-server/src/main.ts'))
+    ) {
       return current
     }
     const parent = path.dirname(current)
-    if (parent === current) return path.resolve(start)
+    if (parent === current) return path.resolve(process.cwd())
     current = parent
   }
 }
