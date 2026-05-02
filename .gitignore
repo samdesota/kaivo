@@ -17,3 +17,4 @@ playwright-report
 .cloud-code/
 test-data
 packages/cloud-code-desktop/release/
+packages/cloud-code-desktop/bundle/
