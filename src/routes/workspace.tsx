@@ -123,6 +123,9 @@ export function WorkspacePage() {
   if (!workspace.data || !uiState.data) {
     return <WorkspaceError message="Workspace did not load." />
   }
+  if (!hydrated || hydratedStateWorkspaceId !== workspaceId) {
+    return <div className="p-8 text-neutral-500">Loading workspace…</div>
+  }
 
   return (
     <WorkspaceContextProvider
@@ -280,6 +283,7 @@ function WorkspaceAgentPane({
   dispatchWorkspaceState: WorkspaceUiDispatch
 }) {
   const ctx = useWorkspaceContext()
+  const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
   if (collapsed) {
     return <AgentCollapsedRail onExpand={onToggleCollapsed} />
   }
@@ -310,7 +314,6 @@ function WorkspaceAgentPane({
   }
   const localEnvTarget = ctx.localEnvTarget
   const localEnvToken = localEnvTarget.token!
-  const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
   return (
     <AgentPaneFrame>
       <WorkspaceAgentEnvProvider>

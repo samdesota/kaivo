@@ -1,7 +1,15 @@
-import { desc, eq, isNull } from 'drizzle-orm'
+import { asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { ulid } from 'ulid'
 import { db, type Db } from '../db/client.js'
-import { workspaceUiStates, workspaces, type WorkspaceUiState } from '../db/schema.js'
+import {
+  workspaceTabs,
+  workspaceUiStates,
+  workspaceViewStates,
+  workspaces,
+  type WorkspaceTab,
+  type WorkspaceTabRow,
+  type WorkspaceUiState,
+} from '../db/schema.js'
 
 export type Workspace = typeof workspaces.$inferSelect
 
@@ -24,11 +32,53 @@ export const EMPTY_WORKSPACE_UI_STATE: WorkspaceUiState = {
 }
 
 function normalizeWorkspaceUiState(state: WorkspaceUiState): WorkspaceUiState {
+  const workspaceTabs = Array.isArray(state.workspaceTabs) ? state.workspaceTabs : []
+  const activeWorkspaceTabId = workspaceTabs.some((tab) => tab.id === state.activeWorkspaceTabId)
+    ? state.activeWorkspaceTabId
+    : (workspaceTabs[0]?.id ?? null)
   return {
     ...EMPTY_WORKSPACE_UI_STATE,
     ...state,
+    activeAgentSessionId: state.activeAgentSessionId ?? null,
+    activeWorkspaceTabId,
+    workspaceTabs,
     agentCollapsed: state.agentCollapsed ?? false,
+    tabOrder: workspaceTabs.map((tab) => tab.id),
   }
+}
+
+function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, updatedAt: Date): WorkspaceTabRow {
+  return {
+    workspaceId,
+    id: tab.id,
+    type: tab.type,
+    title: tab.title,
+    position,
+    envId: 'envId' in tab ? tab.envId : null,
+    shellId: tab.type === 'shell' ? tab.shellId : null,
+    path: tab.type === 'file' ? tab.path : null,
+    sessionId: tab.type === 'file' ? (tab.sessionId ?? null) : null,
+    port: tab.type === 'preview' ? tab.port : null,
+    url: tab.type === 'browser' ? tab.url : null,
+    browserTabId: tab.type === 'browser' ? (tab.browserTabId ?? null) : null,
+    updatedAt,
+  }
+}
+
+function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
+  if (row.type === 'shell' && row.envId && row.shellId) {
+    return { id: row.id, type: 'shell', envId: row.envId, shellId: row.shellId, title: row.title }
+  }
+  if (row.type === 'file' && row.envId && row.path) {
+    return { id: row.id, type: 'file', envId: row.envId, path: row.path, sessionId: row.sessionId ?? undefined, title: row.title }
+  }
+  if (row.type === 'preview' && row.envId && row.port !== null) {
+    return { id: row.id, type: 'preview', envId: row.envId, port: row.port, title: row.title }
+  }
+  if (row.type === 'browser' && row.url) {
+    return { id: row.id, type: 'browser', url: row.url, browserTabId: row.browserTabId ?? undefined, title: row.title }
+  }
+  return null
 }
 
 export function normalizeWorkspaceName(name: string | undefined): string {
@@ -61,12 +111,32 @@ export function createWorkspaceService(database: Db = db) {
 
   async function getUiState(workspaceId: string): Promise<WorkspaceUiState> {
     await get(workspaceId)
-    const rows = await database
+    const viewRows = await database
       .select()
-      .from(workspaceUiStates)
-      .where(eq(workspaceUiStates.workspaceId, workspaceId))
+      .from(workspaceViewStates)
+      .where(eq(workspaceViewStates.workspaceId, workspaceId))
       .limit(1)
-    return rows[0]?.state ? normalizeWorkspaceUiState(rows[0].state) : EMPTY_WORKSPACE_UI_STATE
+    if (!viewRows[0]) {
+      const legacyRows = await database
+        .select()
+        .from(workspaceUiStates)
+        .where(eq(workspaceUiStates.workspaceId, workspaceId))
+        .limit(1)
+      return legacyRows[0]?.state ? normalizeWorkspaceUiState(legacyRows[0].state) : EMPTY_WORKSPACE_UI_STATE
+    }
+    const tabRows = await database
+      .select()
+      .from(workspaceTabs)
+      .where(eq(workspaceTabs.workspaceId, workspaceId))
+      .orderBy(asc(workspaceTabs.position))
+    return normalizeWorkspaceUiState({
+      activeAgentSessionId: viewRows[0].activeAgentSessionId,
+      activeWorkspaceTabId: viewRows[0].activeWorkspaceTabId,
+      workspaceTabs: tabRows.map(rowToTab).filter((tab): tab is WorkspaceTab => Boolean(tab)),
+      splitRatio: viewRows[0].splitRatio,
+      agentCollapsed: viewRows[0].agentCollapsed,
+      tabOrder: [],
+    })
   }
 
   return {
@@ -93,9 +163,12 @@ export function createWorkspaceService(database: Db = db) {
         archivedAt: null,
       }
       await database.insert(workspaces).values(row)
-      await database.insert(workspaceUiStates).values({
+      await database.insert(workspaceViewStates).values({
         workspaceId: id,
-        state: EMPTY_WORKSPACE_UI_STATE,
+        activeAgentSessionId: null,
+        activeWorkspaceTabId: null,
+        splitRatio: null,
+        agentCollapsed: false,
         updatedAt: now,
       })
       return row
@@ -141,12 +214,48 @@ export function createWorkspaceService(database: Db = db) {
       const now = new Date()
       const normalized = normalizeWorkspaceUiState(state)
       await database
-        .insert(workspaceUiStates)
-        .values({ workspaceId, state: normalized, updatedAt: now })
-        .onConflictDoUpdate({
-          target: workspaceUiStates.workspaceId,
-          set: { state: normalized, updatedAt: now },
+        .insert(workspaceViewStates)
+        .values({
+          workspaceId,
+          activeAgentSessionId: normalized.activeAgentSessionId,
+          activeWorkspaceTabId: normalized.activeWorkspaceTabId,
+          splitRatio: normalized.splitRatio,
+          agentCollapsed: normalized.agentCollapsed,
+          updatedAt: now,
         })
+        .onConflictDoUpdate({
+          target: workspaceViewStates.workspaceId,
+          set: {
+            activeAgentSessionId: normalized.activeAgentSessionId,
+            activeWorkspaceTabId: normalized.activeWorkspaceTabId,
+            splitRatio: normalized.splitRatio,
+            agentCollapsed: normalized.agentCollapsed,
+            updatedAt: now,
+          },
+        })
+      await database.delete(workspaceTabs).where(eq(workspaceTabs.workspaceId, workspaceId))
+      const tabRows = normalized.workspaceTabs.map((tab, idx) => tabToRow(workspaceId, tab, idx, now))
+      if (tabRows.length > 0) {
+        await database
+          .insert(workspaceTabs)
+          .values(tabRows)
+          .onConflictDoUpdate({
+            target: [workspaceTabs.workspaceId, workspaceTabs.id],
+            set: {
+              type: sql`excluded.type`,
+              title: sql`excluded.title`,
+              position: sql`excluded.position`,
+              envId: sql`excluded.env_id`,
+              shellId: sql`excluded.shell_id`,
+              path: sql`excluded.path`,
+              sessionId: sql`excluded.session_id`,
+              port: sql`excluded.port`,
+              url: sql`excluded.url`,
+              browserTabId: sql`excluded.browser_tab_id`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          })
+      }
       return normalized
     },
   }

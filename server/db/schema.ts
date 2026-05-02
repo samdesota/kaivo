@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { check, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 export type SandboxStatus = 'active' | 'archived' | 'crashed'
 export type JobState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -21,6 +21,31 @@ export type WorkspaceUiState = {
   splitRatio: number | null
   agentCollapsed: boolean
   tabOrder: string[]
+}
+
+export type WorkspaceViewState = {
+  workspaceId: string
+  activeAgentSessionId: string | null
+  activeWorkspaceTabId: string | null
+  splitRatio: number | null
+  agentCollapsed: boolean
+  updatedAt: Date
+}
+
+export type WorkspaceTabRow = {
+  workspaceId: string
+  id: string
+  type: WorkspaceTab['type']
+  title: string
+  position: number
+  envId: string | null
+  shellId: string | null
+  path: string | null
+  sessionId: string | null
+  port: number | null
+  url: string | null
+  browserTabId: string | null
+  updatedAt: Date
 }
 
 const nowMs = sql`(unixepoch() * 1000)`
@@ -68,6 +93,39 @@ export const workspaceUiStates = sqliteTable('workspace_ui_states', {
   state: jsonText<WorkspaceUiState>('state').notNull(),
   updatedAt: timestamp('updated_at').notNull().default(nowMs),
 })
+
+export const workspaceViewStates = sqliteTable('workspace_view_states', {
+  workspaceId: text('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  activeAgentSessionId: text('active_agent_session_id'),
+  activeWorkspaceTabId: text('active_workspace_tab_id'),
+  splitRatio: real('split_ratio'),
+  agentCollapsed: integer('agent_collapsed', { mode: 'boolean' }).notNull().default(false),
+  updatedAt: timestamp('updated_at').notNull().default(nowMs),
+})
+
+export const workspaceTabs = sqliteTable(
+  'workspace_tabs',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    type: text('type').$type<WorkspaceTab['type']>().notNull(),
+    title: text('title').notNull(),
+    position: integer('position').notNull(),
+    envId: text('env_id'),
+    shellId: text('shell_id'),
+    path: text('path'),
+    sessionId: text('session_id'),
+    port: integer('port'),
+    url: text('url'),
+    browserTabId: text('browser_tab_id'),
+    updatedAt: timestamp('updated_at').notNull().default(nowMs),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.workspaceId, t.id] }) }),
+)
 
 export const sandboxes = sqliteTable('sandboxes', {
   id: text('id').primaryKey(),

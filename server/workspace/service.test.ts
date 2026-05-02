@@ -24,16 +24,47 @@ type UiStateRow = {
   updatedAt: Date
 }
 
+type WorkspaceViewStateRow = {
+  workspaceId: string
+  activeAgentSessionId: string | null
+  activeWorkspaceTabId: string | null
+  splitRatio: number | null
+  agentCollapsed: boolean
+  updatedAt: Date
+}
+
+type WorkspaceTabRow = {
+  workspaceId: string
+  id: string
+  type: string
+  title: string
+  position: number
+  envId: string | null
+  shellId: string | null
+  path: string | null
+  sessionId: string | null
+  port: number | null
+  url: string | null
+  browserTabId: string | null
+  updatedAt: Date
+}
+
 const workspaceRows: WorkspaceRow[] = []
 const uiStateRows: UiStateRow[] = []
+const viewStateRows: WorkspaceViewStateRow[] = []
+const tabRows: WorkspaceTabRow[] = []
 
 function resetState() {
   workspaceRows.length = 0
   uiStateRows.length = 0
+  viewStateRows.length = 0
+  tabRows.length = 0
 }
 
 vi.mock('drizzle-orm', () => ({
+  asc: () => ({}),
   desc: () => ({}),
+  sql: (strings: TemplateStringsArray) => strings.join(''),
   eq:
     (col: { _col: string }, val: unknown) =>
     (r: Record<string, unknown>) =>
@@ -60,28 +91,58 @@ vi.mock('../db/schema.js', () => ({
     state: { _col: 'state' },
     updatedAt: { _col: 'updatedAt' },
   },
+  workspaceViewStates: {
+    _table: 'workspace_view_states',
+    workspaceId: { _col: 'workspaceId' },
+    activeAgentSessionId: { _col: 'activeAgentSessionId' },
+    activeWorkspaceTabId: { _col: 'activeWorkspaceTabId' },
+    splitRatio: { _col: 'splitRatio' },
+    agentCollapsed: { _col: 'agentCollapsed' },
+    updatedAt: { _col: 'updatedAt' },
+  },
+  workspaceTabs: {
+    _table: 'workspace_tabs',
+    workspaceId: { _col: 'workspaceId' },
+    id: { _col: 'id' },
+    position: { _col: 'position' },
+  },
 }))
 
 function rowsFor(table: { _table: string }) {
-  return table._table === 'workspaces' ? workspaceRows : uiStateRows
+  if (table._table === 'workspaces') return workspaceRows
+  if (table._table === 'workspace_ui_states') return uiStateRows
+  if (table._table === 'workspace_view_states') return viewStateRows
+  return tabRows
 }
 
 vi.mock('../db/client.js', () => ({
   db: {
     insert: (table: { _table: string }) => ({
-      values: (value: Record<string, unknown>) => {
+      values: (value: Record<string, unknown> | Array<Record<string, unknown>>) => {
+        const values = Array.isArray(value) ? value : [value]
         if (table._table === 'workspaces') {
-          workspaceRows.push(value as WorkspaceRow)
+          workspaceRows.push(...(values as WorkspaceRow[]))
+        } else if (table._table === 'workspace_ui_states') {
+          for (const row of values as UiStateRow[]) {
+            const idx = uiStateRows.findIndex((r) => r.workspaceId === row.workspaceId)
+            if (idx >= 0) uiStateRows[idx] = row
+            else uiStateRows.push(row)
+          }
+        } else if (table._table === 'workspace_view_states') {
+          for (const row of values as WorkspaceViewStateRow[]) {
+            const idx = viewStateRows.findIndex((r) => r.workspaceId === row.workspaceId)
+            if (idx >= 0) viewStateRows[idx] = row
+            else viewStateRows.push(row)
+          }
         } else {
-          const row = value as UiStateRow
-          const idx = uiStateRows.findIndex((r) => r.workspaceId === row.workspaceId)
-          if (idx >= 0) uiStateRows[idx] = row
-          else uiStateRows.push(row)
+          tabRows.push(...(values as WorkspaceTabRow[]))
         }
         return {
-          onConflictDoUpdate: async ({ set }: { set: Partial<UiStateRow> }) => {
-            const row = value as UiStateRow
-            const existing = uiStateRows.find((r) => r.workspaceId === row.workspaceId)
+          onConflictDoUpdate: async ({ set }: { set: Partial<UiStateRow | WorkspaceViewStateRow> }) => {
+            if (table._table === 'workspace_tabs') return
+            const row = values[0] as UiStateRow | WorkspaceViewStateRow
+            const rows = rowsFor(table) as Array<UiStateRow | WorkspaceViewStateRow>
+            const existing = rows.find((r) => r.workspaceId === row.workspaceId)
             if (existing) Object.assign(existing, set)
           },
         }
@@ -114,6 +175,15 @@ vi.mock('../db/client.js', () => ({
           return { returning: async () => updated }
         },
       }),
+    }),
+    delete: (table: { _table: string }) => ({
+      where: async (pred: (r: Record<string, unknown>) => boolean) => {
+        const rows = rowsFor(table) as unknown as Record<string, unknown>[]
+        for (let i = rows.length - 1; i >= 0; i -= 1) {
+          const row = rows[i]
+          if (row && pred(row)) rows.splice(i, 1)
+        }
+      },
     }),
   },
 }))

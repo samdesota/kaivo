@@ -46,6 +46,32 @@ CREATE TABLE IF NOT EXISTS workspace_ui_states (
   updated_at INTEGER NOT NULL DEFAULT ${nowMs}
 );
 
+CREATE TABLE IF NOT EXISTS workspace_view_states (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  active_agent_session_id TEXT,
+  active_workspace_tab_id TEXT,
+  split_ratio REAL,
+  agent_collapsed INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+);
+
+CREATE TABLE IF NOT EXISTS workspace_tabs (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  env_id TEXT,
+  shell_id TEXT,
+  path TEXT,
+  session_id TEXT,
+  port INTEGER,
+  url TEXT,
+  browser_tab_id TEXT,
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+  PRIMARY KEY (workspace_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS sandboxes (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -220,15 +246,128 @@ export type LocalAppMigrationResult = {
   applied: string[]
 }
 
+function tableExists(sqlite: Database.Database, table: string): boolean {
+  return Boolean(sqlite.prepare('SELECT name FROM sqlite_master WHERE type = ? AND name = ?').get('table', table))
+}
+
+function normalizeLegacyUiState(raw: unknown) {
+  const state = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const workspaceTabs = Array.isArray(state.workspaceTabs) ? state.workspaceTabs : []
+  const activeWorkspaceTabId = workspaceTabs.some((tab) => {
+    return tab && typeof tab === 'object' && (tab as { id?: unknown }).id === state.activeWorkspaceTabId
+  })
+    ? state.activeWorkspaceTabId
+    : ((workspaceTabs[0] as { id?: unknown } | undefined)?.id ?? null)
+  return {
+    activeAgentSessionId: typeof state.activeAgentSessionId === 'string' ? state.activeAgentSessionId : null,
+    activeWorkspaceTabId: typeof activeWorkspaceTabId === 'string' ? activeWorkspaceTabId : null,
+    splitRatio: typeof state.splitRatio === 'number' ? state.splitRatio : null,
+    agentCollapsed: state.agentCollapsed === true,
+    workspaceTabs,
+  }
+}
+
+function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_view_states (
+      workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+      active_agent_session_id TEXT,
+      active_workspace_tab_id TEXT,
+      split_ratio REAL,
+      agent_collapsed INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+
+    CREATE TABLE IF NOT EXISTS workspace_tabs (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      env_id TEXT,
+      shell_id TEXT,
+      path TEXT,
+      session_id TEXT,
+      port INTEGER,
+      url TEXT,
+      browser_tab_id TEXT,
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+      PRIMARY KEY (workspace_id, id)
+    );
+  `)
+
+  if (!tableExists(sqlite, 'workspace_ui_states')) return
+  const rows = sqlite.prepare('SELECT workspace_id, state, updated_at FROM workspace_ui_states').all() as Array<{
+    workspace_id: string
+    state: string
+    updated_at: number
+  }>
+  const upsertView = sqlite.prepare(`
+    INSERT INTO workspace_view_states (
+      workspace_id, active_agent_session_id, active_workspace_tab_id, split_ratio, agent_collapsed, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(workspace_id) DO UPDATE SET
+      active_agent_session_id = excluded.active_agent_session_id,
+      active_workspace_tab_id = excluded.active_workspace_tab_id,
+      split_ratio = excluded.split_ratio,
+      agent_collapsed = excluded.agent_collapsed,
+      updated_at = excluded.updated_at
+  `)
+  const deleteTabs = sqlite.prepare('DELETE FROM workspace_tabs WHERE workspace_id = ?')
+  const insertTab = sqlite.prepare(`
+    INSERT INTO workspace_tabs (
+      workspace_id, id, type, title, position, env_id, shell_id, path, session_id, port, url, browser_tab_id, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  for (const row of rows) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.state)
+    } catch {
+      parsed = null
+    }
+    const state = normalizeLegacyUiState(parsed)
+    upsertView.run(
+      row.workspace_id,
+      state.activeAgentSessionId,
+      state.activeWorkspaceTabId,
+      state.splitRatio,
+      state.agentCollapsed ? 1 : 0,
+      row.updated_at,
+    )
+    deleteTabs.run(row.workspace_id)
+    state.workspaceTabs.forEach((tab, position) => {
+      if (!tab || typeof tab !== 'object') return
+      const t = tab as Record<string, unknown>
+      if (typeof t.id !== 'string' || typeof t.type !== 'string') return
+      insertTab.run(
+        row.workspace_id,
+        t.id,
+        t.type,
+        typeof t.title === 'string' ? t.title : t.id,
+        position,
+        typeof t.envId === 'string' ? t.envId : null,
+        typeof t.shellId === 'string' ? t.shellId : null,
+        typeof t.path === 'string' ? t.path : null,
+        typeof t.sessionId === 'string' ? t.sessionId : null,
+        typeof t.port === 'number' ? t.port : null,
+        typeof t.url === 'string' ? t.url : null,
+        typeof t.browserTabId === 'string' ? t.browserTabId : null,
+        row.updated_at,
+      )
+    })
+  }
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
+  const applied: string[] = []
   try {
     sqlite.pragma('journal_mode = WAL')
     sqlite.pragma('foreign_keys = ON')
-    const hasMigrations = Boolean(
-      sqlite.prepare('SELECT name FROM sqlite_master WHERE type = ? AND name = ?').get('table', 'schema_migrations'),
-    )
+    const hasMigrations = tableExists(sqlite, 'schema_migrations')
     const migrationName = '0001_local_app_schema'
     const migrationAlreadyApplied =
       hasMigrations && sqlite.prepare('SELECT 1 FROM schema_migrations WHERE name = ?').get(migrationName)
@@ -238,10 +377,22 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
         sqlite.exec(localSchemaSql)
         sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(migrationName)
       })()
-      return { sqlitePath, applied: [migrationName] }
+      applied.push(migrationName)
     }
 
-    return { sqlitePath, applied: [] }
+    const workspaceStateMigrationName = '0002_normalized_workspace_state'
+    const workspaceStateMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceStateMigrationName)
+    if (!workspaceStateMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceUiStateBlob(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceStateMigrationName)
+      })()
+      applied.push(workspaceStateMigrationName)
+    }
+
+    return { sqlitePath, applied }
   } finally {
     sqlite.close()
   }
@@ -253,6 +404,8 @@ export const localAppTables = [
   'secrets',
   'workspaces',
   'workspace_ui_states',
+  'workspace_view_states',
+  'workspace_tabs',
   'sandboxes',
   'github_install',
   'github_token_cache',
