@@ -11,6 +11,7 @@ import {
 } from '../transcript-store'
 import { TextPart } from './text-part'
 import { ReasoningPart } from './reasoning-part'
+import { DiffView } from './diff-view'
 
 interface ToolState {
   status?: 'pending' | 'running' | 'completed' | 'error' | string
@@ -63,6 +64,16 @@ export function ToolPart({
       />
     )
   }
+  if (tool === 'apply_patch') {
+    return (
+      <ApplyPatchToolPart
+        partId={part.id}
+        state={state}
+        permission={permission}
+        sessionId={sessionId}
+      />
+    )
+  }
   return (
     <GenericToolPart
       partId={part.id}
@@ -74,6 +85,73 @@ export function ToolPart({
       onOpenShell={onOpenShell}
     />
   )
+}
+
+function ApplyPatchToolPart({
+  partId,
+  state,
+  permission,
+  sessionId,
+}: {
+  partId: string
+  state: ToolState
+  permission?: PermissionRequest
+  sessionId: string
+}) {
+  const [open, setOpen] = useOpenState(`tool:${partId}`, true)
+  const patchText = typeof state.input?.patchText === 'string' ? state.input.patchText : ''
+  const changedFiles = patchText ? patchFileCount(patchText) : 0
+
+  return (
+    <div className="text-xs">
+      <ToolHeader open={open} onToggle={() => setOpen((v) => !v)} status={state.status}>
+        <span className="font-mono text-neutral-300">apply_patch</span>
+        {changedFiles > 0 && (
+          <span className="truncate text-[11px] text-neutral-400">
+            {changedFiles} file{changedFiles === 1 ? '' : 's'}
+          </span>
+        )}
+        <span className="ml-auto text-[10px] text-neutral-500">{state.status ?? 'idle'}</span>
+      </ToolHeader>
+      {open && (
+        <ToolBody>
+          {patchText ? (
+            <div className="max-h-[32rem] overflow-hidden rounded border border-neutral-800 bg-black/80">
+              <DiffView diff={patchText} />
+            </div>
+          ) : (
+            <div className="text-[11px] text-neutral-500">
+              {state.status === 'pending' ? 'Waiting for patch…' : 'No patch available.'}
+            </div>
+          )}
+          {state.output && (
+            <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-neutral-800 bg-neutral-950 p-2 font-mono text-[11px] text-neutral-400">
+              {state.output}
+            </pre>
+          )}
+          {state.error && (
+            <div className="mt-2 rounded border border-red-900 bg-red-950/50 p-2 font-mono text-[11px] text-red-300">
+              {state.error}
+            </div>
+          )}
+        </ToolBody>
+      )}
+      {permission && (
+        <ToolBody>
+          <PermissionBanner req={permission} sessionId={sessionId} />
+        </ToolBody>
+      )}
+    </div>
+  )
+}
+
+function patchFileCount(patchText: string): number {
+  const files = new Set<string>()
+  for (const line of patchText.split('\n')) {
+    const match = /^\*\*\* (?:Add|Delete|Update) File: (.+)$/.exec(line)
+    if (match?.[1]) files.add(match[1])
+  }
+  return files.size
 }
 
 function StatusDot({ status }: { status?: string }) {

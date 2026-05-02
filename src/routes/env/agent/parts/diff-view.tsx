@@ -26,7 +26,14 @@ function splitLines(s: string): Array<{ kind: LineKind; text: string }> {
   for (const raw of s.split('\n')) {
     const text = raw
     let kind: LineKind = 'ctx'
-    if (text.startsWith('diff --git ') || text.startsWith('+++ ') || text.startsWith('--- ')) {
+    if (
+      text.startsWith('diff --git ') ||
+      text.startsWith('+++ ') ||
+      text.startsWith('--- ') ||
+      text.startsWith('*** Add File: ') ||
+      text.startsWith('*** Delete File: ') ||
+      text.startsWith('*** Update File: ')
+    ) {
       kind = 'file'
     } else if (text.startsWith('@@')) {
       kind = 'hunk'
@@ -41,7 +48,10 @@ function splitLines(s: string): Array<{ kind: LineKind; text: string }> {
       text.startsWith('similarity ') ||
       text.startsWith('rename ') ||
       text.startsWith('copy ') ||
-      text.startsWith('Binary ')
+      text.startsWith('Binary ') ||
+      text === '*** Begin Patch' ||
+      text === '*** End Patch' ||
+      text.startsWith('*** Move to: ')
     ) {
       kind = 'meta'
     }
@@ -56,7 +66,7 @@ function DiffLine({ line }: { line: { kind: LineKind; text: string } }) {
   switch (line.kind) {
     case 'file':
       return (
-        <span className={`${base} mt-2 bg-neutral-900/70 text-neutral-200`}>{line.text || ' '}</span>
+        <span className={`${base} mt-2 bg-neutral-900/80 py-0.5 text-neutral-100`}>{line.text || ' '}</span>
       )
     case 'hunk':
       return <span className={`${base} bg-indigo-500/10 text-indigo-300`}>{line.text || ' '}</span>
