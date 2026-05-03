@@ -12,9 +12,21 @@ interface ModelList {
   defaultModelID?: string | null
 }
 interface SessionModel {
-  providerID: string
-  modelID: string
+  providerID: string | null
+  modelID: string | null
+  variant?: ReasoningEffort | null
 }
+
+type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+const reasoningEfforts: Array<{ value: ReasoningEffort; label: string }> = [
+  { value: 'none', label: 'None' },
+  { value: 'minimal', label: 'Minimal' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'XHigh' },
+]
 
 export function ModelPicker({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false)
@@ -43,7 +55,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
 
   const curr = current.data as SessionModel | null | undefined
   const lst = list.data as ModelList | undefined
-  const currentLabel = curr
+  const currentLabel = curr?.providerID && curr.modelID
     ? `${curr.providerID}/${curr.modelID}`
     : lst?.defaultProviderID && lst?.defaultModelID
       ? `${lst.defaultProviderID}/${lst.defaultModelID} (default)`
@@ -84,7 +96,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
               onClick={() => void pick(null, null)}
               className={
                 'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-neutral-900 ' +
-                (!curr ? 'bg-neutral-900/60 text-neutral-100' : 'text-neutral-400')
+                (!curr?.providerID && !curr?.modelID ? 'bg-neutral-900/60 text-neutral-100' : 'text-neutral-400')
               }
             >
               <span className="font-mono">default</span>
@@ -122,5 +134,44 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
         </div>
       )}
     </div>
+  )
+}
+
+export function ReasoningEffortPicker({ sessionId }: { sessionId: string }) {
+  const current = envTrpc.agent.sessionGetModel.useQuery(
+    { sessionId },
+    { staleTime: 0 },
+  )
+  const setVariant = envTrpc.agent.sessionSetModelVariant.useMutation()
+  const utils = envTrpc.useUtils()
+  const curr = current.data as SessionModel | null | undefined
+  const value = curr?.variant ?? ''
+
+  async function pick(next: string) {
+    await setVariant.mutateAsync({
+      sessionId,
+      variant: next ? (next as ReasoningEffort) : null,
+    })
+    await utils.agent.sessionGetModel.invalidate({ sessionId })
+  }
+
+  return (
+    <label className="flex items-center gap-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[11px] text-neutral-300">
+      <span className="text-neutral-500">effort:</span>
+      <select
+        value={value}
+        onChange={(e) => void pick(e.target.value)}
+        disabled={setVariant.isPending}
+        title="Set OpenCode model variant / reasoning effort for this session"
+        className="bg-transparent font-mono text-neutral-200 outline-none disabled:opacity-50"
+      >
+        <option className="bg-neutral-950" value="">default</option>
+        {reasoningEfforts.map((effort) => (
+          <option key={effort.value} className="bg-neutral-950" value={effort.value}>
+            {effort.label}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }

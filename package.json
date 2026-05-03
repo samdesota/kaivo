@@ -35,7 +35,8 @@
     "prepare:sandbox-image": "npm run build:plugin && npm run build:env-server && bash scripts/prepare-sandbox-image.sh",
     "docker:sandbox": "npm run prepare:sandbox-image && docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox",
     "package:everything": "scripts/package-everything.sh",
-    "package:desktop": "scripts/package-desktop.sh"
+    "package:desktop": "scripts/package-desktop.sh",
+    "package:desktop:install": "scripts/package-desktop.sh --install"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",

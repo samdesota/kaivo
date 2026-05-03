@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { envTrpc } from '../../../env-trpc'
@@ -20,7 +20,7 @@ import { PartRenderer } from './parts'
 import { OpenStateProvider } from './parts/open-state'
 import { SessionTabs } from './session-tabs'
 import { EmptySessionState } from './empty-session-state'
-import { ModelPicker } from './model-picker'
+import { ModelPicker, ReasoningEffortPicker } from './model-picker'
 import { selectActiveWorkspaceSession } from './workspace-session-state'
 
 type Action =
@@ -521,6 +521,45 @@ function SessionPane({
   })
 
   const stickToBottom = useRef(true)
+  const scrollTimers = useRef<Array<ReturnType<typeof setTimeout>>>([])
+  const scrollFrames = useRef<number[]>([])
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (renderables.length > 0) {
+      rowVirtualizer.scrollToIndex(renderables.length - 1, { align: 'end' })
+    }
+    el.scrollTop = el.scrollHeight
+  }, [renderables.length, rowVirtualizer])
+
+  const scheduleScrollToBottom = useCallback(() => {
+    for (const id of scrollFrames.current) cancelAnimationFrame(id)
+    for (const id of scrollTimers.current) clearTimeout(id)
+    scrollFrames.current = []
+    scrollTimers.current = []
+
+    const tick = () => {
+      if (stickToBottom.current) scrollToBottom()
+    }
+    scrollFrames.current.push(requestAnimationFrame(tick))
+    scrollFrames.current.push(requestAnimationFrame(() => requestAnimationFrame(tick)))
+    for (const delay of [50, 150, 350]) {
+      scrollTimers.current.push(setTimeout(tick, delay))
+    }
+  }, [scrollToBottom])
+
+  useEffect(() => {
+    return () => {
+      for (const id of scrollFrames.current) cancelAnimationFrame(id)
+      for (const id of scrollTimers.current) clearTimeout(id)
+    }
+  }, [])
+
+  useEffect(() => {
+    stickToBottom.current = true
+    scheduleScrollToBottom()
+  }, [sessionId, scheduleScrollToBottom])
+
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -534,10 +573,21 @@ function SessionPane({
 
   const totalSize = rowVirtualizer.getTotalSize()
   useEffect(() => {
+    if (!stickToBottom.current) return
+    scheduleScrollToBottom()
+  }, [totalSize, renderables.length, messages.isFetching, childMsgs.isFetching, scheduleScrollToBottom])
+
+  useEffect(() => {
     const el = scrollRef.current
-    if (!el || !stickToBottom.current) return
-    el.scrollTop = el.scrollHeight
-  }, [totalSize, renderables.length])
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const resizeObserver = new ResizeObserver(() => {
+      if (stickToBottom.current) scheduleScrollToBottom()
+    })
+    resizeObserver.observe(el)
+    const content = el.firstElementChild
+    if (content) resizeObserver.observe(content)
+    return () => resizeObserver.disconnect()
+  }, [renderables.length, scheduleScrollToBottom])
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -548,6 +598,7 @@ function SessionPane({
           )}
           <RestartAgentButton />
           <ModelPicker sessionId={sessionId} />
+          <ReasoningEffortPicker sessionId={sessionId} />
         </div>
         {reconnecting && (
           <div className="border-b border-amber-500/40 bg-amber-500/5 px-3 py-1 text-[11px] text-amber-200">

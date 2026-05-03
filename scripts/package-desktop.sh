@@ -8,6 +8,20 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 desktop_dir="$repo_root/packages/cloud-code-desktop"
 bundle_dir="$desktop_dir/bundle"
+install_app=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --install)
+      install_app=true
+      ;;
+    *)
+      echo "unknown argument: $arg" >&2
+      echo "usage: $0 [--install]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 echo "==> cleaning bundle dir"
 rm -rf "$bundle_dir"
@@ -98,12 +112,27 @@ echo "==> packaging electron app"
   --ignore='^/\.cloud-code($|/)' \
   --ignore='^/release($|/)')
 
-echo "==> installing to /Applications"
-rm -rf '/Applications/Cloud Code Desktop.app'
-cp -R "$desktop_dir/release/Cloud Code Desktop-darwin-arm64/Cloud Code Desktop.app" /Applications/
-# fix spawn-helper permissions that cp may strip
-find '/Applications/Cloud Code Desktop.app' -name spawn-helper -type f -exec chmod 755 {} + 2>/dev/null || true
-codesign --force --deep --sign - '/Applications/Cloud Code Desktop.app'
+if [ "$install_app" = true ]; then
+  echo "==> installing to /Applications"
+  stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/cloud-code-desktop-install.XXXXXX")
+  next_app="$stage_dir/Cloud Code Desktop.app"
+  backup_dir="${HOME}/Library/Application Support/cloud-code-desktop/app-backups"
+  backup_app="$backup_dir/Cloud Code Desktop.app.$(date +%Y%m%d%H%M%S)"
+  mkdir -p "$backup_dir"
+  cp -R "$desktop_dir/release/Cloud Code Desktop-darwin-arm64/Cloud Code Desktop.app" "$next_app"
+  # fix spawn-helper permissions that cp may strip
+  find "$next_app" -name spawn-helper -type f -exec chmod 755 {} + 2>/dev/null || true
+  codesign --force --deep --sign - "$next_app"
+  if [ -e '/Applications/Cloud Code Desktop.app' ]; then
+    mv '/Applications/Cloud Code Desktop.app' "$backup_app"
+  fi
+  mv "$next_app" '/Applications/Cloud Code Desktop.app'
+  rm -rf "$stage_dir"
+  echo "==> previous app moved to $backup_app"
+else
+  echo "==> packaged app at $desktop_dir/release/Cloud Code Desktop-darwin-arm64/Cloud Code Desktop.app"
+  echo "==> not installing to /Applications; rerun with --install from outside the running app to install"
+fi
 
 echo "==> cleaning bundle dir"
 rm -rf "$bundle_dir"

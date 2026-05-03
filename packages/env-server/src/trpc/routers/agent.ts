@@ -4,6 +4,8 @@ import { z } from 'zod'
 import { authedProcedure, router } from '../trpc.js'
 import { AgentError, agentService, type TranscriptEvent } from '../../agent/service.js'
 
+const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
+
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof AgentError) {
     const code: TRPCError['code'] =
@@ -77,7 +79,11 @@ export const agentRouter = router({
         title: z.string().min(1).max(200).optional(),
         directory: z.string().min(1).max(4_096).optional(),
         model: z
-          .object({ providerID: z.string().min(1), modelID: z.string().min(1) })
+          .object({
+            providerID: z.string().min(1),
+            modelID: z.string().min(1),
+            variant: reasoningEffortSchema.nullable().optional(),
+          })
           .optional(),
       }),
     )
@@ -259,6 +265,18 @@ export const agentRouter = router({
       } else {
         await agentService.setSessionModel(input.sessionId, null)
       }
+      return { ok: true as const }
+    }),
+
+  sessionSetModelVariant: authedProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        variant: reasoningEffortSchema.nullable(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      await agentService.setSessionModelVariant(input.sessionId, input.variant)
       return { ok: true as const }
     }),
 

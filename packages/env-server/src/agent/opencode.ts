@@ -310,6 +310,7 @@ class OpenCodeSupervisor {
       ...process.env,
       ...providerEnv,
       OPENCODE_SERVER_PASSWORD: password,
+      OPENCODE_ENABLE_EXA: '1',
       CLOUDCODE_AGENT_TOKEN: token,
       // Plugin talks to this env-server on loopback (we publish /trpc
       // there; the plugin just treats it as "the cloud-code app").
@@ -453,6 +454,25 @@ class OpenCodeSupervisor {
         build: { mode: 'primary', model: 'openai/gpt-5.5' },
         general: { mode: 'subagent', model: 'openai/gpt-5.5' },
         explore: { mode: 'subagent', model: 'openai/gpt-5.5' },
+      },
+      provider: {
+        openai: {
+          models: {
+            'gpt-5.5': {
+              variants: {
+                none: { reasoningEffort: 'none' },
+                minimal: { reasoningEffort: 'minimal' },
+                low: { reasoningEffort: 'low' },
+                medium: { reasoningEffort: 'medium' },
+                high: { reasoningEffort: 'high' },
+                xhigh: { reasoningEffort: 'xhigh' },
+              },
+            },
+          },
+        },
+      },
+      permission: {
+        websearch: 'allow',
       },
     }
     await fs.writeFile(path.join(dir, 'opencode.json'), JSON.stringify(cfg, null, 2))

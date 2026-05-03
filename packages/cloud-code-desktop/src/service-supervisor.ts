@@ -202,6 +202,7 @@ function packagedLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig)
       CC_IDENTITY_URL: config.app.url,
       CC_ALLOWED_ORIGINS: config.app.url,
       CC_OPENCODE_PLUGIN_PATH: pluginPath,
+      OPENCODE_ENABLE_EXA: '1',
     },
     logPath: config.env.logPath,
   }
@@ -248,6 +249,7 @@ function devLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, cwd:
       CC_IDENTITY_URL: config.app.url,
       CC_ALLOWED_ORIGINS: config.app.url,
       CC_OPENCODE_PLUGIN_PATH: pluginPath,
+      OPENCODE_ENABLE_EXA: '1',
     },
     logPath: config.env.logPath,
   }

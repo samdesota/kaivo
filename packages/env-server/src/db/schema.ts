@@ -76,6 +76,7 @@ export const agentSessions = sqliteTable('agent_sessions', {
   workingDir: text('working_dir'),
   selectedProviderId: text('selected_provider_id'),
   selectedModelId: text('selected_model_id'),
+  selectedModelVariant: text('selected_model_variant'),
   createdAt: text('created_at').notNull(),
   lastActivityAt: text('last_activity_at').notNull(),
 })

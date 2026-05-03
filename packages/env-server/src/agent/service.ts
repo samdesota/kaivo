@@ -14,6 +14,13 @@ import {
 import { IdentityAuthError, IdentityUnreachableError, resolveProviderKeys } from '../identity/client.js'
 
 const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
+const REASONING_EFFORT_VARIANTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+export type ReasoningEffortVariant = typeof REASONING_EFFORT_VARIANTS[number]
+export type SessionModelSelection = {
+  providerID: string | null
+  modelID: string | null
+  variant: ReasoningEffortVariant | null
+}
 
 const CLOUD_TOOL_OVERRIDES = {
   bash: false,
@@ -24,6 +31,7 @@ const CLOUD_TOOL_OVERRIDES = {
   cloud_pty_read: true,
   cloud_pty_close: true,
   cloud_open_pane: true,
+  websearch: true,
 } as const
 
 function directoryOpts(dir: string | null | undefined) {
@@ -31,6 +39,23 @@ function directoryOpts(dir: string | null | undefined) {
   return {
     query: { directory: dir },
     headers: { 'x-opencode-directory': dir },
+  }
+}
+
+function isReasoningEffortVariant(value: string | null | undefined): value is ReasoningEffortVariant {
+  return REASONING_EFFORT_VARIANTS.includes(value as ReasoningEffortVariant)
+}
+
+function promptBody(input: {
+  text: string
+  model: { providerID: string; modelID: string }
+  variant?: ReasoningEffortVariant | null
+}) {
+  return {
+    parts: [{ type: 'text' as const, text: input.text }],
+    tools: CLOUD_TOOL_OVERRIDES,
+    model: input.model,
+    ...(input.variant ? { variant: input.variant } : {}),
   }
 }
 
@@ -175,7 +200,7 @@ class AgentService {
   private seqCounters = new Map<string, number>() // our session id -> next seq
   private parentByChild = new Map<string, string>()
   private childrenByParent = new Map<string, string[]>()
-  private sessionModels = new Map<string, { providerID: string; modelID: string }>()
+  private sessionModels = new Map<string, SessionModelSelection>()
   private contextLimitCache = new Map<string, number>()
 
   async agentStatus(): Promise<{ ready: boolean; hasProvider: boolean }> {
@@ -260,7 +285,7 @@ class AgentService {
     prompt?: string
     title?: string
     directory?: string
-    model?: { providerID: string; modelID: string }
+    model?: { providerID: string; modelID: string; variant?: ReasoningEffortVariant | null }
   }): Promise<AgentSessionSummary> {
     const client = await this.getClient()
     const model = input.model ?? this.getDefaultModel()
@@ -287,6 +312,7 @@ class AgentService {
         workingDir: input.directory ?? null,
         selectedProviderId: input.model?.providerID ?? null,
         selectedModelId: input.model?.modelID ?? null,
+        selectedModelVariant: input.model?.variant ?? null,
         createdAt: now.toISOString(),
         lastActivityAt: now.toISOString(),
       })
@@ -294,18 +320,20 @@ class AgentService {
 
     if (input.directory) recentFolderService.upsert(input.directory)
 
-    if (input.model) this.sessionModels.set(id, input.model)
+    if (input.model) {
+      this.sessionModels.set(id, {
+        providerID: input.model.providerID,
+        modelID: input.model.modelID,
+        variant: input.model.variant ?? null,
+      })
+    }
 
     if (input.prompt) {
       const prompt = input.prompt
       void client.session
         .promptAsync({
           path: { id: ocSession.id },
-          body: {
-            parts: [{ type: 'text', text: prompt }],
-            tools: CLOUD_TOOL_OVERRIDES,
-            model,
-          },
+          body: promptBody({ text: prompt, model, variant: input.model?.variant }),
           ...directoryOpts(input.directory),
         })
         .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
@@ -392,8 +420,13 @@ class AgentService {
     sessionId: string,
     model: { providerID: string; modelID: string } | null,
   ): Promise<void> {
-    if (model) this.sessionModels.set(sessionId, model)
-    else this.sessionModels.delete(sessionId)
+    const current = await this.getSessionModel(sessionId)
+    const next: SessionModelSelection = {
+      providerID: model?.providerID ?? null,
+      modelID: model?.modelID ?? null,
+      variant: current?.variant ?? null,
+    }
+    this.sessionModels.set(sessionId, next)
     db.update(agentSessions)
       .set({
         selectedProviderId: model?.providerID ?? null,
@@ -403,23 +436,46 @@ class AgentService {
       .run()
   }
 
+  async setSessionModelVariant(
+    sessionId: string,
+    variant: ReasoningEffortVariant | null,
+  ): Promise<void> {
+    const current = await this.getSessionModel(sessionId)
+    const next: SessionModelSelection = {
+      providerID: current?.providerID ?? null,
+      modelID: current?.modelID ?? null,
+      variant,
+    }
+    this.sessionModels.set(sessionId, next)
+    db.update(agentSessions)
+      .set({ selectedModelVariant: variant })
+      .where(eq(agentSessions.id, sessionId))
+      .run()
+  }
+
   async getSessionModel(
     sessionId: string,
-  ): Promise<{ providerID: string; modelID: string } | null> {
+  ): Promise<SessionModelSelection | null> {
     const cached = this.sessionModels.get(sessionId)
     if (cached) return cached
     const rows = db
       .select({
         providerID: agentSessions.selectedProviderId,
         modelID: agentSessions.selectedModelId,
+        variant: agentSessions.selectedModelVariant,
       })
       .from(agentSessions)
       .where(eq(agentSessions.id, sessionId))
       .limit(1)
       .all()
     const r = rows[0]
-    if (!r || !r.providerID || !r.modelID) return null
-    const hydrated = { providerID: r.providerID, modelID: r.modelID }
+    if (!r) return null
+    const hydrated = {
+      providerID: r.providerID ?? null,
+      modelID: r.modelID ?? null,
+      variant: isReasoningEffortVariant(r.variant) ? r.variant : null,
+    }
+    if (!hydrated.providerID && !hydrated.modelID && !hydrated.variant) return null
     this.sessionModels.set(sessionId, hydrated)
     return hydrated
   }
@@ -467,7 +523,7 @@ class AgentService {
   }
 
   async runCommand(input: { sessionId: string; command: string; arguments: string }): Promise<void> {
-    const { row, client, model, dirOpts } = await this.sessionContext(input.sessionId)
+    const { row, client, model, variant, dirOpts } = await this.sessionContext(input.sessionId)
     this.ensureSubscription(row.workingDir ?? '')
     await client.session.command({
       path: { id: row.opencodeSessionId },
@@ -475,6 +531,7 @@ class AgentService {
         command: input.command,
         arguments: input.arguments,
         model: `${model.providerID}/${model.modelID}`,
+        ...(variant ? { variant } : {}),
       },
       ...dirOpts,
       throwOnError: true,
@@ -508,15 +565,11 @@ class AgentService {
   }
 
   async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
-    const { row, client, model, dirOpts } = await this.sessionContext(input.sessionId)
+    const { row, client, model, variant, dirOpts } = await this.sessionContext(input.sessionId)
     this.ensureSubscription(row.workingDir ?? '')
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
-      body: {
-        parts: [{ type: 'text', text: input.message }],
-        tools: CLOUD_TOOL_OVERRIDES,
-        model,
-      },
+      body: promptBody({ text: input.message, model, variant }),
       ...dirOpts,
       throwOnError: true,
     })
@@ -1205,11 +1258,15 @@ class AgentService {
   private async sessionContext(sessionId: string) {
     const row = await this.requireSession(sessionId)
     const client = await this.getClient()
-    const model = (await this.getSessionModel(row.id)) ?? this.getDefaultModel()
+    const selection = await this.getSessionModel(row.id)
+    const model = selection?.providerID && selection.modelID
+      ? { providerID: selection.providerID, modelID: selection.modelID }
+      : this.getDefaultModel()
+    const variant = selection?.variant ?? null
     const dirOpts = directoryOpts(row.workingDir)
     const scopedFetch = (pth: string, init: RequestInit) =>
       this.opencodeFetch(pth, init, row.workingDir)
-    return { row, client, model, dirOpts, fetch: scopedFetch }
+    return { row, client, model, variant, dirOpts, fetch: scopedFetch }
   }
 }
 
