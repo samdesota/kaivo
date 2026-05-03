@@ -3,7 +3,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveInstanceRuntimeConfig } from './instance-runtime'
 import { ensureDesktopPairing } from './desktop-pairing'
 
@@ -12,6 +12,64 @@ describe('ensureDesktopPairing', () => {
 
   afterEach(async () => {
     await Promise.all(children.splice(0).map(stopChild))
+    vi.restoreAllMocks()
+  })
+
+  it('rejects registered token reuse when env health belongs to another instance', async () => {
+    const config = resolveInstanceRuntimeConfig(
+      { NODE_ENV: 'development', CC_INSTANCE_ID: 'pairing-a' },
+      { cwd: '/tmp/cloud-code-a', homeDir: '/tmp/home' },
+    )
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === `${config.app.url}/internal/local-env/local-${config.instanceId}`) {
+        return jsonResponse({ envToken: 'existing-token' })
+      }
+      if (url === `${config.env.url}/healthz`) {
+        return jsonResponse({ ok: true, instanceId: 'other-instance', identityReady: true })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+
+    await expect(ensureDesktopPairing(config)).rejects.toThrow(/env service instance mismatch/)
+  })
+
+  it('does not reuse a registered token when auth check returns another instance', async () => {
+    const config = resolveInstanceRuntimeConfig(
+      { NODE_ENV: 'development', CC_INSTANCE_ID: 'pairing-a' },
+      { cwd: '/tmp/cloud-code-a', homeDir: '/tmp/home' },
+    )
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url === `${config.app.url}/internal/local-env/local-${config.instanceId}`) {
+        return jsonResponse({ envToken: 'existing-token' })
+      }
+      if (url === `${config.env.url}/healthz`) {
+        return jsonResponse({ ok: true, instanceId: config.instanceId, identityReady: true })
+      }
+      if (url === `${config.env.url}/auth/check`) {
+        return jsonResponse({ ok: true, instanceId: 'other-instance' })
+      }
+      if (url === `${config.app.url}/trpc/envAuth.issueFromService?batch=1`) {
+        return jsonResponse([{ result: { data: { json: { identityToken: 'identity-token' } } } }])
+      }
+      if (url === `${config.env.url}/pair/desktop`) {
+        return jsonResponse({ envToken: 'fresh-token' })
+      }
+      if (url === `${config.app.url}/internal/local-env/register`) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { instanceId?: string }
+        expect(body.instanceId).toBe(config.instanceId)
+        return jsonResponse({ ok: true })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+
+    await expect(ensureDesktopPairing(config)).resolves.toEqual({
+      envId: `local-${config.instanceId}`,
+      envToken: 'fresh-token',
+      reused: false,
+    })
+    expect(fetchMock).toHaveBeenCalledWith(`${config.env.url}/auth/check`, expect.anything())
   })
 
   it('refuses mismatched env instances and pairs the matching one', async () => {
@@ -32,6 +90,7 @@ describe('ensureDesktopPairing', () => {
       env: {
         ...process.env,
         NODE_ENV: 'test',
+        CC_INSTANCE_ID: config.instanceId,
         APP_SQLITE_PATH: config.app.sqlitePath,
         DATA_DIR: config.app.dataDir,
         PORT: String(config.app.port),
@@ -58,7 +117,7 @@ describe('ensureDesktopPairing', () => {
     await waitForHealth(`${config.env.url}/healthz`)
 
     const mismatched = { ...config, instanceId: 'wrong-instance' }
-    await expect(ensureDesktopPairing(mismatched)).rejects.toThrow(/desktop pairing failed: 409/)
+    await expect(ensureDesktopPairing(mismatched)).rejects.toThrow(/env service instance mismatch/)
 
     const first = await ensureDesktopPairing(config)
     const second = await ensureDesktopPairing(config)
@@ -76,6 +135,13 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   await new Promise<void>((resolve) => {
     child.once('exit', () => resolve())
     setTimeout(resolve, 1000).unref()
+  })
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
   })
 }
 

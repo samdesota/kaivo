@@ -123,11 +123,25 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   }, [closeOnUnmount])
 
   if (!browserApi.isAvailable()) {
+    const fallbackUrl = url ? normalizeBrowserUrl(url) : ''
     return (
       <div className="flex h-full min-h-0 items-center justify-center bg-neutral-950 p-6 text-center text-sm text-neutral-400">
-        <div>
+        <div className="max-w-md">
           <div className="mb-2 text-neutral-200">Browser pane unavailable</div>
-          <div>Open this workspace in the desktop app to use native browser tabs.</div>
+          <div>Native browser tabs require the desktop app. This URL can still be opened from browser mode.</div>
+          {fallbackUrl ? (
+            <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-left">
+              <div className="mb-2 break-all font-mono text-xs text-neutral-300">{fallbackUrl}</div>
+              <a
+                href={fallbackUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                Open externally
+              </a>
+            </div>
+          ) : null}
         </div>
       </div>
     )
@@ -225,9 +239,9 @@ function BrowserControlButton({
 export function normalizeBrowserUrl(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return 'about:blank'
-  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)) return trimmed
   if (trimmed.startsWith('localhost') || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?/.test(trimmed)) {
     return `http://${trimmed}`
   }
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)) return trimmed
   return `https://${trimmed}`
 }

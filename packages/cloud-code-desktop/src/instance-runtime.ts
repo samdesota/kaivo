@@ -3,7 +3,7 @@ import path from 'node:path'
 
 export type DesktopRuntimeMode = 'development' | 'production'
 
-export type RuntimePortName = 'app' | 'env'
+export type RuntimePortName = 'app' | 'env' | 'client'
 
 export type RuntimePortStatus = 'available' | 'same-instance' | 'occupied'
 
@@ -19,6 +19,8 @@ export type RuntimePortSelection = {
   shouldPersist: boolean
 }
 
+export type RuntimePortSelections = Record<RuntimePortName, RuntimePortSelection>
+
 export type InstanceRuntimeConfig = {
   instanceId: string
   mode: DesktopRuntimeMode
@@ -28,6 +30,7 @@ export type InstanceRuntimeConfig = {
     host: string
     port: number
     url: string
+    healthUrl: string
     dataDir: string
     sqlitePath: string
     logPath: string
@@ -37,9 +40,17 @@ export type InstanceRuntimeConfig = {
     host: string
     port: number
     url: string
+    healthUrl: string
     stateDir: string
     workingDir: string
     label: string
+    logPath: string
+    portSelection: RuntimePortSelection
+  }
+  client: {
+    host: string
+    port: number
+    url: string
     logPath: string
     portSelection: RuntimePortSelection
   }
@@ -75,21 +86,24 @@ export function resolveInstanceRuntimeConfig(
   const persistedPorts = options.persistedPorts ?? {}
   const portAvailability = options.portAvailability ?? (() => 'available')
 
-  const appPortSelection = selectPort({
-    service: 'app',
-    override: env.CC_APP_PORT,
-    persisted: persistedPorts.app,
-    preferred: preferredPort(instanceId, 'app'),
-    portAvailability,
-  })
-  const envPortSelection = selectPort({
-    service: 'env',
-    override: env.CC_ENV_PORT,
-    persisted: persistedPorts.env,
-    preferred: preferredPort(instanceId, 'env'),
+  const portSelections = selectRuntimePorts({
+    overrides: {
+      app: env.CC_APP_PORT,
+      env: env.CC_ENV_PORT,
+      client: env.CC_CLIENT_PORT ?? env.VITE_PORT,
+    },
+    persisted: persistedPorts,
+    preferred: {
+      app: preferredPort(instanceId, 'app'),
+      env: preferredPort(instanceId, 'env'),
+      client: preferredPort(instanceId, 'client'),
+    },
     portAvailability,
   })
   const envLabel = env.CC_ENV_LABEL ?? `Cloud Code ${instanceId}`
+  const appUrl = env.CC_APP_URL ?? `http://${host}:${portSelections.app.port}`
+  const envUrl = env.CC_ENV_URL ?? `http://${host}:${portSelections.env.port}`
+  const clientUrl = env.CC_CLIENT_URL ?? env.CC_DESKTOP_DEV_URL ?? `http://${host}:${portSelections.client.port}`
 
   return {
     instanceId,
@@ -98,22 +112,31 @@ export function resolveInstanceRuntimeConfig(
     logsDir,
     app: {
       host,
-      port: appPortSelection.port,
-      url: env.CC_APP_URL ?? `http://${host}:${appPortSelection.port}`,
+      port: portSelections.app.port,
+      url: appUrl,
+      healthUrl: `${appUrl}/healthz`,
       dataDir: appDataDir,
       sqlitePath: path.resolve(env.CC_APP_SQLITE_PATH ?? path.join(appDataDir, 'app.db')),
       logPath: path.resolve(env.CC_APP_LOG_PATH ?? path.join(logsDir, 'app.log')),
-      portSelection: appPortSelection,
+      portSelection: portSelections.app,
     },
     env: {
       host,
-      port: envPortSelection.port,
-      url: env.CC_ENV_URL ?? `http://${host}:${envPortSelection.port}`,
+      port: portSelections.env.port,
+      url: envUrl,
+      healthUrl: `${envUrl}/healthz`,
       stateDir: envStateDir,
       workingDir: envWorkingDir,
       label: envLabel,
       logPath: path.resolve(env.CC_ENV_LOG_PATH ?? path.join(logsDir, 'cc-env.log')),
-      portSelection: envPortSelection,
+      portSelection: portSelections.env,
+    },
+    client: {
+      host,
+      port: portSelections.client.port,
+      url: clientUrl,
+      logPath: path.resolve(env.CC_CLIENT_LOG_PATH ?? path.join(logsDir, 'client.log')),
+      portSelection: portSelections.client,
     },
   }
 }
@@ -143,7 +166,36 @@ function defaultWorkingDir(mode: DesktopRuntimeMode, homeDir: string, rootDir: s
 
 function preferredPort(instanceId: string, service: RuntimePortName): number {
   const offset = parseInt(shortHash(`${instanceId}:${service}`).slice(0, 4), 16) % 1000
-  return (service === 'app' ? 3100 : 48000) + offset
+  if (service === 'app') return 3100 + offset
+  if (service === 'env') return 48000 + offset
+  return 5100 + offset
+}
+
+export function selectRuntimePorts(input: {
+  overrides?: Partial<Record<RuntimePortName, string | undefined>>
+  persisted?: PersistedRuntimePorts
+  preferred: Record<RuntimePortName, number>
+  portAvailability: RuntimePortAvailability
+}): RuntimePortSelections {
+  const usedPorts = new Map<number, RuntimePortName>()
+  const selections = {} as RuntimePortSelections
+
+  for (const service of ['app', 'env', 'client'] as const) {
+    const selection = selectPort({
+      service,
+      override: input.overrides?.[service],
+      persisted: input.persisted?.[service],
+      preferred: input.preferred[service],
+      portAvailability: input.portAvailability,
+      isPortReserved: (port) => usedPorts.has(port),
+    })
+    const reservedBy = usedPorts.get(selection.port)
+    if (reservedBy) throw new Error(`Port ${selection.port} selected for both ${reservedBy} and ${service}`)
+    usedPorts.set(selection.port, service)
+    selections[service] = selection
+  }
+
+  return selections
 }
 
 function selectPort(input: {
@@ -152,20 +204,24 @@ function selectPort(input: {
   persisted?: number
   preferred: number
   portAvailability: RuntimePortAvailability
+  isPortReserved?: (port: number) => boolean
 }): RuntimePortSelection {
   const override = parsePort(input.override)
-  if (override) return { port: override, source: 'override', shouldPersist: false }
+  if (override) {
+    if (input.isPortReserved?.(override)) throw new Error(`Port ${override} is already selected by another service`)
+    return { port: override, source: 'override', shouldPersist: false }
+  }
 
-  if (input.persisted && canUsePort(input.persisted, input.service, input.portAvailability)) {
+  if (input.persisted && canUsePort(input.persisted, input.service, input.portAvailability, input.isPortReserved)) {
     return { port: input.persisted, source: 'persisted', shouldPersist: false }
   }
 
-  if (canUsePort(input.preferred, input.service, input.portAvailability)) {
+  if (canUsePort(input.preferred, input.service, input.portAvailability, input.isPortReserved)) {
     return { port: input.preferred, source: 'preferred', shouldPersist: input.persisted !== input.preferred }
   }
 
   for (let port = input.preferred + 1; port < input.preferred + 1000 && port <= 65535; port += 1) {
-    if (canUsePort(port, input.service, input.portAvailability)) {
+    if (canUsePort(port, input.service, input.portAvailability, input.isPortReserved)) {
       return { port, source: 'fallback', shouldPersist: true }
     }
   }
@@ -173,7 +229,13 @@ function selectPort(input: {
   throw new Error(`No available ${input.service} port near ${input.preferred}`)
 }
 
-function canUsePort(port: number, service: RuntimePortName, portAvailability: RuntimePortAvailability): boolean {
+function canUsePort(
+  port: number,
+  service: RuntimePortName,
+  portAvailability: RuntimePortAvailability,
+  isPortReserved: ((port: number) => boolean) | undefined,
+): boolean {
+  if (isPortReserved?.(port)) return false
   const status = portAvailability(port, service)
   return status === 'available' || status === 'same-instance'
 }

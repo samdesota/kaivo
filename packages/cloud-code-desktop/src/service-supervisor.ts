@@ -142,7 +142,7 @@ function bundleDir(): string {
 }
 
 function isPackagedBundle(): boolean {
-  return app.isPackaged && fs.existsSync(path.join(bundleDir(), 'app-server', 'index.js'))
+  return Boolean((app as { isPackaged?: boolean } | undefined)?.isPackaged) && fs.existsSync(path.join(bundleDir(), 'app-server', 'index.js'))
 }
 
 function serviceLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, cwd: string): ServiceLaunchSpec {

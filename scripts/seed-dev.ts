@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcrypt'
 import { runLocalAppMigrations } from '../server/db/local-migrate'
 
@@ -12,23 +13,34 @@ const DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' }
 const BCRYPT_COST = 12
 const DESKTOP_APP_ID = 'cloud-code-desktop'
 
-async function main(): Promise<void> {
-  if (process.env.NODE_ENV === 'production' && process.env.CC_SEED_FORCE !== 'true') {
+export type DevSeedOptions = {
+  env?: NodeJS.ProcessEnv
+  cwd?: string
+  log?: (message: string) => void
+}
+
+export async function runDevSeed(options: DevSeedOptions = {}): Promise<void> {
+  const seedEnv = options.env ?? process.env
+  const log = options.log ?? console.log
+
+  if (seedEnv.NODE_ENV === 'production' && seedEnv.CC_SEED_FORCE !== 'true') {
     throw new Error('Refusing to run dev seed with NODE_ENV=production. Set CC_SEED_FORCE=true to override.')
   }
 
-  const target = process.env.CC_SEED_TARGET ?? 'desktop-dev'
-  const cwd = path.resolve(process.cwd())
-  const homeDir = process.env.HOME ?? cwd
-  const instanceId = sanitizeId(process.env.CC_INSTANCE_ID ?? defaultInstanceId(target, cwd))
-  const instanceRoot = path.resolve(process.env.CC_INSTANCE_ROOT ?? defaultInstanceRoot(target, homeDir, cwd, instanceId))
-  const dataDir = path.resolve(process.env.DATA_DIR ?? process.env.CC_APP_DATA_DIR ?? path.join(instanceRoot, 'app'))
-  const sqlitePath = path.resolve(process.env.APP_SQLITE_PATH ?? process.env.CC_APP_SQLITE_PATH ?? path.join(dataDir, 'app.db'))
+  const target = seedEnv.CC_SEED_TARGET ?? 'desktop-dev'
+  const cwd = path.resolve(options.cwd ?? process.cwd())
+  const homeDir = seedEnv.HOME ?? cwd
+  const instanceId = sanitizeId(seedEnv.CC_INSTANCE_ID ?? defaultInstanceId(target, cwd))
+  const instanceRoot = path.resolve(seedEnv.CC_INSTANCE_ROOT ?? defaultInstanceRoot(target, homeDir, cwd, instanceId))
+  const dataDir = path.resolve(seedEnv.DATA_DIR ?? seedEnv.CC_APP_DATA_DIR ?? path.join(instanceRoot, 'app'))
+  const sqlitePath = path.resolve(seedEnv.APP_SQLITE_PATH ?? seedEnv.CC_APP_SQLITE_PATH ?? path.join(dataDir, 'app.db'))
 
-  process.env.NODE_ENV ??= 'development'
-  process.env.DATA_DIR = dataDir
-  process.env.APP_SQLITE_PATH = sqlitePath
-  process.env.CC_SERVICE_CREDENTIAL ??= 'local-dev-seed-service-credential'
+  seedEnv.NODE_ENV ??= 'development'
+  seedEnv.DATA_DIR = dataDir
+  seedEnv.APP_SQLITE_PATH = sqlitePath
+  seedEnv.CC_SERVICE_CREDENTIAL ??= 'local-dev-seed-service-credential'
+
+  Object.assign(process.env, seedEnv)
 
   const migration = runLocalAppMigrations(sqlitePath)
 
@@ -38,7 +50,7 @@ async function main(): Promise<void> {
     import('../server/secrets/index'),
   ])
 
-  const password = process.env.CC_SEED_ADMIN_PASSWORD ?? DEFAULT_PASSWORD
+  const password = seedEnv.CC_SEED_ADMIN_PASSWORD ?? DEFAULT_PASSWORD
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST)
   await db
     .insert(admin)
@@ -48,11 +60,11 @@ async function main(): Promise<void> {
       set: { passwordHash },
     })
 
-  const openaiApiKey = process.env.CC_SEED_OPENAI_API_KEY ?? readOnePasswordSecret() ?? DEFAULT_OPENAI_API_KEY
-  const openaiBaseUrl = process.env.CC_SEED_OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL
+  const openaiApiKey = seedEnv.CC_SEED_OPENAI_API_KEY ?? readOnePasswordSecret(seedEnv) ?? DEFAULT_OPENAI_API_KEY
+  const openaiBaseUrl = seedEnv.CC_SEED_OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL
   const model = {
-    providerID: process.env.CC_SEED_MODEL_PROVIDER ?? DEFAULT_MODEL.providerID,
-    modelID: process.env.CC_SEED_MODEL_ID ?? DEFAULT_MODEL.modelID,
+    providerID: seedEnv.CC_SEED_MODEL_PROVIDER ?? DEFAULT_MODEL.providerID,
+    modelID: seedEnv.CC_SEED_MODEL_ID ?? DEFAULT_MODEL.modelID,
   }
 
   await putSecret('provider.openai.api_key', openaiApiKey)
@@ -60,19 +72,21 @@ async function main(): Promise<void> {
   await putSecret('agent.default_model', JSON.stringify(model))
 
   const displayPath = path.relative(process.cwd(), sqlitePath) || sqlitePath
-  console.log(`Seed target: ${target}`)
-  console.log(`Seeded dev app database: ${displayPath}`)
-  if (migration.applied.length > 0) console.log(`Applied migrations: ${migration.applied.join(', ')}`)
-  console.log(`Admin password: ${password}`)
-  console.log(`OpenAI-compatible base URL: ${openaiBaseUrl}`)
-  console.log(`OpenAI-compatible API key: ${openaiApiKey === DEFAULT_OPENAI_API_KEY ? 'placeholder' : 'configured'}`)
-  console.log(`Default model: ${model.providerID}/${model.modelID}`)
+  log(`Seed target: ${target}`)
+  log(`Seeded dev app database: ${displayPath}`)
+  if (migration.applied.length > 0) log(`Applied migrations: ${migration.applied.join(', ')}`)
+  log(`Admin password: ${password}`)
+  log(`OpenAI-compatible base URL: ${openaiBaseUrl}`)
+  log(`OpenAI-compatible API key: ${openaiApiKey === DEFAULT_OPENAI_API_KEY ? 'placeholder' : 'configured'}`)
+  log(`Default model: ${model.providerID}/${model.modelID}`)
 }
 
-main().catch((error) => {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  runDevSeed().catch((error) => {
   console.error(error instanceof Error ? error.message : error)
   process.exit(1)
-})
+  })
+}
 
 function shortHash(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12)
@@ -100,9 +114,9 @@ function defaultInstanceRoot(target: string, homeDir: string, cwd: string, insta
   return path.join(cwd, '.cloud-code', 'instances', instanceId)
 }
 
-function readOnePasswordSecret(): string | null {
-  const ref = process.env.CC_SEED_OPENAI_API_KEY_OP_REF ?? DEFAULT_OPENAI_API_KEY_OP_REF
-  if (process.env.CC_SEED_OPENAI_API_KEY_OP_REF === '') return null
+function readOnePasswordSecret(seedEnv: NodeJS.ProcessEnv): string | null {
+  const ref = seedEnv.CC_SEED_OPENAI_API_KEY_OP_REF ?? DEFAULT_OPENAI_API_KEY_OP_REF
+  if (seedEnv.CC_SEED_OPENAI_API_KEY_OP_REF === '') return null
   try {
     const value = execFileSync('op', ['read', ref], {
       encoding: 'utf8',

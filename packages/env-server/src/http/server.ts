@@ -65,7 +65,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       ? header.slice(7).trim()
       : ''
     if (!token || !hasEnvTokenHash(hashEnvToken(token))) return reply.code(401).send({ ok: false })
-    return { ok: true }
+    return { ok: true, instanceId: config.CC_INSTANCE_ID }
   })
 
   app.post('/pair/desktop', async (req, reply) => {

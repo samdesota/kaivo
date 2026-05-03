@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "npm run dev:desktop",
-    "dev:web": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:web": "npm run dev:local",
+    "dev:local": "tsx scripts/local-launch.ts",
     "dev:server": "CC_SERVICE_CREDENTIAL=local-desktop-service-credential tsx watch --env-file=.env --tsconfig tsconfig.server.json server/index.ts",
     "dev:client": "vite",
     "build": "npm run build:client && npm run build:server",

@@ -77,7 +77,7 @@ describe('env-server healthz', () => {
         headers: { authorization: `Bearer ${envToken}` },
       })
       expect(auth.statusCode).toBe(200)
-      expect(auth.json()).toEqual({ ok: true })
+      expect(auth.json()).toEqual({ ok: true, instanceId: 'dev-worktree-a' })
     } finally {
       await app.close()
     }

@@ -70,13 +70,17 @@ export async function buildServer() {
   server.post('/internal/local-env/register', async (req, reply) => {
     const body = req.body as Partial<{
       id: string
+      instanceId: string
       label: string
       url: string
       envToken: string
       localIdentityLabel: string
     }>
-    if (!body.id || !body.label || !body.url || !body.envToken || !body.localIdentityLabel) {
+    if (!body.id || !body.instanceId || !body.label || !body.url || !body.envToken || !body.localIdentityLabel) {
       return reply.code(400).send({ error: 'missing fields' })
+    }
+    if (body.instanceId !== env.CC_INSTANCE_ID) {
+      return reply.code(409).send({ error: 'instance mismatch' })
     }
     return upsertLocalEnvRegistration({
       id: body.id,

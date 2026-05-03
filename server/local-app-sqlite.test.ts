@@ -14,6 +14,7 @@ describe('local app SQLite boot', () => {
     const sqlitePath = path.join(dataDir, 'app.db')
     vi.stubEnv('APP_SQLITE_PATH', sqlitePath)
     vi.stubEnv('DATA_DIR', dataDir)
+    vi.stubEnv('CC_INSTANCE_ID', 'default')
     vi.stubEnv('CC_SERVICE_CREDENTIAL', 'test-service-credential-min-16-chars')
 
     const { runLocalAppMigrations } = await import('./db/local-migrate.js')
@@ -27,6 +28,53 @@ describe('local app SQLite boot', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toMatchObject({ ok: true, instanceId: 'default' })
       expect(fs.existsSync(sqlitePath)).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects local env registration for another instance', async () => {
+    vi.resetModules()
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-local-app-test-'))
+    const sqlitePath = path.join(dataDir, 'app.db')
+    vi.stubEnv('APP_SQLITE_PATH', sqlitePath)
+    vi.stubEnv('DATA_DIR', dataDir)
+    vi.stubEnv('CC_INSTANCE_ID', 'app-instance-a')
+    vi.stubEnv('CC_SERVICE_CREDENTIAL', 'test-service-credential-min-16-chars')
+
+    const { runLocalAppMigrations } = await import('./db/local-migrate.js')
+    const { buildServer } = await import('./index.js')
+    runLocalAppMigrations(sqlitePath)
+    const app = await buildServer()
+
+    try {
+      const mismatch = await app.inject({
+        method: 'POST',
+        url: '/internal/local-env/register',
+        payload: {
+          id: 'local-other',
+          instanceId: 'other-instance',
+          label: 'Other',
+          url: 'http://127.0.0.1:4999',
+          envToken: 'token',
+          localIdentityLabel: 'Other',
+        },
+      })
+      expect(mismatch.statusCode).toBe(409)
+
+      const matching = await app.inject({
+        method: 'POST',
+        url: '/internal/local-env/register',
+        payload: {
+          id: 'local-app-instance-a',
+          instanceId: 'app-instance-a',
+          label: 'Matching',
+          url: 'http://127.0.0.1:4999',
+          envToken: 'token',
+          localIdentityLabel: 'Matching',
+        },
+      })
+      expect(matching.statusCode).toBe(200)
     } finally {
       await app.close()
     }

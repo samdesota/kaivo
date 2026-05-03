@@ -19,9 +19,17 @@ This runs Electron with `CC_DESKTOP_MANAGE_SERVICES=true`. Electron starts/disco
 
 - identity/app server, SQLite app DB under `.cloud-code/instances/<id>/app/app.db`
 - `cc-env`, SQLite env DB under `.cloud-code/instances/<id>/env-state/env.db`
-- instance-scoped ports, logs, labels, and pairing token
+- instance-scoped ports, logs, labels, pairing token, and launch manifest
 
 Multiple worktrees can run together because the default instance id is derived from the worktree path. Override with `CC_INSTANCE_ID`, `CC_INSTANCE_ROOT`, `CC_APP_PORT`, and `CC_ENV_PORT` when needed.
+
+Before assuming local ports, URLs, database paths, or log locations, read the current launch manifest:
+
+```bash
+cat .cloud-code/instances/<id>/launch.json
+```
+
+The manifest lists the app/identity server, `cc-env`, client dev server, health URLs, PIDs, SQLite/state paths, workspace path, secrets-key path, and log files for that worktree. `.cloud-code/` is gitignored and contains local runtime state only.
 
 ## Browser-Only Development
 
@@ -29,7 +37,21 @@ Multiple worktrees can run together because the default instance id is derived f
 npm run dev:web
 ```
 
-Open <http://127.0.0.1:5180>. Manual local env pairing remains available from the dashboard for browser-only or externally managed `cc-env` flows.
+This routes through the local launcher, finds free ports for app/identity, `cc-env`, and Vite, seeds local dev LLM credentials, and writes `.cloud-code/instances/<id>/launch.json`. Open the manifest's `client` URL instead of assuming `http://127.0.0.1:5180`.
+
+Manual local env pairing remains available from the dashboard for browser-only or externally managed `cc-env` flows.
+
+## Worktree Readiness Smoke
+
+```bash
+# Terminal 1, worktree A
+CC_INSTANCE_ID=smoke-a npm run dev:web
+
+# Terminal 2, worktree B
+CC_INSTANCE_ID=smoke-b npm run dev:web
+```
+
+Verify each `.cloud-code/instances/<id>/launch.json` has distinct app, env, and client ports; `curl` each app/env `healthUrl` and confirm the `instanceId`; open each manifest `client` URL in the browser pane or a normal browser.
 
 ## External Desktop Debugging
 
@@ -54,6 +76,8 @@ Do not add new default workflows that require Docker, Postgres, sandbox image bu
 
 - Desktop-managed app log: `.cloud-code/instances/<id>/logs/app.log`
 - Desktop-managed cc-env log: `.cloud-code/instances/<id>/logs/cc-env.log`
+- Browser/dev client log: `.cloud-code/instances/<id>/logs/client.log`
+- Local launcher manifest: `.cloud-code/instances/<id>/launch.json`
 - Desktop harness log when set: `CC_DESKTOP_TEST_LOG`
 - Legacy local cc-env launchd log: `~/.local/share/cc-env/state/log/cc-env.log`
 - Legacy opencode logs: `~/.local/share/cc-env/state/xdg/data/opencode/log/`

@@ -9,7 +9,8 @@ export type DesktopPairingResult = {
 export async function ensureDesktopPairing(config: InstanceRuntimeConfig): Promise<DesktopPairingResult> {
   const envId = `local-${config.instanceId}`
   const [existing, envHealth] = await Promise.all([getRegisteredEnv(config, envId), getEnvHealth(config)])
-  if (existing?.envToken && envHealth?.identityReady && await tokenIsValid(config.env.url, existing.envToken)) {
+  if (envHealth) assertMatchingEnvHealth(config, envHealth)
+  if (existing?.envToken && envHealth?.identityReady && await tokenIsValid(config.env.url, existing.envToken, config.instanceId)) {
     return { envId, envToken: existing.envToken, reused: true }
   }
 
@@ -19,13 +20,19 @@ export async function ensureDesktopPairing(config: InstanceRuntimeConfig): Promi
   return { envId, envToken, reused: false }
 }
 
-async function getEnvHealth(config: InstanceRuntimeConfig): Promise<{ identityReady?: boolean } | null> {
+async function getEnvHealth(config: InstanceRuntimeConfig): Promise<{ identityReady?: boolean; instanceId?: string } | null> {
   try {
     const response = await fetch(`${config.env.url}/healthz`)
     if (!response.ok) return null
-    return (await response.json()) as { identityReady?: boolean }
+    return (await response.json()) as { identityReady?: boolean; instanceId?: string }
   } catch {
     return null
+  }
+}
+
+function assertMatchingEnvHealth(config: InstanceRuntimeConfig, health: { instanceId?: string }): void {
+  if (health.instanceId !== config.instanceId) {
+    throw new Error(`env service instance mismatch: expected ${config.instanceId}, got ${health.instanceId ?? 'missing'}`)
   }
 }
 
@@ -45,6 +52,7 @@ async function registerEnv(config: InstanceRuntimeConfig, envId: string, envToke
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       id: envId,
+      instanceId: config.instanceId,
       label: config.env.label,
       url: config.env.url,
       envToken,
@@ -54,12 +62,14 @@ async function registerEnv(config: InstanceRuntimeConfig, envId: string, envToke
   if (!response.ok) throw new Error(`local env registration failed: ${response.status}`)
 }
 
-async function tokenIsValid(envUrl: string, envToken: string): Promise<boolean> {
+async function tokenIsValid(envUrl: string, envToken: string, instanceId: string): Promise<boolean> {
   try {
     const response = await fetch(`${envUrl}/auth/check`, {
       headers: { authorization: `Bearer ${envToken}` },
     })
-    return response.ok
+    if (!response.ok) return false
+    const body = await response.json() as { ok?: boolean; instanceId?: string }
+    return body.ok === true && body.instanceId === instanceId
   } catch {
     return false
   }

@@ -1,11 +1,16 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-code-test-'))
+const tmpDir = typeof os.tmpdir === 'function' && typeof fs.mkdtempSync === 'function'
+  ? fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-code-test-'))
+  : `/tmp/cloud-code-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
 process.env.DATA_DIR = tmpDir
-process.env.APP_SQLITE_PATH = process.env.APP_SQLITE_PATH ?? path.join(tmpDir, 'app.db')
+process.env.APP_SQLITE_PATH = process.env.APP_SQLITE_PATH ?? (
+  typeof path.join === 'function' ? path.join(tmpDir, 'app.db') : `${tmpDir}/app.db`
+)
+process.env.CC_INSTANCE_ID = 'default'
 process.env.NODE_ENV = 'test'
 process.env.CC_SERVICE_CREDENTIAL =
   process.env.CC_SERVICE_CREDENTIAL ?? 'test-service-credential-min-16-chars'
@@ -13,7 +18,7 @@ process.env.CC_SERVICE_CREDENTIAL =
 // Best-effort cleanup after the suite.
 process.on('exit', () => {
   try {
-    fs.rmSync(tmpDir, { recursive: true, force: true })
+    if (typeof fs.rmSync === 'function') fs.rmSync(tmpDir, { recursive: true, force: true })
   } catch {
     // ignore
   }

@@ -14,6 +14,7 @@ import { ShellsDropdown } from './env/shell/dropdowns'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
 import { BrowserTabContent } from './env/tabs/browser-tab'
+import { PreviewTabContent } from './env/tabs/preview-tab'
 import type { PaneContent } from './env/shell/tab-state'
 import {
   createWorkspaceEnvClientResolver,
@@ -31,6 +32,7 @@ import {
 } from './workspace/tab-state'
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { WorkspaceTabBar } from './workspace/workspace-tab-bar'
+import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 
@@ -389,34 +391,16 @@ function useWorkspaceOpenPane(dispatchWorkspaceState: WorkspaceUiDispatch) {
     (content: PaneContent, options?: { title?: string; activate?: boolean }) => {
       const envId = ctx.localEnvTarget?.env.id
       if (!envId && content.type !== 'browser') return
-      const id = makeWorkspaceTabId(content.type, envId)
-      if (content.type === 'shell') {
-        dispatchWorkspaceState({
-          type: 'openTab',
-          tab: { id, type: 'shell', envId: envId!, shellId: content.shellId, title: options?.title ?? `shell ${content.shellId.slice(-8)}` },
-          activate: options?.activate,
-        })
-      } else if (content.type === 'file') {
-        dispatchWorkspaceState({
-          type: 'openTab',
-          tab: { id, type: 'file', envId: envId!, path: content.path, title: options?.title ?? content.path.split('/').pop() ?? content.path },
-          activate: options?.activate,
-        })
-      } else if (content.type === 'browser') {
-        if (!content.url) return
-        dispatchWorkspaceState({
-          type: 'openTab',
-          tab: { id, type: 'browser', url: content.url, title: options?.title ?? content.url },
-          activate: options?.activate,
-        })
-      }
+      const tab = workspaceTabFromPaneContent(content, envId, options)
+      if (!tab) return
+      dispatchWorkspaceState({
+        type: 'openTab',
+        tab,
+        activate: options?.activate,
+      })
     },
     [ctx.localEnvTarget?.env.id, dispatchWorkspaceState],
   )
-}
-
-function makeWorkspaceTabId(type: string, envId?: string): string {
-  return `${type}-${envId ?? 'browser'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function WorkspaceEnvTargetProvider({ children }: { children: ReactNode }) {
@@ -624,7 +608,13 @@ function WorkspaceTabContent({
       </div>
     )
   }
-  return <span>{workspaceTabLabel(tab)}</span>
+  return (
+    <div className="h-full min-h-0 w-full">
+      <WorkspaceEnvTargetProvider>
+        <PreviewTabContent port={tab.port} />
+      </WorkspaceEnvTargetProvider>
+    </div>
+  )
 }
 
 function closeWorkspaceTab(tab: WorkspaceTab, dispatchWorkspaceState: WorkspaceUiDispatch): void {

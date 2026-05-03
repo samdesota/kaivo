@@ -94,8 +94,12 @@ describe('BrowserPane', () => {
 
   it('renders an unavailable state outside Electron', () => {
     api.isAvailable.mockReturnValue(false)
-    const view = render(<BrowserPane paneId="pane-1" active={true} />)
+    const view = render(<BrowserPane paneId="pane-1" active={true} url="localhost:5173" />)
     expect(view.getByText('Browser pane unavailable')).toBeTruthy()
+    expect(view.getByText('http://localhost:5173')).toBeTruthy()
+    const link = view.getByRole('link', { name: 'Open externally' }) as HTMLAnchorElement
+    expect(link.href).toBe('http://localhost:5173/')
+    expect(api.createTab).not.toHaveBeenCalled()
   })
 
   it('renders controls and drives browser navigation', async () => {

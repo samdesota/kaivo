@@ -82,6 +82,9 @@ describe('resolveInstanceRuntimeConfig', () => {
         CC_ENV_WORKING_DIR: '/tmp/custom-workspaces',
         CC_ENV_LABEL: 'Custom Env',
         CC_ENV_LOG_PATH: '/tmp/custom-env.log',
+        CC_CLIENT_PORT: '5999',
+        CC_CLIENT_URL: 'http://localhost:5999/client',
+        CC_CLIENT_LOG_PATH: '/tmp/custom-client.log',
       },
       { cwd: '/tmp/cloud-code-a', homeDir: '/tmp/home' },
     )
@@ -101,6 +104,10 @@ describe('resolveInstanceRuntimeConfig', () => {
     expect(config.env.workingDir).toBe('/tmp/custom-workspaces')
     expect(config.env.label).toBe('Custom Env')
     expect(config.env.logPath).toBe('/tmp/custom-env.log')
+    expect(config.client.host).toBe('localhost')
+    expect(config.client.port).toBe(5999)
+    expect(config.client.url).toBe('http://localhost:5999/client')
+    expect(config.client.logPath).toBe('/tmp/custom-client.log')
   })
 
   it('uses packaged app identity for production defaults', () => {
