@@ -15,11 +15,14 @@ interface ShellRow {
 export function ShellTabContent({
   shellId,
   onTerminated,
+  workspaceId,
 }: {
   shellId: string
   onTerminated?: () => void
+  workspaceId?: string
 }) {
-  const shells = envTrpc.shell.list.useQuery(undefined, { refetchInterval: 5_000 })
+  const shellListInput = workspaceId ? { workspaceId } : undefined
+  const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
   const utils = envTrpc.useUtils()
   const dispose = envTrpc.shell.dispose.useMutation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -33,7 +36,7 @@ export function ShellTabContent({
     setErr(null)
     try {
       await dispose.mutateAsync({ id: shellId })
-      await utils.shell.list.invalidate()
+      await utils.shell.list.invalidate(shellListInput)
       setMenuOpen(false)
       onTerminated?.()
     } catch (e) {

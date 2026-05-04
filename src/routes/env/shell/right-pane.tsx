@@ -15,14 +15,15 @@ import {
 interface RightPaneProps {
   state: RightPaneState
   dispatch: React.Dispatch<RightPaneAction>
+  workspaceId?: string
 }
 
 interface ShellRow {
   id: string
 }
 
-export function RightPane({ state, dispatch }: RightPaneProps) {
-  const shells = envTrpc.shell.list.useQuery(undefined, { refetchInterval: 5_000 })
+export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
+  const shells = envTrpc.shell.list.useQuery(workspaceId ? { workspaceId } : undefined, { refetchInterval: 5_000 })
   const tabsRef = useRef(state.tabs)
 
   tabsRef.current = state.tabs
@@ -108,7 +109,7 @@ export function RightPane({ state, dispatch }: RightPaneProps) {
               aria-hidden={!active}
               className={'h-full min-h-0 ' + (active ? 'block' : 'hidden')}
             >
-              <TabContent tabId={t.id} content={t.content} active={active} dispatch={dispatch} />
+              <TabContent tabId={t.id} content={t.content} active={active} dispatch={dispatch} workspaceId={workspaceId} />
             </div>
           )
         })}
@@ -122,13 +123,15 @@ function TabContent({
   content,
   active,
   dispatch,
+  workspaceId,
 }: {
   tabId: string
   content: PaneContent
   active: boolean
   dispatch: React.Dispatch<RightPaneAction>
+  workspaceId?: string
 }) {
-  if (content.type === 'shell') return <ShellTabContent shellId={content.shellId} />
+  if (content.type === 'shell') return <ShellTabContent shellId={content.shellId} workspaceId={workspaceId} />
   if (content.type === 'file') return <FileTabContent path={content.path} absolute={content.absolute} />
   if (content.type === 'preview') return <PreviewTabContent port={content.port} />
   if (content.type === 'browser') {

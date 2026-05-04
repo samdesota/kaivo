@@ -23,10 +23,12 @@ interface PortRow {
 interface ShellsDropdownProps {
   onOpen: (content: PaneContent) => void
   align?: 'left' | 'right'
+  workspaceId?: string
 }
 
-export function ShellsDropdown({ onOpen, align = 'left' }: ShellsDropdownProps) {
-  const shells = envTrpc.shell.list.useQuery(undefined, { refetchInterval: 5_000 })
+export function ShellsDropdown({ onOpen, align = 'left', workspaceId }: ShellsDropdownProps) {
+  const shellListInput = workspaceId ? { workspaceId } : undefined
+  const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
   const utils = envTrpc.useUtils()
   const dispose = envTrpc.shell.dispose.useMutation()
   const [error, setError] = useState<string | null>(null)
@@ -36,7 +38,7 @@ export function ShellsDropdown({ onOpen, align = 'left' }: ShellsDropdownProps) 
     setError(null)
     try {
       await dispose.mutateAsync({ id })
-      await utils.shell.list.invalidate()
+      await utils.shell.list.invalidate(shellListInput)
     } catch (err) {
       setError(extractTrpcMessage(err))
     }

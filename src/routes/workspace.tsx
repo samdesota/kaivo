@@ -255,6 +255,7 @@ function WorkspaceShell({
           onCloseTab={closeActiveTab}
           hasActiveTab={ctx.uiState.workspaceTabs.length > 0}
           activeSessionId={ctx.uiState.activeAgentSessionId}
+          workspaceId={ctx.workspace.id}
         />
       </WorkspaceEnvTargetProvider>
       <WorkspaceBottomBar />
@@ -269,6 +270,7 @@ function WorkspaceHeaderActions({
   onCommandPalette: () => void
   onOpenPane: (content: PaneContent, options?: { title?: string; activate?: boolean }) => void
 }) {
+  const ctx = useWorkspaceContext()
   return (
     <>
       <button
@@ -278,7 +280,7 @@ function WorkspaceHeaderActions({
         ⌘K
       </button>
       <WorkspaceEnvTargetProvider>
-        <ShellsDropdown align="right" onOpen={(content) => onOpenPane(content)} />
+        <ShellsDropdown align="right" workspaceId={ctx.workspace.id} onOpen={(content) => onOpenPane(content)} />
       </WorkspaceEnvTargetProvider>
       <EnvStatusLink />
       <Link to="/settings" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
@@ -575,11 +577,12 @@ function WorkspaceTabContent({
   onBrowserTabId: (browserTabId: string) => void
   onTitleChange: (title: string) => void
 }) {
+  const ctx = useWorkspaceContext()
   if (tab.type === 'shell') {
     return (
       <div className="h-full min-h-0 w-full">
         <WorkspaceEnvTargetProvider>
-          <ShellTabContent shellId={tab.shellId} onTerminated={onClose} />
+          <ShellTabContent shellId={tab.shellId} workspaceId={ctx.workspace.id} onTerminated={onClose} />
         </WorkspaceEnvTargetProvider>
       </div>
     )

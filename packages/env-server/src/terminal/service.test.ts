@@ -133,7 +133,28 @@ vi.mock('node-pty', () => ({
 }))
 
 vi.mock('node:child_process', () => ({
-  spawn: (_command: string, _args: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+  spawn: (_command: string, args: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+    if (args[0] === '-ilc') {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter
+        stderr: EventEmitter
+      }
+      child.stdout = new EventEmitter()
+      child.stderr = new EventEmitter()
+      queueMicrotask(() => {
+        child.stdout.emit(
+          'data',
+          Buffer.from(
+            `_CLOUD_CODE_SHELL_ENV_DELIMITER_${Object.entries(loginShellEnv)
+              .map(([key, value]) => `${key}=${value}`)
+              .join('\n')}\n_CLOUD_CODE_SHELL_ENV_DELIMITER_`,
+          ),
+        )
+        child.emit('exit', 0, null)
+      })
+      return child
+    }
+
     runOnceSpawnedEnvs.push(opts.env)
     const child = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter
@@ -149,10 +170,6 @@ vi.mock('node:child_process', () => ({
     queueMicrotask(() => child.emit('exit', 0, null))
     return child
   },
-}))
-
-vi.mock('shell-env', () => ({
-  shellEnv: () => Promise.resolve(loginShellEnv),
 }))
 
 vi.mock('../logger.js', () => ({

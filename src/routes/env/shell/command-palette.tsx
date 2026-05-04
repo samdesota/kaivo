@@ -38,6 +38,7 @@ export function CommandPalette({
   onCloseTab,
   hasActiveTab,
   activeSessionId,
+  workspaceId,
 }: {
   open: boolean
   onClose: () => void
@@ -47,6 +48,7 @@ export function CommandPalette({
   /** Currently focused agent session — its workingDir becomes the cwd
    * for any shell created here. */
   activeSessionId?: string | null
+  workspaceId?: string
 }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -60,7 +62,8 @@ export function CommandPalette({
     }
   }, [open])
 
-  const shells = envTrpc.shell.list.useQuery(undefined, {
+  const workspaceInput = useMemo(() => workspaceId ? { workspaceId } : undefined, [workspaceId])
+  const shells = envTrpc.shell.list.useQuery(workspaceInput, {
     enabled: open,
     staleTime: 5_000,
   })
@@ -70,7 +73,7 @@ export function CommandPalette({
   })
   const utils = envTrpc.useUtils()
   const createShell = envTrpc.shell.create.useMutation()
-  const sessions = envTrpc.agent.sessionList.useQuery(undefined, {
+  const sessions = envTrpc.agent.sessionList.useQuery(workspaceInput, {
     enabled: open,
     staleTime: 5_000,
   })
@@ -92,9 +95,9 @@ export function CommandPalette({
       run: async () => {
         try {
           const info = (await createShell.mutateAsync(
-            activeCwd ? { cwd: activeCwd } : {},
+            { ...workspaceInput, ...(activeCwd ? { cwd: activeCwd } : {}) },
           )) as ShellCreateResult
-          await utils.shell.list.invalidate()
+          await utils.shell.list.invalidate(workspaceInput)
           onOpenContent({ type: 'shell', shellId: info.id })
         } catch (e) {
           console.error('new shell failed', extractTrpcMessage(e))
@@ -142,7 +145,7 @@ export function CommandPalette({
     }
 
     return out
-  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, utils, createShell, activeCwd])
+  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, utils, createShell, activeCwd, workspaceInput])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

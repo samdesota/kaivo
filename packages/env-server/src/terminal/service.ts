@@ -2,7 +2,6 @@ import { createRequire } from 'node:module'
 import os from 'node:os'
 import { spawn as ptySpawn, type IPty } from 'node-pty'
 import { spawn as procSpawn, type ChildProcess } from 'node:child_process'
-import { shellEnv } from 'shell-env'
 import type {
   Terminal as HeadlessTerminalType,
   ITerminalOptions,
@@ -74,24 +73,73 @@ const DEFAULT_ROWS = 32
 const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
 const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
 const DEFAULT_LOGIN_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+const ENV_CAPTURE_DELIMITER = '_CLOUD_CODE_SHELL_ENV_DELIMITER_'
 
-async function userShellEnv(extra: Record<string, string> = {}): Promise<NodeJS.ProcessEnv> {
-  try {
-    return { ...(await shellEnv()), ...extra }
-  } catch (err) {
-    logger.warn({ err }, 'failed to read login shell environment')
-  }
-
+function baseLoginEnv(): NodeJS.ProcessEnv {
   const user = os.userInfo()
   const shell = (user as { shell?: string }).shell ?? '/bin/bash'
-  const env: NodeJS.ProcessEnv = {
+  return {
+    DISABLE_AUTO_UPDATE: 'true',
     HOME: user.homedir,
     LOGNAME: user.username,
     PATH: DEFAULT_LOGIN_PATH,
     SHELL: shell,
     USER: user.username,
+    ZSH_TMUX_AUTOSTART: 'false',
+    ZSH_TMUX_AUTOSTARTED: 'true',
   }
+}
+
+async function userShellEnv(extra: Record<string, string> = {}): Promise<NodeJS.ProcessEnv> {
+  const env = baseLoginEnv()
+  try {
+    return { ...(await captureLoginShellEnv(env)), ...extra }
+  } catch (err) {
+    logger.warn({ err }, 'failed to read login shell environment')
+  }
+
   return { ...env, ...extra }
+}
+
+async function captureLoginShellEnv(env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+  const shell = env.SHELL ?? '/bin/bash'
+  const script = `printf '%s' '${ENV_CAPTURE_DELIMITER}'; command env; printf '%s' '${ENV_CAPTURE_DELIMITER}'; exit`
+
+  return await new Promise((resolve, reject) => {
+    const child = procSpawn(shell, ['-ilc', script], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8')
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8')
+    })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`login shell env probe exited ${code}: ${stderr.trim()}`))
+        return
+      }
+      resolve(parseCapturedEnv(stdout))
+    })
+  })
+}
+
+function parseCapturedEnv(output: string): NodeJS.ProcessEnv {
+  const captured = output.split(ENV_CAPTURE_DELIMITER)[1]
+  if (!captured) throw new Error('login shell env probe returned no environment')
+  const env: NodeJS.ProcessEnv = {}
+  for (const line of captured.split('\n')) {
+    if (!line) continue
+    const index = line.indexOf('=')
+    if (index <= 0) continue
+    env[line.slice(0, index)] = line.slice(index + 1)
+  }
+  return env
 }
 
 export class ShellError extends Error {
