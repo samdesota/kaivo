@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type AgentRow = {
   id: string
@@ -23,11 +23,17 @@ type ShellRow = {
 const agentRows: AgentRow[] = []
 const shellRows: ShellRow[] = []
 const spawnedCwds: string[] = []
+const spawnedEnvs: Array<NodeJS.ProcessEnv | undefined> = []
+const runOnceSpawnedEnvs: Array<NodeJS.ProcessEnv | undefined> = []
+let loginShellEnv: NodeJS.ProcessEnv = {}
 
 function resetState() {
   agentRows.length = 0
   shellRows.length = 0
   spawnedCwds.length = 0
+  spawnedEnvs.length = 0
+  runOnceSpawnedEnvs.length = 0
+  loginShellEnv = { HOME: '/Users/tester', PATH: '/login/bin:/usr/bin', SHELL: '/bin/zsh', USER: 'tester' }
 }
 
 vi.mock('drizzle-orm', () => ({
@@ -106,8 +112,9 @@ vi.mock('../db/client.js', () => ({
 }))
 
 vi.mock('node-pty', () => ({
-  spawn: (_shell: string, _args: string[], opts: { cwd: string }) => {
+  spawn: (_shell: string, _args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv }) => {
     spawnedCwds.push(opts.cwd)
+    spawnedEnvs.push(opts.env)
     const em = new EventEmitter()
     return {
       onData: (cb: (s: string) => void) => {
@@ -125,6 +132,29 @@ vi.mock('node-pty', () => ({
   },
 }))
 
+vi.mock('node:child_process', () => ({
+  spawn: (_command: string, _args: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+    runOnceSpawnedEnvs.push(opts.env)
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter
+      stderr: EventEmitter
+      kill: () => boolean
+    }
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => {
+      child.emit('exit', 130, null)
+      return true
+    }
+    queueMicrotask(() => child.emit('exit', 0, null))
+    return child
+  },
+}))
+
+vi.mock('shell-env', () => ({
+  shellEnv: () => Promise.resolve(loginShellEnv),
+}))
+
 vi.mock('../logger.js', () => ({
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 }))
@@ -132,6 +162,10 @@ vi.mock('../logger.js', () => ({
 beforeEach(() => {
   resetState()
   vi.resetModules()
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 describe('terminal service workspace shells', () => {
@@ -168,5 +202,45 @@ describe('terminal service workspace shells', () => {
 
     expect(terminalService.list({ workspaceId: 'workspace-a' }).map((s) => s.cwd)).toEqual(['/tmp/a'])
     expect(terminalService.list()).toHaveLength(3)
+  })
+
+  it('uses login shell env for persistent shells instead of server runtime env', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('CC_IDENTITY_URL', 'http://127.0.0.1:3100')
+    vi.stubEnv('CC_WORKING_DIR', '/internal/workspace')
+    vi.stubEnv('PATH', '/server/bin')
+    const { terminalService } = await import('./service.js')
+
+    await terminalService.create({ cwd: '/tmp/project' })
+
+    expect(spawnedEnvs[0]).toMatchObject({
+      HOME: '/Users/tester',
+      PATH: '/login/bin:/usr/bin',
+      SHELL: '/bin/zsh',
+      TERM: 'xterm-256color',
+    })
+    expect(spawnedEnvs[0]).not.toHaveProperty('NODE_ENV')
+    expect(spawnedEnvs[0]).not.toHaveProperty('CC_IDENTITY_URL')
+    expect(spawnedEnvs[0]).not.toHaveProperty('CC_WORKING_DIR')
+  })
+
+  it('uses login shell env for run-once shells instead of server runtime env', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('CC_IDENTITY_URL', 'http://127.0.0.1:3100')
+    vi.stubEnv('CC_WORKING_DIR', '/internal/workspace')
+    vi.stubEnv('PATH', '/server/bin')
+    const { terminalService } = await import('./service.js')
+
+    const handle = terminalService.runOnceStream({ cmd: 'echo hi', cwd: '/tmp/project' })
+    await handle.exitPromise
+
+    expect(runOnceSpawnedEnvs[0]).toMatchObject({
+      HOME: '/Users/tester',
+      PATH: '/login/bin:/usr/bin',
+      SHELL: '/bin/zsh',
+    })
+    expect(runOnceSpawnedEnvs[0]).not.toHaveProperty('NODE_ENV')
+    expect(runOnceSpawnedEnvs[0]).not.toHaveProperty('CC_IDENTITY_URL')
+    expect(runOnceSpawnedEnvs[0]).not.toHaveProperty('CC_WORKING_DIR')
   })
 })

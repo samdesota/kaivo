@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module'
+import os from 'node:os'
 import { spawn as ptySpawn, type IPty } from 'node-pty'
 import { spawn as procSpawn, type ChildProcess } from 'node:child_process'
+import { shellEnv } from 'shell-env'
 import type {
   Terminal as HeadlessTerminalType,
   ITerminalOptions,
@@ -71,6 +73,26 @@ const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 32
 const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
 const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
+const DEFAULT_LOGIN_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+
+async function userShellEnv(extra: Record<string, string> = {}): Promise<NodeJS.ProcessEnv> {
+  try {
+    return { ...(await shellEnv()), ...extra }
+  } catch (err) {
+    logger.warn({ err }, 'failed to read login shell environment')
+  }
+
+  const user = os.userInfo()
+  const shell = (user as { shell?: string }).shell ?? '/bin/bash'
+  const env: NodeJS.ProcessEnv = {
+    HOME: user.homedir,
+    LOGNAME: user.username,
+    PATH: DEFAULT_LOGIN_PATH,
+    SHELL: shell,
+    USER: user.username,
+  }
+  return { ...env, ...extra }
+}
 
 export class ShellError extends Error {
   constructor(
@@ -172,13 +194,14 @@ class TerminalService {
     const serialize = new SerializeAddon()
     term.loadAddon(serialize as unknown as ITerminalAddon)
 
-    const shell = process.env.SHELL ?? '/bin/bash'
+    const env = await userShellEnv({ TERM: 'xterm-256color' })
+    const shell = env.SHELL ?? '/bin/bash'
     const pty = ptySpawn(shell, ['-l'], {
       name: 'xterm-256color',
       cols,
       rows,
       cwd,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env,
     })
 
     const now = new Date()
@@ -434,6 +457,7 @@ class TerminalService {
         })
         .run()
 
+      const env = await userShellEnv()
       return await new Promise<{ exitCode: number; truncated: boolean }>((resolve, reject) => {
         if (handle.disposed) {
           resolve({ exitCode: 130, truncated: false })
@@ -442,7 +466,7 @@ class TerminalService {
         const child = procSpawn('bash', ['-lc', opts.cmd], {
           cwd,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env },
+          env,
         })
         handle.child = child
 
