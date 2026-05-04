@@ -3,7 +3,19 @@ import '@fastify/cookie'
 import { env, isProd } from '../env.js'
 import { ABSOLUTE_TTL_MS } from './service.js'
 
-export const SESSION_COOKIE = 'ccenv_sid'
+const SESSION_COOKIE_BASE = 'ccenv_sid'
+
+export const SESSION_COOKIE = sessionCookieName(env.CC_INSTANCE_ID)
+
+export function sessionCookieName(instanceId: string): string {
+  if (env.COOKIE_DOMAIN) return SESSION_COOKIE_BASE
+  const suffix = instanceId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  return suffix && suffix !== 'default' ? `${SESSION_COOKIE_BASE}_${suffix}` : SESSION_COOKIE_BASE
+}
 
 export function setSessionCookie(reply: FastifyReply, sessionId: string, expiresAt: Date): void {
   reply.setCookie(SESSION_COOKIE, sessionId, {

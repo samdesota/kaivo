@@ -29,7 +29,7 @@ export function ShellChrome({
 }) {
   return (
     <div className={`flex flex-col bg-neutral-950 text-neutral-100 ${className}`}>
-      <header className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
+      <header className="window-drag flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
         <div className="flex min-w-0 items-center gap-3">
           {backTo && (
             <Link to={backTo} className="text-brand-500 hover:underline" title="Back to dashboard">

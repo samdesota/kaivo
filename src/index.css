@@ -60,6 +60,19 @@ body.overlay-layer-document,
   background: transparent;
 }
 
+.window-drag {
+  -webkit-app-region: drag;
+}
+
+.window-drag a,
+.window-drag button,
+.window-drag input,
+.window-drag select,
+.window-drag textarea,
+.window-drag [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
 .no-scrollbar {
   scrollbar-width: none;
 }

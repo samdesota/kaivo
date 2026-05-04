@@ -108,6 +108,7 @@ export function FormError({ children }: { children: ReactNode }) {
 export function CenteredLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-neutral-950 via-neutral-900 to-black px-4">
+      <div className="window-drag fixed top-0 right-0 left-0 h-10" />
       {children}
     </div>
   )

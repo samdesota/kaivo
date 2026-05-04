@@ -54,6 +54,7 @@ function RootLayout() {
   if (status.isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-neutral-950 text-neutral-500">
+        <div className="window-drag fixed top-0 right-0 left-0 h-10" />
         Loading…
       </div>
     )
