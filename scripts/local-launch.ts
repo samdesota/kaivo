@@ -5,11 +5,15 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import * as runtime from '../packages/cloud-code-desktop/src/instance-runtime.ts'
 import type { InstanceRuntimeConfig, RuntimePortName } from '../packages/cloud-code-desktop/src/instance-runtime'
+import * as desktopPairing from '../packages/cloud-code-desktop/src/desktop-pairing.ts'
 import { runDevSeed } from './seed-dev'
 
 const runtimeModule = runtime as typeof runtime & { default?: typeof runtime }
 const resolveRuntimeConfig = runtime.resolveInstanceRuntimeConfig ?? runtimeModule.default?.resolveInstanceRuntimeConfig
 if (!resolveRuntimeConfig) throw new Error('Unable to load instance runtime resolver')
+const desktopPairingModule = desktopPairing as typeof desktopPairing & { default?: typeof desktopPairing }
+const ensureDesktopPairing = desktopPairing.ensureDesktopPairing ?? desktopPairingModule.default?.ensureDesktopPairing
+if (!ensureDesktopPairing) throw new Error('Unable to load desktop pairing helper')
 
 type LaunchMode = 'browser' | 'desktop'
 type LaunchServiceName = RuntimePortName
@@ -84,6 +88,7 @@ export type LocalLaunchDeps = {
     options: RequiredLocalLaunchOptions,
   ) => Promise<void>
   seedApp?: (config: InstanceRuntimeConfig, options: RequiredLocalLaunchOptions) => Promise<void>
+  pairServices?: (config: InstanceRuntimeConfig, options: RequiredLocalLaunchOptions) => Promise<void>
   writeManifest?: (config: InstanceRuntimeConfig, manifest: LaunchManifest) => Promise<void>
 }
 
@@ -111,6 +116,7 @@ export async function runLocalDevLauncher(
       services = await (deps.startServices ?? startServices)(config, resolvedOptions)
       await writeManifest(config, buildLaunchManifest(config, resolvedOptions, services, 'starting'), deps)
       await (deps.waitForServices ?? waitForServices)(config, services, resolvedOptions)
+      await (deps.pairServices ?? pairServices)(config, resolvedOptions)
 
       const manifest = buildLaunchManifest(config, resolvedOptions, services, 'healthy')
       await writeManifest(config, manifest, deps)
@@ -147,6 +153,10 @@ async function seedApp(config: InstanceRuntimeConfig, options: RequiredLocalLaun
       CC_SERVICE_CREDENTIAL: options.env.CC_SERVICE_CREDENTIAL ?? 'local-dev-seed-service-credential',
     },
   })
+}
+
+async function pairServices(config: InstanceRuntimeConfig): Promise<void> {
+  await ensureDesktopPairing(config)
 }
 
 export async function resolveFreeRuntimeConfig(

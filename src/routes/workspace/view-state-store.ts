@@ -44,7 +44,9 @@ export function useWorkspaceViewStateStore(workspaceId: string) {
       },
     })
     return createCollection(options as never) as unknown as Collection<WorkspaceViewStateRecord, string>
-  }, [queryClient, trpcUtils.client, workspaceId])
+    // Do not include the tRPC proxy client in deps: React dev instrumentation
+    // introspects dependency objects and tRPC proxies execute on property reads.
+  }, [queryClient, workspaceId])
 
   const live = useLiveQuery(() => collection, [collection])
   const viewState = live.data?.[0]

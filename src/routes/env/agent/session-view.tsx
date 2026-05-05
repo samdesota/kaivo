@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import { envTrpc } from '../../../env-trpc'
 import { handleAgentUiOpenPaneEvent } from '../../../lib/agent-ui-open-pane'
 import { extractTrpcMessage } from '../../../lib/utils'
@@ -22,6 +21,7 @@ import { SessionTabs } from './session-tabs'
 import { EmptySessionState } from './empty-session-state'
 import { ModelPicker, ReasoningEffortPicker } from './model-picker'
 import { selectActiveWorkspaceSession } from './workspace-session-state'
+import { BottomAnchoredLazyList } from './bottom-anchored-lazy-list'
 
 type Action =
   | { type: 'reset' }
@@ -511,84 +511,6 @@ function SessionPane({
     return out
   }, [parts, state.messages, state.childOrder, state.childTranscripts])
 
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const rowVirtualizer = useVirtualizer({
-    count: renderables.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 80,
-    overscan: 8,
-    getItemKey: (i) => renderables[i]!.part.id,
-  })
-
-  const stickToBottom = useRef(true)
-  const scrollTimers = useRef<Array<ReturnType<typeof setTimeout>>>([])
-  const scrollFrames = useRef<number[]>([])
-  const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    if (renderables.length > 0) {
-      rowVirtualizer.scrollToIndex(renderables.length - 1, { align: 'end' })
-    }
-    el.scrollTop = el.scrollHeight
-  }, [renderables.length, rowVirtualizer])
-
-  const scheduleScrollToBottom = useCallback(() => {
-    for (const id of scrollFrames.current) cancelAnimationFrame(id)
-    for (const id of scrollTimers.current) clearTimeout(id)
-    scrollFrames.current = []
-    scrollTimers.current = []
-
-    const tick = () => {
-      if (stickToBottom.current) scrollToBottom()
-    }
-    scrollFrames.current.push(requestAnimationFrame(tick))
-    scrollFrames.current.push(requestAnimationFrame(() => requestAnimationFrame(tick)))
-    for (const delay of [50, 150, 350]) {
-      scrollTimers.current.push(setTimeout(tick, delay))
-    }
-  }, [scrollToBottom])
-
-  useEffect(() => {
-    return () => {
-      for (const id of scrollFrames.current) cancelAnimationFrame(id)
-      for (const id of scrollTimers.current) clearTimeout(id)
-    }
-  }, [])
-
-  useEffect(() => {
-    stickToBottom.current = true
-    scheduleScrollToBottom()
-  }, [sessionId, scheduleScrollToBottom])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    function onScroll() {
-      const atBottom = el!.scrollHeight - el!.scrollTop - el!.clientHeight < 80
-      stickToBottom.current = atBottom
-    }
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
-  }, [])
-
-  const totalSize = rowVirtualizer.getTotalSize()
-  useEffect(() => {
-    if (!stickToBottom.current) return
-    scheduleScrollToBottom()
-  }, [totalSize, renderables.length, messages.isFetching, childMsgs.isFetching, scheduleScrollToBottom])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const resizeObserver = new ResizeObserver(() => {
-      if (stickToBottom.current) scheduleScrollToBottom()
-    })
-    resizeObserver.observe(el)
-    const content = el.firstElementChild
-    if (content) resizeObserver.observe(content)
-    return () => resizeObserver.disconnect()
-  }, [renderables.length, scheduleScrollToBottom])
-
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -606,41 +528,32 @@ function SessionPane({
           </div>
         )}
         <OpenStateProvider>
-          <div ref={scrollRef} className="flex-1 overflow-auto">
+          <div className="flex min-h-0 flex-1">
             {messages.isLoading && renderables.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-xs text-neutral-500">Loading…</div>
+              <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">Loading…</div>
             ) : messages.error ? (
-              <div className="p-4 text-xs text-red-400">
+              <div className="flex-1 p-4 text-xs text-red-400">
                 Failed to load transcript: {extractTrpcMessage(messages.error)}
               </div>
             ) : renderables.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-xs text-neutral-500">
+              <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">
                 No messages yet.
               </div>
             ) : (
-              <div
-                className="relative w-full"
-                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-              >
-                {rowVirtualizer.getVirtualItems().map((v) => {
-                  const { part, role, childTranscript } = renderables[v.index]!
-                  const prev = v.index > 0 ? renderables[v.index - 1] : null
+              <BottomAnchoredLazyList
+                resetKey={sessionId}
+                items={renderables}
+                itemKey={({ part }) => part.id}
+                renderItem={({ part, role, childTranscript }, index, isLast) => {
+                  const prev = index > 0 ? renderables[index - 1] : null
                   const isTool = part.type === 'tool'
                   const prevIsTool = prev?.part.type === 'tool'
-                  const isLast = v.index === renderables.length - 1
-                  const padTop = v.index === 0 ? 12 : isTool && prevIsTool ? 6 : 8
+                  const padTop = index === 0 ? 12 : isTool && prevIsTool ? 6 : 8
                   const padBottom = isLast ? 12 : 0
                   return (
                     <div
-                      key={v.key}
-                      ref={rowVirtualizer.measureElement}
-                      data-index={v.index}
-                      className="absolute left-0 right-0 px-4"
-                      style={{
-                        transform: `translateY(${v.start}px)`,
-                        paddingTop: padTop,
-                        paddingBottom: padBottom,
-                      }}
+                      className="px-4"
+                      style={{ paddingTop: padTop, paddingBottom: padBottom }}
                     >
                       <PartRenderer
                         part={part}
@@ -652,8 +565,8 @@ function SessionPane({
                       />
                     </div>
                   )
-                })}
-              </div>
+                }}
+              />
             )}
           </div>
         </OpenStateProvider>

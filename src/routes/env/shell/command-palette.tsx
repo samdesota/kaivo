@@ -72,7 +72,9 @@ export function CommandPalette({
     staleTime: 5_000,
   })
   const utils = envTrpc.useUtils()
+  const invalidateShellList = utils.shell.list.invalidate
   const createShell = envTrpc.shell.create.useMutation()
+  const createShellAsync = createShell.mutateAsync
   const sessions = envTrpc.agent.sessionList.useQuery(workspaceInput, {
     enabled: open,
     staleTime: 5_000,
@@ -94,10 +96,10 @@ export function CommandPalette({
       haystack: 'new shell terminal',
       run: async () => {
         try {
-          const info = (await createShell.mutateAsync(
+          const info = (await createShellAsync(
             { ...workspaceInput, ...(activeCwd ? { cwd: activeCwd } : {}) },
           )) as ShellCreateResult
-          await utils.shell.list.invalidate(workspaceInput)
+          await invalidateShellList(workspaceInput)
           onOpenContent({ type: 'shell', shellId: info.id })
         } catch (e) {
           console.error('new shell failed', extractTrpcMessage(e))
@@ -145,7 +147,7 @@ export function CommandPalette({
     }
 
     return out
-  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, utils, createShell, activeCwd, workspaceInput])
+  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, invalidateShellList, createShellAsync, activeCwd, workspaceInput])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

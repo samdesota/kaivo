@@ -84,6 +84,7 @@ describe('local launcher retry', () => {
           waitCalls += 1
           if (waitCalls === 1) throw new Error('app service instance mismatch: expected retry-test, got other')
         },
+        pairServices: async () => {},
         writeManifest: async (_config, manifest) => {
           writes.push({ status: manifest.servers[0]?.status ?? 'missing', ports: manifest.servers.map((server) => server.port) })
         },
@@ -128,6 +129,7 @@ describe('local launcher retry', () => {
           { name: 'client', pid: 303, stop: async () => {} },
         ],
         waitForServices: async () => {},
+        pairServices: async () => {},
         writeManifest: async () => {},
       },
     )
@@ -138,5 +140,44 @@ describe('local launcher retry', () => {
       OPENAI_API_KEY: 'launch-key',
       OPENAI_BASE_URL: 'http://localhost:11434/v1',
     })
+  })
+
+  it('pairs local app and env services before reporting healthy', async () => {
+    const writes: Array<{ status: string }> = []
+    let pairCalled = false
+
+    await runLocalDevLauncher(
+      {
+        cwd: '/tmp/cloud-code-a',
+        homeDir: '/tmp/home',
+        env: { NODE_ENV: 'development', CC_INSTANCE_ID: 'pair-launch-test' },
+        maxAttempts: 1,
+        waitMs: 1,
+        pollMs: 1,
+        now: () => new Date('2026-05-02T00:00:00.000Z'),
+        command: 'test-launch',
+        script: 'test',
+      },
+      {
+        seedApp: async () => {},
+        isPortAvailable: async () => true,
+        startServices: async () => [
+          { name: 'app', pid: 401, stop: async () => {} },
+          { name: 'env', pid: 402, stop: async () => {} },
+          { name: 'client', pid: 403, stop: async () => {} },
+        ],
+        waitForServices: async () => {},
+        pairServices: async () => {
+          expect(writes.map((write) => write.status)).toEqual(['starting'])
+          pairCalled = true
+        },
+        writeManifest: async (_config, manifest) => {
+          writes.push({ status: manifest.servers[0]?.status ?? 'missing' })
+        },
+      },
+    )
+
+    expect(pairCalled).toBe(true)
+    expect(writes.map((write) => write.status)).toEqual(['starting', 'healthy'])
   })
 })

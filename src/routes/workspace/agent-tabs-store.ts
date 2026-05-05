@@ -55,7 +55,9 @@ export function useWorkspaceAgentTabsStore(workspaceId: string | undefined) {
       },
     })
     return createCollection(options as never) as unknown as Collection<WorkspaceAgentTabRecord, string>
-  }, [collectionWorkspaceId, queryClient, trpcUtils.client, workspaceId])
+    // Do not include the tRPC proxy client in deps: React dev instrumentation
+    // introspects dependency objects and tRPC proxies execute on property reads.
+  }, [collectionWorkspaceId, queryClient, workspaceId])
 
   const live = useLiveQuery(() => collection, [collection])
   const records = (live.data ?? []).slice().sort(compareWorkspaceAgentTabRecords)

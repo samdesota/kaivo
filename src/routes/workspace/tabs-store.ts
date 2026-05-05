@@ -96,7 +96,9 @@ export function useWorkspaceTabsStore(workspaceId: string) {
       },
     })
     return createCollection(options as never) as unknown as Collection<WorkspaceTabRecord, string>
-  }, [queryClient, trpcUtils.client, workspaceId])
+    // Do not include the tRPC proxy client in deps: React dev instrumentation
+    // introspects dependency objects and tRPC proxies execute on property reads.
+  }, [queryClient, workspaceId])
 
   const live = useLiveQuery(() => collection, [collection])
   const records = (live.data ?? []).slice().sort(compareWorkspaceTabRecords)

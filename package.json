@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "npm run dev:desktop",
     "dev:web": "npm run dev:local",
-    "dev:local": "tsx scripts/local-launch.ts",
+    "dev:local": "tsx --env-file=.env scripts/local-launch.ts",
     "dev:server": "CC_SERVICE_CREDENTIAL=local-desktop-service-credential tsx watch --env-file=.env --tsconfig tsconfig.server.json server/index.ts",
     "dev:client": "vite",
     "build": "npm run build:client && npm run build:server",
@@ -54,7 +54,6 @@
     "@tanstack/react-db": "^0.1.83",
     "@tanstack/react-query": "^5.59.20",
     "@tanstack/react-router": "^1.114.27",
-    "@tanstack/react-virtual": "^3.13.24",
     "@trpc/client": "^11.0.0",
     "@trpc/react-query": "^11.0.0",
     "@trpc/server": "^11.0.0",
