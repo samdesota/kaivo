@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import path from 'node:path'
 
 // Preserve webframe's chrome API when this app supplies an additional preload.
-require('@samdesota/webframe/dist/preload/chrome.js')
+require(path.join(path.dirname(require.resolve('@samdesota/webframe')), 'preload/chrome.js'))
 
 contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   kind: 'skeleton',
