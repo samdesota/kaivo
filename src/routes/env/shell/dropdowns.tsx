@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { useEnv } from '../env-context'
 import { Popover } from './popover'
@@ -29,7 +31,7 @@ interface ShellsDropdownProps {
 export function ShellsDropdown({ onOpen, align = 'left', workspaceId }: ShellsDropdownProps) {
   const shellListInput = workspaceId ? { workspaceId } : undefined
   const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const dispose = envTrpc.shell.dispose.useMutation()
   const [error, setError] = useState<string | null>(null)
   const list = (shells.data ?? []) as ShellRow[]
@@ -38,7 +40,7 @@ export function ShellsDropdown({ onOpen, align = 'left', workspaceId }: ShellsDr
     setError(null)
     try {
       await dispose.mutateAsync({ id })
-      await utils.shell.list.invalidate(shellListInput)
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', shellListInput) })
     } catch (err) {
       setError(extractTrpcMessage(err))
     }

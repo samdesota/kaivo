@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
+import { trpcQueryKey } from '../lib/trpc-plain'
 import { extractTrpcMessage } from '../lib/utils'
 import { RepoCombobox } from './repo-combobox'
 
@@ -40,7 +42,7 @@ export function NewRepoConfigForm({
   const ghRepos = trpc.github.listOrgRepos.useQuery(undefined, {
     enabled: Boolean(ghStatus.data?.installed),
   })
-  const utils = trpc.useUtils()
+  const queryClient = useQueryClient()
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -60,7 +62,7 @@ export function NewRepoConfigForm({
               name: draft.name.trim() || undefined,
               ref: draft.ref.trim() || undefined,
             })
-      await utils.repoConfig.list.invalidate()
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.list') })
       onCreated(cfg.id)
     } catch (e2) {
       setErr(extractTrpcMessage(e2))
@@ -171,7 +173,7 @@ export function NewRepoConfigForm({
  * files (path + encrypted contents). Used by Settings and the clone modal.
  */
 export function RepoConfigEditor({ configId }: { configId: string }) {
-  const utils = trpc.useUtils()
+  const queryClient = useQueryClient()
   const cfg = trpc.repoConfig.get.useQuery({ id: configId })
   const files = trpc.repoConfig.listFiles.useQuery({ configId })
   const update = trpc.repoConfig.update.useMutation()
@@ -194,8 +196,8 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
     setErr(null)
     try {
       await update.mutateAsync({ id: configId, name, ref: ref || null })
-      await utils.repoConfig.get.invalidate({ id: configId })
-      await utils.repoConfig.list.invalidate()
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.get', { id: configId }) })
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.list') })
       setSavedAt(Date.now())
     } catch (e) {
       setErr(extractTrpcMessage(e))
@@ -206,7 +208,7 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
     if (!confirm(`Delete config "${cfg.data?.name}"? Cloned repos using it remain but lose the link.`)) return
     try {
       await remove.mutateAsync({ id: configId })
-      await utils.repoConfig.list.invalidate()
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.list') })
     } catch (e) {
       setErr(extractTrpcMessage(e))
     }
@@ -216,7 +218,7 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
     if (!confirm(`Remove file "${path}" from this config?`)) return
     try {
       await removeFile.mutateAsync({ configId, fileId })
-      await utils.repoConfig.listFiles.invalidate({ configId })
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.listFiles', { configId }) })
     } catch (e) {
       setErr(extractTrpcMessage(e))
     }
@@ -356,7 +358,7 @@ function FileEditor({
   initialPath?: string
   onClose: () => void
 }) {
-  const utils = trpc.useUtils()
+  const queryClient = useQueryClient()
   const existing = trpc.repoConfig.readFile.useQuery(
     fileId ? { configId, fileId } : { configId, fileId: '' },
     { enabled: Boolean(fileId) },
@@ -379,7 +381,7 @@ function FileEditor({
     setErr(null)
     try {
       await put.mutateAsync({ configId, fileId, path: path.trim(), contents })
-      await utils.repoConfig.listFiles.invalidate({ configId })
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.listFiles', { configId }) })
       onClose()
     } catch (e) {
       setErr(extractTrpcMessage(e))

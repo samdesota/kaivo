@@ -1,6 +1,7 @@
 import { createTRPCReact } from '@trpc/react-query'
 import { createContext } from 'react'
 import {
+  createTRPCUntypedClient,
   createWSClient,
   httpBatchLink,
   splitLink,
@@ -22,7 +23,7 @@ function wsUrl(): string {
 
 export function makeTrpcClient() {
   const ws = createWSClient({ url: wsUrl() })
-  return trpc.createClient({
+  return createTRPCUntypedClient<AppRouter>({
     links: [
       splitLink({
         condition: (op) => op.type === 'subscription',

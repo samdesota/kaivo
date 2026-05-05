@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { FolderPickerModal } from './folder-picker-modal'
 import {
@@ -51,7 +53,7 @@ export function NewAgentChatOverlay({
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const deleteWorktree = envTrpc.repo.deleteWorktree.useMutation()
   const start = envTrpc.agent.sessionStart.useMutation()
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -81,9 +83,9 @@ export function NewAgentChatOverlay({
       }
       const session = (await start.mutateAsync(newAgentChatStartInput(workspaceId, workingDir))) as { id: string }
       await Promise.all([
-        utils.agent.sessionList.invalidate({ workspaceId }),
-        utils.repo.listRecentFolders.invalidate(),
-        utils.repo.listWorktrees.invalidate(),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId }) }),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listRecentFolders') }),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') }),
       ])
       onCreated(session.id)
       onClose()
@@ -106,7 +108,7 @@ export function NewAgentChatOverlay({
     try {
       await deleteWorktree.mutateAsync({ repoId: worktree.id })
       if (selection?.type === 'worktree' && selection.repoId === worktree.id) setSelection(null)
-      await utils.repo.listWorktrees.invalidate()
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') })
     } catch (err) {
       setError(extractTrpcMessage(err))
     }

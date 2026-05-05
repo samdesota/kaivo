@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearch } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
+import { trpcQueryKey } from '../lib/trpc-plain'
 import { Button, Card, FormError, Input } from '../components/ui'
 import { extractTrpcMessage } from '../lib/utils'
 import { ProvidersSection } from './settings/providers'
@@ -162,7 +164,7 @@ export function SettingsPage() {
 function AgentDefaultModelSection() {
   const current = trpc.agent.defaultModelGet.useQuery()
   const save = trpc.agent.defaultModelSet.useMutation()
-  const utils = trpc.useUtils()
+  const queryClient = useQueryClient()
   const [providerID, setProviderID] = useState('openai')
   const [modelID, setModelID] = useState('gpt-5.5')
   const [error, setError] = useState<string | null>(null)
@@ -177,7 +179,7 @@ function AgentDefaultModelSection() {
     setError(null)
     try {
       await save.mutateAsync({ providerID: providerID.trim(), modelID: modelID.trim() })
-      await utils.agent.defaultModelGet.invalidate()
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.defaultModelGet') })
     } catch (err) {
       setError(extractTrpcMessage(err))
     }

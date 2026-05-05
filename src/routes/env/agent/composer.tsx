@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 
 interface CommandEntry {
@@ -31,7 +33,7 @@ export function Composer({
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   })
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const entries = useMemo(() => {
@@ -93,7 +95,7 @@ export function Composer({
     if (name === 'rename') {
       if (!args) throw new Error('usage: /rename <new title>')
       await rename.mutateAsync({ sessionId, title: args })
-      await utils.agent.sessionList.invalidate()
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList') })
       return
     }
     const known = (commands.data as CommandEntry[] | undefined)?.find((c) => c.name === name)

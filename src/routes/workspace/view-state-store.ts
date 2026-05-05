@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createCollection, useLiveQuery, type Collection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
-import { trpc } from '../../trpc'
+import { appTrpcMutation, appTrpcQuery } from '../../lib/trpc-plain'
 
 export type WorkspaceViewStateRecord = {
   workspaceId: string
@@ -20,19 +20,18 @@ type WorkspaceViewStatePatch = Partial<Pick<
 
 export function useWorkspaceViewStateStore(workspaceId: string) {
   const queryClient = useQueryClient()
-  const trpcUtils = trpc.useUtils()
   const collection = useMemo(() => {
     const options = queryCollectionOptions({
       id: `workspace-view-state:${workspaceId}`,
       queryKey: ['workspace-view-state', workspaceId],
       queryClient,
       getKey: (state: WorkspaceViewStateRecord) => state.workspaceId,
-      queryFn: async () => [await trpcUtils.client.workspace.getViewState.query({ workspaceId })],
+      queryFn: async () => [await appTrpcQuery<WorkspaceViewStateRecord>('workspace.getViewState', { workspaceId })],
       onUpdate: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
         const mutation = transaction.mutations[0]
         if (!mutation) return
         const modified = mutation.modified as WorkspaceViewStateRecord
-        await trpcUtils.client.workspace.saveViewState.mutate({
+        await appTrpcMutation('workspace.saveViewState', {
           workspaceId: modified.workspaceId,
           state: {
             activeAgentSessionId: modified.activeAgentSessionId,
@@ -44,8 +43,6 @@ export function useWorkspaceViewStateStore(workspaceId: string) {
       },
     })
     return createCollection(options as never) as unknown as Collection<WorkspaceViewStateRecord, string>
-    // Do not include the tRPC proxy client in deps: React dev instrumentation
-    // introspects dependency objects and tRPC proxies execute on property reads.
   }, [queryClient, workspaceId])
 
   const live = useLiveQuery(() => collection, [collection])

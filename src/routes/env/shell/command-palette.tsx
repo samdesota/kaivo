@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { type PaneContent } from './tab-state'
 
@@ -71,8 +73,7 @@ export function CommandPalette({
     enabled: open,
     staleTime: 5_000,
   })
-  const utils = envTrpc.useUtils()
-  const invalidateShellList = utils.shell.list.invalidate
+  const queryClient = useQueryClient()
   const createShell = envTrpc.shell.create.useMutation()
   const createShellAsync = createShell.mutateAsync
   const sessions = envTrpc.agent.sessionList.useQuery(workspaceInput, {
@@ -99,7 +100,7 @@ export function CommandPalette({
           const info = (await createShellAsync(
             { ...workspaceInput, ...(activeCwd ? { cwd: activeCwd } : {}) },
           )) as ShellCreateResult
-          await invalidateShellList(workspaceInput)
+          await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', workspaceInput) })
           onOpenContent({ type: 'shell', shellId: info.id })
         } catch (e) {
           console.error('new shell failed', extractTrpcMessage(e))
@@ -147,7 +148,7 @@ export function CommandPalette({
     }
 
     return out
-  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, invalidateShellList, createShellAsync, activeCwd, workspaceInput])
+  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, queryClient, createShellAsync, activeCwd, workspaceInput])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

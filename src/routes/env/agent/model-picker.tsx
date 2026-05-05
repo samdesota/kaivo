@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 
 interface ModelEntry {
   label: string
@@ -42,7 +44,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
     { staleTime: 0 },
   )
   const setModel = envTrpc.agent.sessionSetModel.useMutation()
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     if (!open) return
@@ -67,7 +69,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
 
   async function pick(providerID: string | null, modelID: string | null) {
     await setModel.mutateAsync({ sessionId, providerID, modelID })
-    await utils.agent.sessionGetModel.invalidate({ sessionId })
+    await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionGetModel', { sessionId }) })
     setOpen(false)
   }
 
@@ -143,7 +145,7 @@ export function ReasoningEffortPicker({ sessionId }: { sessionId: string }) {
     { staleTime: 0 },
   )
   const setVariant = envTrpc.agent.sessionSetModelVariant.useMutation()
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const curr = current.data as SessionModel | null | undefined
   const value = curr?.variant ?? ''
 
@@ -152,7 +154,7 @@ export function ReasoningEffortPicker({ sessionId }: { sessionId: string }) {
       sessionId,
       variant: next ? (next as ReasoningEffort) : null,
     })
-    await utils.agent.sessionGetModel.invalidate({ sessionId })
+    await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionGetModel', { sessionId }) })
   }
 
   return (

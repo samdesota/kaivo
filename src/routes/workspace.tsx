@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
 import { envTrpc, makeEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
@@ -33,6 +33,7 @@ import {
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { WorkspaceTabBar } from './workspace/workspace-tab-bar'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
+import { trpcQueryKey } from '../lib/trpc-plain'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 
@@ -40,11 +41,11 @@ export function WorkspacePage() {
   const { workspaceId } = useParams({ from: '/w/$workspaceId' })
   const search = useSearch({ from: '/w/$workspaceId' })
   const navigate = useNavigate({ from: '/w/$workspaceId' })
-  const utils = trpc.useUtils()
+  const queryClient = useQueryClient()
   const workspace = trpc.workspace.get.useQuery({ id: workspaceId })
   const envs = trpc.env.list.useQuery({}, { refetchInterval: 10_000 })
   const markOpened = trpc.workspace.markOpened.useMutation({
-    onSuccess: () => utils.workspace.list.invalidate(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
   })
   const viewStateStore = useWorkspaceViewStateStore(workspaceId)
   const tabsStore = useWorkspaceTabsStore(workspaceId)

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
 import { handleAgentUiOpenPaneEvent } from '../../../lib/agent-ui-open-pane'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
@@ -119,7 +121,7 @@ export function AgentSessionView({
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
   const sessionListInput = workspaceId ? { workspaceId } : undefined
   const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, { refetchInterval: 5_000 })
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const [internalSessionId, setInternalSessionId] = useState<string | null>(null)
   const sessionId = activeSessionId !== undefined ? activeSessionId : internalSessionId
   const setSessionId = (id: string | null) => {
@@ -201,7 +203,7 @@ export function AgentSessionView({
               ? async () => {
                   const id = await onOpenNewChat()
                   if (!id) return
-                  await utils.agent.sessionList.invalidate(sessionListInput)
+                  await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', sessionListInput) })
                   setSessionId(id)
                 }
               : undefined
@@ -258,7 +260,7 @@ function ContextUsageBar({ used, limit }: { used: number; limit: number }) {
  */
 function RestartAgentButton() {
   const restart = envTrpc.agent.restart.useMutation()
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const [err, setErr] = useState<string | null>(null)
 
   async function onClick() {
@@ -267,9 +269,9 @@ function RestartAgentButton() {
     try {
       await restart.mutateAsync()
       await Promise.all([
-        utils.agent.agentStatus.invalidate(),
-        utils.agent.sessionList.invalidate(),
-        utils.agent.listModels.invalidate(),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.agentStatus') }),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList') }),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.listModels') }),
       ])
     } catch (e) {
       setErr(extractTrpcMessage(e))
@@ -291,6 +293,27 @@ function RestartAgentButton() {
   )
 }
 
+function TranscriptSubscription({
+  sessionId,
+  sinceSeq,
+  onData,
+  onError,
+}: {
+  sessionId: string
+  sinceSeq: number
+  onData: (evt: unknown) => void
+  onError: () => void
+}) {
+  envTrpc.agent.transcript.useSubscription(
+    { sessionId, sinceSeq },
+    {
+      onData,
+      onError,
+    },
+  )
+  return null
+}
+
 function SessionPane({
   sessionId,
   onOpenPane,
@@ -304,7 +327,7 @@ function SessionPane({
     (id) => transcriptStateCache.get(id) ?? emptyTranscript(),
   )
   const [reconnecting, setReconnecting] = useState(false)
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     transcriptStateCache.set(sessionId, state)
@@ -344,45 +367,68 @@ function SessionPane({
 
   const [running, setRunning] = useState(false)
   const seenSeqs = useRef<Set<number>>(new Set())
+  const lastSeenSeq = useRef(0)
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectAttempt = useRef(0)
+  const [subscriptionGeneration, setSubscriptionGeneration] = useState(0)
 
   useEffect(() => {
     seenSeqs.current = new Set()
+    lastSeenSeq.current = 0
+    reconnectAttempt.current = 0
+    setReconnecting(false)
+    setSubscriptionGeneration((generation) => generation + 1)
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current)
+      reconnectTimer.current = null
+    }
   }, [sessionId])
 
-  envTrpc.agent.transcript.useSubscription(
-    { sessionId, sinceSeq: 0 },
-    {
-      onData(evt: unknown) {
-        setReconnecting(false)
-        const e = evt as {
-          seq?: number
-          type: string
-          parentSessionId?: string
-          payload: Record<string, unknown>
-        }
-        if (typeof e.seq === 'number') {
-          if (seenSeqs.current.has(e.seq)) return
-          seenSeqs.current.add(e.seq)
-        }
-        if (e.type === 'session.idle' || e.type === 'session.error') {
-          if ((e.payload as { sessionID?: string })?.sessionID && !e.parentSessionId) {
-            setRunning(false)
-          }
-        } else if (e.type === 'message.part.updated' && !e.parentSessionId) {
-          setRunning(true)
-        }
-        dispatch({ type: 'event', evt: e })
-      },
-      onError() {
-        setReconnecting(true)
-        void Promise.all([
-          utils.agent.sessionMessages.invalidate({ sessionId }),
-          utils.agent.childTranscripts.invalidate({ sessionId }),
-          utils.agent.sessionStatus.invalidate({ sessionId }),
-        ])
-      },
-    },
-  )
+  useEffect(() => {
+    return () => {
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+    }
+  }, [])
+
+  const handleTranscriptEvent = useCallback((evt: unknown) => {
+    setReconnecting(false)
+    reconnectAttempt.current = 0
+    const e = evt as {
+      seq?: number
+      type: string
+      parentSessionId?: string
+      payload: Record<string, unknown>
+    }
+    if (typeof e.seq === 'number') {
+      lastSeenSeq.current = Math.max(lastSeenSeq.current, e.seq)
+      if (seenSeqs.current.has(e.seq)) return
+      seenSeqs.current.add(e.seq)
+    }
+    if (e.type === 'session.idle' || e.type === 'session.error') {
+      if ((e.payload as { sessionID?: string })?.sessionID && !e.parentSessionId) {
+        setRunning(false)
+      }
+    } else if (e.type === 'message.part.updated' && !e.parentSessionId) {
+      setRunning(true)
+    }
+    dispatch({ type: 'event', evt: e })
+  }, [])
+
+  const handleTranscriptError = useCallback(() => {
+    setReconnecting(true)
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionMessages', { sessionId }) }),
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.childTranscripts', { sessionId }) }),
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionStatus', { sessionId }) }),
+    ])
+    if (reconnectTimer.current) return
+    const attempt = reconnectAttempt.current++
+    const delay = Math.min(1_000 * 2 ** attempt, 10_000)
+    reconnectTimer.current = setTimeout(() => {
+      reconnectTimer.current = null
+      setSubscriptionGeneration((generation) => generation + 1)
+    }, delay)
+  }, [queryClient, sessionId])
 
   envTrpc.agentUi.events.useSubscription(
     { sessionId },
@@ -513,6 +559,13 @@ function SessionPane({
 
   return (
     <div className="flex min-h-0 flex-1">
+      <TranscriptSubscription
+        key={`${sessionId}:${subscriptionGeneration}`}
+        sessionId={sessionId}
+        sinceSeq={lastSeenSeq.current}
+        onData={handleTranscriptEvent}
+        onError={handleTranscriptError}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center justify-end gap-2 border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
           {statusData?.contextUsage && (

@@ -1,6 +1,7 @@
 import { createTRPCReact } from '@trpc/react-query'
 import { createContext } from 'react'
 import {
+  createTRPCUntypedClient,
   createWSClient,
   httpBatchLink,
   splitLink,
@@ -16,13 +17,23 @@ export const envTrpc = createTRPCReact<EnvAppRouter>({
   context: envTrpcContext,
 })
 
+function wsRetryDelayMs(attemptIndex: number): number {
+  return Math.min(1_000 * 2 ** attemptIndex, 10_000)
+}
+
 export function makeEnvReactClient(env: EnvRef, envToken: string) {
   const base = resolveEnvUrl(env)
   const ws = createWSClient({
     url: envWsUrl(env, '/trpc'),
     connectionParams: { token: envToken },
+    retryDelayMs: wsRetryDelayMs,
+    keepAlive: {
+      enabled: true,
+      intervalMs: 10_000,
+      pongTimeoutMs: 3_000,
+    },
   })
-  return envTrpc.createClient({
+  return createTRPCUntypedClient<EnvAppRouter>({
     links: [
       splitLink({
         condition: (op) => op.type === 'subscription',

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../trpc'
+import { trpcQueryKey } from '../../lib/trpc-plain'
 import {
   idleRenameEditState,
   nextRenameValue,
@@ -50,14 +52,14 @@ export function WorkspaceTabBar({
   activeWorkspaceName: string
 }) {
   const navigate = useNavigate()
-  const utils = trpc.useUtils()
+  const queryClient = useQueryClient()
   const list = trpc.workspace.list.useQuery(undefined, { refetchInterval: 15_000 })
   const create = trpc.workspace.create.useMutation()
   const rename = trpc.workspace.rename.useMutation({
-    onSuccess: () => utils.workspace.list.invalidate(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
   })
   const archive = trpc.workspace.archive.useMutation({
-    onSuccess: () => utils.workspace.list.invalidate(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
   })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
   const [optimisticWorkspace, setOptimisticWorkspace] = useState<WorkspaceSummary | null>(null)

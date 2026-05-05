@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createCollection, useLiveQuery, type Collection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
-import { trpc } from '../../trpc'
+import { appTrpcMutation, appTrpcQuery } from '../../lib/trpc-plain'
 import { type WorkspaceTab, workspaceTabKey } from './tab-state'
 
 export type WorkspaceTabRecord = {
@@ -65,20 +65,19 @@ export function compareWorkspaceTabRecords(a: WorkspaceTabRecord, b: WorkspaceTa
 
 export function useWorkspaceTabsStore(workspaceId: string) {
   const queryClient = useQueryClient()
-  const trpcUtils = trpc.useUtils()
   const collection = useMemo(() => {
     const options = queryCollectionOptions({
       id: `workspace-tabs:${workspaceId}`,
       queryKey: ['workspace-tabs', workspaceId],
       queryClient,
       getKey: (tab: WorkspaceTabRecord) => tab.id,
-      queryFn: async () => await trpcUtils.client.workspace.listTabs.query({ workspaceId }),
+      queryFn: async () => await appTrpcQuery<WorkspaceTabRecord[]>('workspace.listTabs', { workspaceId }),
       onInsert: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
         for (const mutation of transaction.mutations) {
           const record = mutation.modified as WorkspaceTabRecord
           const tab = recordToMutationTab(record)
           if (!tab) continue
-          await trpcUtils.client.workspace.upsertTab.mutate({ workspaceId: record.workspaceId, tab, position: record.position })
+          await appTrpcMutation('workspace.upsertTab', { workspaceId: record.workspaceId, tab, position: record.position })
         }
       },
       onUpdate: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
@@ -86,18 +85,16 @@ export function useWorkspaceTabsStore(workspaceId: string) {
           const record = mutation.modified as WorkspaceTabRecord
           const tab = recordToMutationTab(record)
           if (!tab) continue
-          await trpcUtils.client.workspace.upsertTab.mutate({ workspaceId: record.workspaceId, tab, position: record.position })
+          await appTrpcMutation('workspace.upsertTab', { workspaceId: record.workspaceId, tab, position: record.position })
         }
       },
       onDelete: async ({ transaction }: { transaction: { mutations: Array<{ key: unknown }> } }) => {
         for (const mutation of transaction.mutations) {
-          await trpcUtils.client.workspace.deleteTab.mutate({ workspaceId, tabId: String(mutation.key) })
+          await appTrpcMutation('workspace.deleteTab', { workspaceId, tabId: String(mutation.key) })
         }
       },
     })
     return createCollection(options as never) as unknown as Collection<WorkspaceTabRecord, string>
-    // Do not include the tRPC proxy client in deps: React dev instrumentation
-    // introspects dependency objects and tRPC proxies execute on property reads.
   }, [queryClient, workspaceId])
 
   const live = useLiveQuery(() => collection, [collection])

@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { XTermAttached } from '../xterm-attached'
 
@@ -23,7 +25,7 @@ export function ShellTabContent({
 }) {
   const shellListInput = workspaceId ? { workspaceId } : undefined
   const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const dispose = envTrpc.shell.dispose.useMutation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -36,7 +38,7 @@ export function ShellTabContent({
     setErr(null)
     try {
       await dispose.mutateAsync({ id: shellId })
-      await utils.shell.list.invalidate(shellListInput)
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', shellListInput) })
       setMenuOpen(false)
       onTerminated?.()
     } catch (e) {

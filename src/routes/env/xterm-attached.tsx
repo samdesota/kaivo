@@ -44,45 +44,72 @@ export function XTermAttached({ shellId }: { shellId: string }) {
       }
     })
 
-    const wsUrl = envWsUrl(env, `/ws/shell/${encodeURIComponent(shellId)}`) +
-      `?token=${encodeURIComponent(envToken)}`
-    const ws = new WebSocket(wsUrl)
-    ws.binaryType = 'arraybuffer'
-
     let mounted = true
     const pending: string[] = []
-    let openedSnapshot = false
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let reconnectAttempt = 0
+    let reconnecting = false
 
-    ws.onopen = () => {
-      for (const q of pending) ws.send(q)
-      pending.length = 0
-    }
-    ws.onmessage = (evt) => {
-      if (!mounted) return
-      let str: string
-      if (evt.data instanceof ArrayBuffer) {
-        str = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(evt.data))
-      } else if (typeof evt.data === 'string') {
-        str = evt.data
-      } else {
-        return
+    const connect = () => {
+      const wsUrl = envWsUrl(env, `/ws/shell/${encodeURIComponent(shellId)}`) +
+        `?token=${encodeURIComponent(envToken)}`
+      const socket = new WebSocket(wsUrl)
+      ws = socket
+      socket.binaryType = 'arraybuffer'
+      let openedSnapshot = false
+
+      socket.onopen = () => {
+        reconnectAttempt = 0
+        for (const q of pending) socket.send(q)
+        pending.length = 0
       }
-      if (!openedSnapshot) {
-        openedSnapshot = true
+      socket.onmessage = (evt) => {
+        if (!mounted || ws !== socket) return
+        let str: string
+        if (evt.data instanceof ArrayBuffer) {
+          str = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(evt.data))
+        } else if (typeof evt.data === 'string') {
+          str = evt.data
+        } else {
+          return
+        }
+        if (!openedSnapshot) {
+          openedSnapshot = true
+          if (reconnecting) {
+            reconnecting = false
+            term.clear()
+          }
+        }
+        term.write(str)
       }
-      term.write(str)
+      socket.onclose = (evt) => {
+        if (!mounted || ws !== socket) return
+        ws = null
+        if (evt.code === 4401 || evt.code === 4404) {
+          term.writeln(`\r\n\x1b[31m[disconnected: ${evt.reason || 'unauthorized'}]\x1b[0m`)
+          return
+        }
+        const delay = Math.min(1_000 * 2 ** reconnectAttempt++, 10_000)
+        term.writeln(`\r\n\x1b[2m[disconnected, reconnecting in ${Math.round(delay / 1000)}s]\x1b[0m`)
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null
+          if (!mounted) return
+          reconnecting = true
+          connect()
+        }, delay)
+      }
+      socket.onerror = () => {
+        if (!mounted || ws !== socket) return
+        term.writeln('\r\n\x1b[31m[ws error]\x1b[0m')
+        socket.close()
+      }
     }
-    ws.onclose = () => {
-      if (!mounted) return
-      term.writeln('\r\n\x1b[2m[disconnected]\x1b[0m')
-    }
-    ws.onerror = () => {
-      if (!mounted) return
-      term.writeln('\r\n\x1b[31m[ws error]\x1b[0m')
-    }
+
+    connect()
 
     const send = (data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws?.readyState === WebSocket.OPEN) {
         ws.send(data)
       } else {
         pending.push(data)
@@ -104,10 +131,11 @@ export function XTermAttached({ shellId }: { shellId: string }) {
 
     return () => {
       mounted = false
+      if (reconnectTimer) clearTimeout(reconnectTimer)
       dataSub.dispose()
       resizeObserver.disconnect()
       try {
-        ws.close()
+        ws?.close()
       } catch {
         // ignore
       }

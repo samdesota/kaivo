@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { envTrpc } from '../../env-trpc'
+import { trpcQueryKey } from '../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../lib/utils'
 import { languageForPath } from '../../lib/cm-language'
 
 export function FileViewer({ path, absolute }: { path: string; absolute?: boolean }) {
   const read = envTrpc.fs.read.useQuery({ path, absolute })
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const write = envTrpc.fs.write.useMutation()
 
   const [draft, setDraft] = useState<string | null>(null)
@@ -53,7 +55,7 @@ export function FileViewer({ path, absolute }: { path: string; absolute?: boolea
     try {
       await write.mutateAsync({ path, content: draft ?? '', absolute })
       setDraft(null)
-      await utils.fs.read.invalidate({ path, absolute })
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('fs.read', { path, absolute }) })
     } catch (err) {
       setWriteError(extractTrpcMessage(err))
     }

@@ -51,6 +51,12 @@ export function makeEnvClient(env: EnvRef, envToken: string) {
   const ws = createWSClient({
     url: envWsUrl(env, '/trpc'),
     connectionParams: { token: envToken },
+    retryDelayMs: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 10_000),
+    keepAlive: {
+      enabled: true,
+      intervalMs: 10_000,
+      pongTimeoutMs: 3_000,
+    },
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return createTRPCClient<any>({

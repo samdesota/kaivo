@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { useWorkspaceAgentTabsStore } from '../../workspace/agent-tabs-store'
 import { FolderPickerModal } from './folder-picker-modal'
@@ -34,7 +36,7 @@ export function SessionTabs({
   const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, {
     refetchInterval: 5_000,
   })
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const close = envTrpc.agent.sessionClose.useMutation()
   const reopen = envTrpc.agent.sessionReopen.useMutation()
   const agentTabs = useWorkspaceAgentTabsStore(workspaceId)
@@ -74,7 +76,7 @@ export function SessionTabs({
     const others = active.filter((s) => s.id !== id)
     try {
       await close.mutateAsync({ sessionId: id })
-      await utils.agent.sessionList.invalidate(sessionListInput)
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', sessionListInput) })
       agentTabs.deleteSession(id)
       if (id === sessionId) {
         const next = others[0]?.id
@@ -88,7 +90,7 @@ export function SessionTabs({
   async function onReopen(id: string) {
     try {
       await reopen.mutateAsync({ sessionId: id })
-      await utils.agent.sessionList.invalidate(sessionListInput)
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', sessionListInput) })
       agentTabs.ensureSession(id)
       onSelect(id)
     } catch {
@@ -158,7 +160,7 @@ export function NewSessionPopover({
   const ref = useRef<HTMLDivElement | null>(null)
   const repos = envTrpc.repo.list.useQuery(undefined, { enabled: open })
   const start = envTrpc.agent.sessionStart.useMutation()
-  const utils = envTrpc.useUtils()
+  const queryClient = useQueryClient()
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -199,7 +201,7 @@ export function NewSessionPopover({
     setErr(null)
     try {
       const res = (await start.mutateAsync({ workspaceId, directory })) as { id: string }
-      await utils.agent.sessionList.invalidate(workspaceId ? { workspaceId } : undefined)
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', workspaceId ? { workspaceId } : undefined) })
       onCreated(res.id)
       setOpen(false)
     } catch (e) {
