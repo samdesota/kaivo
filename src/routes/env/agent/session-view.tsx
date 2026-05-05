@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
@@ -9,14 +9,7 @@ import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
 import { QuestionBanner } from './parts/question-banner'
 import { TodosPanel } from './todos-panel'
-import {
-  applyEvent,
-  emptyTranscript,
-  flattenParts,
-  hydrateChildren,
-  hydrateFromMessages,
-  type TranscriptState,
-} from './transcript-store'
+import { flattenParts, type TranscriptState } from './transcript-store'
 import { PartRenderer } from './parts'
 import { OpenStateProvider } from './parts/open-state'
 import { SessionTabs } from './session-tabs'
@@ -24,42 +17,12 @@ import { EmptySessionState } from './empty-session-state'
 import { ModelPicker, ReasoningEffortPicker } from './model-picker'
 import { selectActiveWorkspaceSession } from './workspace-session-state'
 import { BottomAnchoredLazyList } from './bottom-anchored-lazy-list'
-
-type Action =
-  | { type: 'reset' }
-  | {
-      type: 'hydrate'
-      msgs: Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>
-    }
-  | {
-      type: 'hydrate-children'
-      children: Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }>
-    }
-  | {
-      type: 'event'
-      evt: { type: string; parentSessionId?: string; payload: Record<string, unknown> }
-    }
-
-const transcriptStateCache = new Map<string, TranscriptState>()
+import { useChatSession, useChatStateStore, useRetainChatSessions } from './chat-state'
+import { chatDebug } from './chat-debug'
 
 interface OpenPaneOptions {
   title?: string
   activate?: boolean
-}
-
-function reducer(state: TranscriptState, action: Action): TranscriptState {
-  switch (action.type) {
-    case 'reset':
-      return emptyTranscript()
-    case 'hydrate':
-      return hydrateFromMessages(state, action.msgs as Array<{ info: unknown; parts: unknown[] }>)
-    case 'hydrate-children':
-      return hydrateChildren(state, action.children)
-    case 'event':
-      return applyEvent(state, action.evt)
-    default:
-      return state
-  }
 }
 
 interface AgentStatus {
@@ -71,27 +34,6 @@ interface SessionSummary {
   id: string
   status: string
   workspaceId?: string | null
-}
-
-interface SessionStatus {
-  running: boolean
-  pendingApprovals: Array<{
-    id: string
-    sessionId: string
-    callID?: string
-    title: string
-    pattern?: string | string[]
-    metadata: Record<string, unknown>
-    createdAt: number
-  }>
-  pendingQuestions: Array<{
-    id: string
-    sessionId: string
-    questions: unknown[]
-    tool?: unknown
-  }>
-  todos: Array<{ id: string; content: string; status: string; priority: string }>
-  contextUsage: { used: number; limit: number } | null
 }
 
 export function AgentSessionView({
@@ -124,10 +66,10 @@ export function AgentSessionView({
   const queryClient = useQueryClient()
   const [internalSessionId, setInternalSessionId] = useState<string | null>(null)
   const sessionId = activeSessionId !== undefined ? activeSessionId : internalSessionId
-  const setSessionId = (id: string | null) => {
+  const setSessionId = useCallback((id: string | null) => {
     if (onSessionSelect) onSessionSelect(id)
     else setInternalSessionId(id)
-  }
+  }, [onSessionSelect])
   useEffect(() => {
     onActiveSessionChange?.(sessionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -136,6 +78,11 @@ export function AgentSessionView({
   const [startError, setStartError] = useState<string | null>(null)
 
   const sessionsData = sessions.data as SessionSummary[] | undefined
+  const retainedChatSessionIds = useMemo(
+    () => (sessionsData ?? []).filter((s) => s.status !== 'archived').map((s) => s.id),
+    [sessionsData],
+  )
+  useRetainChatSessions(retainedChatSessionIds)
 
   useEffect(() => {
     if (sessionsData) onSessionListChange?.(sessionsData.length)
@@ -145,7 +92,7 @@ export function AgentSessionView({
     if (!sessionsData) return
     const next = selectActiveWorkspaceSession(sessionsData, sessionId)
     if (next !== sessionId) setSessionId(next)
-  }, [sessionId, sessionsData])
+  }, [sessionId, sessionsData, setSessionId])
 
   if (status.isLoading) {
     return <div className="flex h-full items-center justify-center text-sm text-neutral-500">Checking agent…</div>
@@ -293,27 +240,6 @@ function RestartAgentButton() {
   )
 }
 
-function TranscriptSubscription({
-  sessionId,
-  sinceSeq,
-  onData,
-  onError,
-}: {
-  sessionId: string
-  sinceSeq: number
-  onData: (evt: unknown) => void
-  onError: () => void
-}) {
-  envTrpc.agent.transcript.useSubscription(
-    { sessionId, sinceSeq },
-    {
-      onData,
-      onError,
-    },
-  )
-  return null
-}
-
 function SessionPane({
   sessionId,
   onOpenPane,
@@ -321,135 +247,25 @@ function SessionPane({
   sessionId: string
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
 }) {
-  const [state, dispatch] = useReducer(
-    reducer,
-    sessionId,
-    (id) => transcriptStateCache.get(id) ?? emptyTranscript(),
-  )
-  const [reconnecting, setReconnecting] = useState(false)
-  const [snapshotHydrated, setSnapshotHydrated] = useState(false)
-  const queryClient = useQueryClient()
+  const chat = useChatSession(sessionId)
+  const chatStore = useChatStateStore()
+  const { state, loading, error, reconnecting, running, status } = chat
 
   useEffect(() => {
-    transcriptStateCache.set(sessionId, state)
-  }, [sessionId, state])
-
-  const messages = envTrpc.agent.sessionMessages.useQuery(
-    { sessionId },
-    { staleTime: 0, refetchOnWindowFocus: false },
-  )
-
-  const childMsgs = envTrpc.agent.childTranscripts.useQuery(
-    { sessionId },
-    { staleTime: 0, refetchOnWindowFocus: false },
-  )
-
-  const latestSeq = envTrpc.agent.transcriptLatestSeq.useQuery(
-    { sessionId },
-    {
-      enabled: Boolean(messages.data && childMsgs.data),
-      staleTime: 0,
-      refetchOnWindowFocus: false,
-    },
-  )
-
-  useEffect(() => {
-    if (!messages.data) return
-    dispatch({
-      type: 'hydrate',
-      msgs: messages.data as Array<{
-        info: Record<string, unknown>
-        parts: Array<Record<string, unknown>>
-      }>,
+    chatDebug('session-pane:snapshot', {
+      sessionId,
+      loading,
+      hasError: Boolean(error),
+      reconnecting,
+      running,
+      messageCount: state.messageOrder.length,
+      partCount: state.parts.size,
+      permissions: state.permissions.size,
+      questions: state.questions.size,
     })
-  }, [sessionId, messages.data])
+  }, [sessionId, loading, error, reconnecting, running, state])
 
-  useEffect(() => {
-    if (!childMsgs.data) return
-    dispatch({
-      type: 'hydrate-children',
-      children: childMsgs.data as Array<{
-        sessionID: string
-        messages: Array<{ info: unknown; parts: unknown[] }>
-      }>,
-    })
-  }, [sessionId, childMsgs.data])
-
-  useEffect(() => {
-    if (!messages.data || !childMsgs.data || !latestSeq.data) return
-    const seq = (latestSeq.data as { seq: number }).seq
-    lastSeenSeq.current = seq
-    seenSeqs.current = new Set()
-    setSnapshotHydrated(true)
-    setSubscriptionGeneration((generation) => generation + 1)
-  }, [sessionId, messages.data, childMsgs.data, latestSeq.data])
-
-  const [running, setRunning] = useState(false)
-  const seenSeqs = useRef<Set<number>>(new Set())
-  const lastSeenSeq = useRef(0)
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const reconnectAttempt = useRef(0)
-  const [subscriptionGeneration, setSubscriptionGeneration] = useState(0)
-
-  useEffect(() => {
-    seenSeqs.current = new Set()
-    lastSeenSeq.current = 0
-    reconnectAttempt.current = 0
-    setSnapshotHydrated(false)
-    setReconnecting(false)
-    setSubscriptionGeneration((generation) => generation + 1)
-    if (reconnectTimer.current) {
-      clearTimeout(reconnectTimer.current)
-      reconnectTimer.current = null
-    }
-  }, [sessionId])
-
-  useEffect(() => {
-    return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
-    }
-  }, [])
-
-  const handleTranscriptEvent = useCallback((evt: unknown) => {
-    setReconnecting(false)
-    reconnectAttempt.current = 0
-    const e = evt as {
-      seq?: number
-      type: string
-      parentSessionId?: string
-      payload: Record<string, unknown>
-    }
-    if (typeof e.seq === 'number') {
-      lastSeenSeq.current = Math.max(lastSeenSeq.current, e.seq)
-      if (seenSeqs.current.has(e.seq)) return
-      seenSeqs.current.add(e.seq)
-    }
-    if (e.type === 'session.idle' || e.type === 'session.error') {
-      if ((e.payload as { sessionID?: string })?.sessionID && !e.parentSessionId) {
-        setRunning(false)
-      }
-    } else if (e.type === 'message.part.updated' && !e.parentSessionId) {
-      setRunning(true)
-    }
-    dispatch({ type: 'event', evt: e })
-  }, [])
-
-  const handleTranscriptError = useCallback(() => {
-    setReconnecting(true)
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionMessages', { sessionId }) }),
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.childTranscripts', { sessionId }) }),
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionStatus', { sessionId }) }),
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.transcriptLatestSeq', { sessionId }) }),
-    ])
-    if (reconnectTimer.current) return
-    const attempt = reconnectAttempt.current++
-    const delay = Math.min(1_000 * 2 ** attempt, 10_000)
-    reconnectTimer.current = setTimeout(() => {
-      reconnectTimer.current = null
-      setSubscriptionGeneration((generation) => generation + 1)
-    }, delay)
-  }, [queryClient, sessionId])
+  useEffect(() => chatStore.retainSession(sessionId), [chatStore, sessionId])
 
   envTrpc.agentUi.events.useSubscription(
     { sessionId },
@@ -460,109 +276,18 @@ function SessionPane({
     },
   )
 
-  const sessionStatus = envTrpc.agent.sessionStatus.useQuery(
-    { sessionId },
-    { refetchInterval: 3_000 },
-  )
-  const statusData = sessionStatus.data as SessionStatus | undefined
+  const statusData = status
   const pendingFromStatus = statusData?.pendingApprovals ?? []
-  const questionsFromStatus = statusData?.pendingQuestions ?? []
-  useEffect(() => {
-    if (statusData) setRunning(statusData.running)
-  }, [statusData])
   const pendingCount = state.permissions.size > 0 ? state.permissions.size : pendingFromStatus.length
 
-  useEffect(() => {
-    if (!statusData) return
-    const live = state.questions
-    for (const q of questionsFromStatus) {
-      if (!live.has(q.id)) {
-        dispatch({
-          type: 'event',
-          evt: {
-            type: 'question.asked',
-            payload: {
-              id: q.id,
-              sessionID: q.sessionId,
-              questions: q.questions,
-              tool: q.tool,
-            },
-          },
-        })
-      }
-    }
-    for (const id of live.keys()) {
-      if (!questionsFromStatus.some((q) => q.id === id)) {
-        dispatch({
-          type: 'event',
-          evt: {
-            type: 'question.replied',
-            payload: { requestID: id },
-          },
-        })
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusData])
-
-  // Mirror the question reconciliation for permissions. The transcript
-  // subscription is live-only, so a page reload (or a missed event
-  // window) leaves `state.permissions` empty while the env-server still
-  // has pending approvals — banner doesn't render but the composer is
-  // gated on the count, leaving the user unable to type.
-  useEffect(() => {
-    if (!statusData) return
-    const live = state.permissions
-    for (const p of pendingFromStatus) {
-      if (!live.has(p.id)) {
-        dispatch({
-          type: 'event',
-          evt: {
-            type: 'permission.updated',
-            payload: {
-              id: p.id,
-              sessionID: p.sessionId,
-              callID: p.callID,
-              title: p.title,
-              pattern: p.pattern,
-              metadata: p.metadata,
-              time: { created: p.createdAt },
-            },
-          },
-        })
-      }
-    }
-    for (const id of live.keys()) {
-      if (!pendingFromStatus.some((p) => p.id === id)) {
-        dispatch({
-          type: 'event',
-          evt: {
-            type: 'permission.replied',
-            payload: { permissionID: id },
-          },
-        })
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusData])
-
   const activeQuestions = Array.from(state.questions.values())
-
-  useEffect(() => {
-    if (!statusData) return
-    if (state.todos.length === 0 && statusData.todos.length > 0) {
-      dispatch({
-        type: 'event',
-        evt: { type: 'todo.updated', payload: { todos: statusData.todos } },
-      })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusData])
 
   const parts = useMemo(() => flattenParts(state), [state])
   const renderables = useMemo(() => {
     let taskIdx = 0
     const out: Array<{ part: typeof parts[number]; role: string; childTranscript?: TranscriptState }> = []
+    let skippedSynthetic = 0
+    let skippedSystem = 0
     for (const p of parts) {
       let childTranscript: TranscriptState | undefined
       if (p.type === 'tool' && (p as { tool?: string }).tool === 'task') {
@@ -570,25 +295,31 @@ function SessionPane({
         if (childOcId) childTranscript = state.childTranscripts.get(childOcId)
         taskIdx++
       }
-      if (p.type === 'step-start' || p.type === 'snapshot' || p.type === 'step-finish') continue
-      if ((p as { synthetic?: boolean }).synthetic) continue
+      if (p.type === 'step-start' || p.type === 'snapshot' || p.type === 'step-finish') {
+        skippedSystem++
+        continue
+      }
+      if ((p as { synthetic?: boolean }).synthetic) {
+        skippedSynthetic++
+        continue
+      }
       const role = state.messages.get(p.messageID)?.role ?? 'assistant'
       out.push({ part: p, role, childTranscript })
     }
+    chatDebug('session-pane:renderables', {
+      sessionId,
+      loading,
+      inputParts: parts.length,
+      renderables: out.length,
+      skippedSystem,
+      skippedSynthetic,
+      optimisticParts: parts.filter((p) => (p as { optimistic?: boolean }).optimistic).length,
+    })
     return out
-  }, [parts, state.messages, state.childOrder, state.childTranscripts])
+  }, [loading, parts, sessionId, state.messages, state.childOrder, state.childTranscripts])
 
   return (
     <div className="flex min-h-0 flex-1">
-      {snapshotHydrated && (
-        <TranscriptSubscription
-          key={`${sessionId}:${subscriptionGeneration}`}
-          sessionId={sessionId}
-          sinceSeq={lastSeenSeq.current}
-          onData={handleTranscriptEvent}
-          onError={handleTranscriptError}
-        />
-      )}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center justify-end gap-2 border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
           {statusData?.contextUsage && (
@@ -605,11 +336,11 @@ function SessionPane({
         )}
         <OpenStateProvider>
           <div className="flex min-h-0 flex-1">
-            {!snapshotHydrated ? (
+            {loading ? (
               <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">Loading…</div>
-            ) : messages.error ? (
+            ) : error ? (
               <div className="flex-1 p-4 text-xs text-red-400">
-                Failed to load transcript: {extractTrpcMessage(messages.error)}
+                Failed to load transcript: {extractTrpcMessage(error)}
               </div>
             ) : renderables.length === 0 ? (
               <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">
@@ -663,7 +394,18 @@ function SessionPane({
                 : null
           }
           running={running}
-          onSent={() => setRunning(true)}
+          onSendStart={(message) => {
+            chatDebug('session-pane:onSendStart', { sessionId, messageLength: message.length })
+            return chatStore.addOptimisticUserMessage(sessionId, message)
+          }}
+          onSendFailed={(optimisticId) => {
+            chatDebug('session-pane:onSendFailed', { sessionId, optimisticId })
+            if (optimisticId) chatStore.removeOptimisticUserMessage(sessionId, optimisticId)
+          }}
+          onSent={() => {
+            chatDebug('session-pane:onSent', { sessionId })
+            chatStore.markSent(sessionId)
+          }}
         />
       </div>
       <TodosPanel todos={state.todos} />

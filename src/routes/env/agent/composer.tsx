@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
+import { chatDebug } from './chat-debug'
 
 interface CommandEntry {
   name: string
@@ -13,17 +14,22 @@ export function Composer({
   sessionId,
   pendingApprovalReason,
   running = false,
+  onSendStart,
+  onSendFailed,
   onSent,
 }: {
   sessionId: string
   pendingApprovalReason?: string | null
   running?: boolean
+  onSendStart?: (message: string) => string | undefined
+  onSendFailed?: (optimisticId: string | undefined) => void
   onSent?: () => void
 }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeIdx, setActiveIdx] = useState(0)
+  const [localSending, setLocalSending] = useState(false)
 
   const send = envTrpc.agent.sessionSend.useMutation()
   const rename = envTrpc.agent.sessionRename.useMutation()
@@ -35,6 +41,11 @@ export function Composer({
   })
   const queryClient = useQueryClient()
   const taRef = useRef<HTMLTextAreaElement | null>(null)
+  const effectiveRunning = running || localSending
+
+  useEffect(() => {
+    if (running) setLocalSending(false)
+  }, [running])
 
   const entries = useMemo(() => {
     const list: SlashEntry[] = [
@@ -105,25 +116,52 @@ export function Composer({
 
   async function onSend() {
     const msg = text.trim()
-    if (!msg || send.isPending || pendingApprovalReason || running) return
+    chatDebug('composer:onSend', {
+      sessionId,
+      hasMessage: Boolean(msg),
+      sendPending: send.isPending,
+      hasPendingApprovalReason: Boolean(pendingApprovalReason),
+      running: effectiveRunning,
+      slash: msg.startsWith('/'),
+    })
+    if (!msg || send.isPending || pendingApprovalReason || effectiveRunning) {
+      chatDebug('composer:onSend:blocked', {
+        sessionId,
+        empty: !msg,
+        sendPending: send.isPending,
+        hasPendingApprovalReason: Boolean(pendingApprovalReason),
+        running: effectiveRunning,
+      })
+      return
+    }
     setErr(null)
     const snapshot = text
+    let optimisticId: string | undefined
     setText('')
     try {
       if (msg.startsWith('/')) {
         await runSlashCommand(msg)
       } else {
+        setLocalSending(true)
+        chatDebug('composer:onSendStart:before', { sessionId, messageLength: msg.length })
+        optimisticId = onSendStart?.(msg)
+        chatDebug('composer:onSendStart:after', { sessionId, optimisticId })
         await send.mutateAsync({ sessionId, message: msg })
+        chatDebug('composer:mutation:resolved', { sessionId, optimisticId })
+        onSent?.()
+        return
       }
-      onSent?.()
     } catch (e) {
       setErr(extractTrpcMessage(e))
       setText(snapshot)
+      setLocalSending(false)
+      chatDebug('composer:onSend:error', { sessionId, optimisticId, error: extractTrpcMessage(e) })
+      if (!msg.startsWith('/')) onSendFailed?.(optimisticId)
     }
   }
 
   async function onStop() {
-    if (!running || abort.isPending) return
+    if (!effectiveRunning || abort.isPending) return
     setErr(null)
     try {
       await abort.mutateAsync({ sessionId })
@@ -137,11 +175,11 @@ export function Composer({
     send.isPending ||
     rename.isPending ||
     runCommand.isPending ||
-    running
+    effectiveRunning
 
   return (
     <div className="relative border-t border-neutral-800 bg-neutral-950 p-2">
-      {running && (
+      {effectiveRunning && (
         <div className="mb-2 flex items-center gap-2 rounded border border-brand-500/40 bg-brand-500/5 px-2 py-1 text-[11px] text-brand-300">
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
@@ -200,7 +238,7 @@ export function Composer({
                 return
               }
             }
-            if (e.key === 'Escape' && running) {
+            if (e.key === 'Escape' && effectiveRunning) {
               e.preventDefault()
               void onStop()
               return
@@ -213,14 +251,14 @@ export function Composer({
           placeholder={
             pendingApprovalReason
               ? 'Waiting on permission approval…'
-              : running
+              : effectiveRunning
                 ? 'Agent is responding — esc to stop.'
                 : 'Message the agent. Enter to send, Shift+Enter for newline. Type / for commands.'
           }
           rows={1}
           className="min-h-[32px] flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none disabled:opacity-60"
         />
-        {running ? (
+        {effectiveRunning ? (
           <button
             onClick={() => void onStop()}
             disabled={abort.isPending}
