@@ -327,6 +327,7 @@ function SessionPane({
     (id) => transcriptStateCache.get(id) ?? emptyTranscript(),
   )
   const [reconnecting, setReconnecting] = useState(false)
+  const [snapshotHydrated, setSnapshotHydrated] = useState(false)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -341,6 +342,15 @@ function SessionPane({
   const childMsgs = envTrpc.agent.childTranscripts.useQuery(
     { sessionId },
     { staleTime: 0, refetchOnWindowFocus: false },
+  )
+
+  const latestSeq = envTrpc.agent.transcriptLatestSeq.useQuery(
+    { sessionId },
+    {
+      enabled: Boolean(messages.data && childMsgs.data),
+      staleTime: 0,
+      refetchOnWindowFocus: false,
+    },
   )
 
   useEffect(() => {
@@ -365,6 +375,15 @@ function SessionPane({
     })
   }, [sessionId, childMsgs.data])
 
+  useEffect(() => {
+    if (!messages.data || !childMsgs.data || !latestSeq.data) return
+    const seq = (latestSeq.data as { seq: number }).seq
+    lastSeenSeq.current = seq
+    seenSeqs.current = new Set()
+    setSnapshotHydrated(true)
+    setSubscriptionGeneration((generation) => generation + 1)
+  }, [sessionId, messages.data, childMsgs.data, latestSeq.data])
+
   const [running, setRunning] = useState(false)
   const seenSeqs = useRef<Set<number>>(new Set())
   const lastSeenSeq = useRef(0)
@@ -376,6 +395,7 @@ function SessionPane({
     seenSeqs.current = new Set()
     lastSeenSeq.current = 0
     reconnectAttempt.current = 0
+    setSnapshotHydrated(false)
     setReconnecting(false)
     setSubscriptionGeneration((generation) => generation + 1)
     if (reconnectTimer.current) {
@@ -420,6 +440,7 @@ function SessionPane({
       queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionMessages', { sessionId }) }),
       queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.childTranscripts', { sessionId }) }),
       queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionStatus', { sessionId }) }),
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.transcriptLatestSeq', { sessionId }) }),
     ])
     if (reconnectTimer.current) return
     const attempt = reconnectAttempt.current++
@@ -559,13 +580,15 @@ function SessionPane({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <TranscriptSubscription
-        key={`${sessionId}:${subscriptionGeneration}`}
-        sessionId={sessionId}
-        sinceSeq={lastSeenSeq.current}
-        onData={handleTranscriptEvent}
-        onError={handleTranscriptError}
-      />
+      {snapshotHydrated && (
+        <TranscriptSubscription
+          key={`${sessionId}:${subscriptionGeneration}`}
+          sessionId={sessionId}
+          sinceSeq={lastSeenSeq.current}
+          onData={handleTranscriptEvent}
+          onError={handleTranscriptError}
+        />
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center justify-end gap-2 border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
           {statusData?.contextUsage && (
@@ -582,7 +605,7 @@ function SessionPane({
         )}
         <OpenStateProvider>
           <div className="flex min-h-0 flex-1">
-            {messages.isLoading && renderables.length === 0 ? (
+            {!snapshotHydrated ? (
               <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">Loading…</div>
             ) : messages.error ? (
               <div className="flex-1 p-4 text-xs text-red-400">

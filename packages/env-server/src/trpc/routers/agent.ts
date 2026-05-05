@@ -151,6 +151,16 @@ export const agentRouter = router({
       }
     }),
 
+  transcriptLatestSeq: authedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await agentService.transcriptLatestSeq(input.sessionId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionApprove: authedProcedure
     .input(
       z.object({

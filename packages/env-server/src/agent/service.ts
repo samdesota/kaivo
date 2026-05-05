@@ -858,6 +858,18 @@ class AgentService {
     return this.transcriptReplayRows(row.id, sinceSeq)
   }
 
+  async transcriptLatestSeq(sessionId: string): Promise<{ seq: number }> {
+    const row = await this.requireSession(sessionId)
+    const latest = db
+      .select({ seq: agentTranscripts.seq })
+      .from(agentTranscripts)
+      .where(eq(agentTranscripts.sessionId, row.id))
+      .orderBy(desc(agentTranscripts.seq))
+      .limit(1)
+      .all()[0]
+    return { seq: latest?.seq ?? 0 }
+  }
+
   subscribeTranscript(sessionId: string, fn: TranscriptListener, sinceSeq = 0): () => void {
     let unsubscribed = false
     let innerUnsub: (() => void) | null = null
