@@ -85,6 +85,16 @@ describe('browser API adapter', () => {
     expect(calls.close).toHaveBeenLastCalledWith({ tabId: 'tab-1' })
   })
 
+  it('opens native browser tab devtools through the desktop preload bridge', async () => {
+    const { win } = makeWindow()
+    const openBrowserDevTools = vi.fn(async () => ({ ok: true }))
+    const api = createBrowserApi({ ...win, cloudCodeDesktop: { openBrowserDevTools } } as Parameters<typeof createBrowserApi>[0])
+
+    await api.openDevTools({ browserTabId: 'tab-1' })
+
+    expect(openBrowserDevTools).toHaveBeenCalledWith({ browserTabId: 'tab-1' })
+  })
+
   it('turns webframe tab-not-found results into recoverable client errors', async () => {
     const { win, calls } = makeWindow()
     calls.move!.mockResolvedValueOnce({ ok: false, code: 'TAB_NOT_FOUND', message: 'Tab tab-1 not found' })

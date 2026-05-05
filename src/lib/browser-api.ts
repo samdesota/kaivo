@@ -26,6 +26,7 @@ export type BrowserApi = {
   back(input: { browserTabId: string }): Promise<void>
   forward(input: { browserTabId: string }): Promise<void>
   reload(input: { browserTabId: string; ignoreCache?: boolean }): Promise<void>
+  openDevTools(input: { browserTabId: string }): Promise<void>
   closeTab(input: { browserTabId: string }): Promise<void>
   setSlot(input: BrowserSlotUpdate): Promise<void>
   createDetachedOverlay(input: { url: string; transparent?: boolean; clickThrough?: boolean }): Promise<{ overlayId: string }>
@@ -82,6 +83,11 @@ type WebframeGlobal = {
 }
 
 type BrowserWindowLike = Window & { webframe?: WebframeGlobal }
+type DesktopWindowLike = Window & {
+  cloudCodeDesktop?: {
+    openBrowserDevTools?: (input: { browserTabId: string }) => Promise<unknown>
+  }
+}
 
 type SlotRecord = { name: string; rect: { x: number; y: number; w: number; h: number } }
 
@@ -166,6 +172,12 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
         tabId: input.browserTabId,
         ignoreCache: input.ignoreCache ?? false,
       })
+    },
+
+    async openDevTools(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.openBrowserDevTools) throw new Error('browser devtools unavailable')
+      await desktop.cloudCodeDesktop.openBrowserDevTools({ browserTabId: input.browserTabId })
     },
 
     async closeTab(input) {

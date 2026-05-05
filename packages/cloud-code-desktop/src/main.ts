@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, type BrowserWindow, type WebContents } from 'electron'
+import { app, ipcMain, webContents as electronWebContents, type BrowserWindow, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
 import { ensureDesktopServices, type ServiceSupervisor } from './service-supervisor'
@@ -41,6 +41,31 @@ function trackWebContents(contents: WebContents): void {
   })
 }
 
+function findTabWebContents(browserTabId: string): WebContents | null {
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
+  } | undefined
+  if (!bridge?.callerForWebContents) return null
+
+  for (const contents of electronWebContents.getAllWebContents()) {
+    if (contents.isDestroyed()) continue
+    const caller = bridge.callerForWebContents(contents)
+    if (caller.kind === 'tab' && caller.tabId === browserTabId) return contents
+  }
+  return null
+}
+
+function installIpcHandlers(): void {
+  ipcMain.handle('cloud-code/browser/open-devtools', (_event, input: { browserTabId?: string }) => {
+    const browserTabId = input.browserTabId
+    if (!browserTabId) throw new Error('browserTabId is required')
+    const contents = findTabWebContents(browserTabId)
+    if (!contents) throw new Error(`Browser tab ${browserTabId} not found`)
+    contents.openDevTools({ mode: 'detach', activate: true })
+    return { ok: true as const }
+  })
+}
+
 process.on('uncaughtException', (error) => {
   writeLog('exception', 'error', 'uncaughtException', { message: error.message, stack: error.stack })
 })
@@ -51,6 +76,7 @@ process.on('unhandledRejection', (reason) => {
 
 async function main(): Promise<void> {
   await app.whenReady()
+  installIpcHandlers()
   const config = resolveDesktopConfig({
     ...process.env,
     NODE_ENV: app.isPackaged ? 'production' : process.env.NODE_ENV,
@@ -71,6 +97,7 @@ async function main(): Promise<void> {
 
   const handle = await webframeApp.windows.create({
     chromeUrl: config.chromeUrl,
+    chromePreload: path.join(__dirname, 'preload.js'),
     electronWindow: {
       width: 1200,
       height: 800,

@@ -164,6 +164,11 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     else await browserApi.reload({ browserTabId: activeBrowserTabId })
   }
 
+  async function openDevTools() {
+    if (!activeBrowserTabId) return
+    await browserApi.openDevTools({ browserTabId: activeBrowserTabId })
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-neutral-950">
       <form
@@ -191,6 +196,13 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
           onClick={() => void runNavigation('reload')}
         >
           ↻
+        </BrowserControlButton>
+        <BrowserControlButton
+          label="Open DevTools"
+          disabled={!activeBrowserTabId}
+          onClick={() => void openDevTools()}
+        >
+          DevTools
         </BrowserControlButton>
         <label className="sr-only" htmlFor={`browser-url-${paneId}`}>
           URL

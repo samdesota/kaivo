@@ -12,6 +12,7 @@ const api = {
   back: vi.fn(async () => undefined),
   forward: vi.fn(async () => undefined),
   reload: vi.fn(async () => undefined),
+  openDevTools: vi.fn(async () => undefined),
   closeTab: vi.fn(async () => undefined),
   setSlot: vi.fn(async () => undefined),
   onTabChange: vi.fn(() => () => undefined),
@@ -115,9 +116,11 @@ describe('BrowserPane', () => {
     fireEvent.click(view.getByLabelText('Back'))
     fireEvent.click(view.getByLabelText('Forward'))
     fireEvent.click(view.getByLabelText('Reload'))
+    fireEvent.click(view.getByLabelText('Open DevTools'))
     expect(api.back).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
     expect(api.forward).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
     expect(api.reload).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
+    expect(api.openDevTools).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
 
     const input = view.getByLabelText('URL') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'example.org/path' } })
