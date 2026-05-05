@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
@@ -21,6 +21,7 @@ type RepoWorktree = {
   workingDir: string
   githubFullName?: string | null
 }
+type NewChatTab = 'folder' | 'worktree' | 'clone'
 
 export function NewAgentChatModal({
   open,
@@ -57,6 +58,9 @@ export function NewAgentChatOverlay({
   const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<NewChatTab>('folder')
+  const [folderFilter, setFolderFilter] = useState('')
+  const folderSearchRef = useRef<HTMLInputElement | null>(null)
 
   const busy = start.isPending || cloneConfig.isPending || deleteWorktree.isPending
   const validation = validateNewAgentChatSelection(selection)
@@ -97,6 +101,11 @@ export function NewAgentChatOverlay({
   const folders = (recentFolders.data ?? []) as RecentFolder[]
   const configs = (repoConfigs.data ?? []) as RepoConfig[]
   const existingWorktrees = (worktrees.data ?? []) as RepoWorktree[]
+  const filteredFolders = useMemo(() => {
+    const q = folderFilter.trim().toLowerCase()
+    if (!q) return folders
+    return folders.filter((folder) => `${folder.label ?? ''} ${folder.path}`.toLowerCase().includes(q))
+  }, [folderFilter, folders])
   const selectedConfig = selection?.type === 'repoConfig' ? configs.find((config) => config.id === selection.configId) : null
   const clonePreview = selectedConfig && selection?.type === 'repoConfig'
     ? `repos/${slugify(selectedConfig.name)}/${slugify(selection.worktreeName || 'work-tree')}`
@@ -114,110 +123,138 @@ export function NewAgentChatOverlay({
     }
   }
 
+  useEffect(() => {
+    if (activeTab !== 'folder') return
+    const id = requestAnimationFrame(() => folderSearchRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [activeTab])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-3xl rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+      <div className="flex max-h-[84vh] w-full max-w-2xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
         <div className="border-b border-neutral-800 px-4 py-3">
           <h2 className="text-sm font-semibold text-neutral-100">New agent chat</h2>
-          <p className="mt-1 text-xs text-neutral-500">Start from a folder, an existing work tree, or a new repo config clone.</p>
+          <p className="mt-1 text-xs text-neutral-500">Choose where the agent should work.</p>
         </div>
-        <div className="grid gap-4 p-4 lg:grid-cols-3">
-          <section className="space-y-2">
-            <div className="text-[10px] uppercase tracking-wide text-neutral-500">Open folder</div>
-            {recentFolders.isLoading && <div className="text-xs text-neutral-500">Loading recent folders…</div>}
-            {folders.map((folder) => (
-              <button
-                key={folder.path}
-                onClick={() => setSelection({ type: 'folder', path: folder.path })}
-                className={choiceClass(selection?.type === 'folder' && selection.path === folder.path)}
-              >
-                <span className="truncate text-neutral-100">{folder.label ?? folder.path}</span>
-                <span className="truncate font-mono text-[10px] text-neutral-500">{folder.path}</span>
-              </button>
-            ))}
-            {folders.length === 0 && !recentFolders.isLoading && (
-              <div className="rounded border border-neutral-800 p-3 text-xs text-neutral-500">No recent folders yet.</div>
-            )}
-            <button
-              onClick={() => setPickerOpen(true)}
-              className="w-full rounded border border-dashed border-neutral-700 px-3 py-2 text-left text-xs text-neutral-300 hover:border-brand-500/60"
-            >
-              Choose any folder…
-            </button>
-          </section>
-          <section className="space-y-2">
-            <div className="text-[10px] uppercase tracking-wide text-neutral-500">Existing work tree</div>
-            {worktrees.isLoading && <div className="text-xs text-neutral-500">Loading work trees…</div>}
-            {existingWorktrees.map((worktree) => (
-              <div
-                key={worktree.id}
-                className={choiceClass(selection?.type === 'worktree' && selection.repoId === worktree.id, 'row')}
-              >
+        <div className="flex border-b border-neutral-800 px-3 pt-3">
+          <TabButton active={activeTab === 'folder'} onClick={() => setActiveTab('folder')}>Folders</TabButton>
+          <TabButton active={activeTab === 'worktree'} onClick={() => setActiveTab('worktree')}>Work trees</TabButton>
+          <TabButton active={activeTab === 'clone'} onClick={() => setActiveTab('clone')}>Clone config</TabButton>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden p-4">
+          {activeTab === 'folder' && (
+            <section className="flex h-full min-h-[340px] flex-col gap-3">
+              <div className="flex gap-2">
+                <input
+                  ref={folderSearchRef}
+                  value={folderFilter}
+                  onChange={(event) => setFolderFilter(event.target.value)}
+                  placeholder="Search recent folders…"
+                  className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-brand-500"
+                />
                 <button
-                  onClick={() => setSelection({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir })}
-                  className="min-w-0 flex-1 text-left"
+                  onClick={() => setPickerOpen(true)}
+                  className="shrink-0 rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300 hover:border-brand-500/60 hover:bg-neutral-900"
                 >
-                  <span className="block truncate text-neutral-100">{worktree.name} / {worktree.worktreeName}</span>
-                  <span className="block truncate font-mono text-[10px] text-neutral-500">{worktree.workingDir}</span>
+                  Browse…
                 </button>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void removeWorktree(worktree)
+              </div>
+              {recentFolders.isLoading && <div className="text-xs text-neutral-500">Loading recent folders…</div>}
+              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
+                {filteredFolders.map((folder) => (
+                  <button
+                    key={folder.path}
+                    onClick={() => setSelection({ type: 'folder', path: folder.path })}
+                    className={compactChoiceClass(selection?.type === 'folder' && selection.path === folder.path)}
+                  >
+                    <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                      <span className="shrink-0 truncate text-neutral-100">{folder.label ?? folderName(folder.path)}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-neutral-500" title={folder.path}>{folder.path}</span>
+                    </span>
+                  </button>
+                ))}
+                {folders.length === 0 && !recentFolders.isLoading && <EmptyList>No recent folders yet.</EmptyList>}
+                {folders.length > 0 && filteredFolders.length === 0 && <EmptyList>No folders match “{folderFilter}”.</EmptyList>}
+              </div>
+            </section>
+          )}
+          {activeTab === 'worktree' && (
+            <section className="flex h-full min-h-[340px] flex-col gap-2">
+              {worktrees.isLoading && <div className="text-xs text-neutral-500">Loading work trees…</div>}
+              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
+                {existingWorktrees.map((worktree) => (
+                  <div
+                    key={worktree.id}
+                    className={compactChoiceClass(selection?.type === 'worktree' && selection.repoId === worktree.id, 'row')}
+                  >
+                    <button
+                      onClick={() => setSelection({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir })}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <span className="block truncate text-neutral-100">{worktree.name} / {worktree.worktreeName}</span>
+                      <span className="block truncate font-mono text-[10px] text-neutral-500" title={worktree.workingDir}>{worktree.workingDir}</span>
+                    </button>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void removeWorktree(worktree)
+                      }}
+                      disabled={busy}
+                      className="ml-2 shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))}
+                {existingWorktrees.length === 0 && !worktrees.isLoading && <EmptyList>No cloned work trees yet.</EmptyList>}
+              </div>
+            </section>
+          )}
+          {activeTab === 'clone' && (
+            <section className="flex h-full min-h-[340px] flex-col gap-3">
+              {repoConfigs.isLoading && <div className="text-xs text-neutral-500">Loading repo configs…</div>}
+              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
+                {configs.map((config) => (
+                  <button
+                    key={config.id}
+                    onClick={() => setSelection({
+                      type: 'repoConfig',
+                      configId: config.id,
+                      worktreeName: selection?.type === 'repoConfig' ? selection.worktreeName : '',
+                    })}
+                    className={compactChoiceClass(selection?.type === 'repoConfig' && selection.configId === config.id)}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-neutral-100">{config.name}</span>
+                      <span className="block truncate text-[10px] text-neutral-500" title={config.githubFullName ?? config.originUrl ?? config.id}>{config.githubFullName ?? config.originUrl ?? config.id}</span>
+                    </span>
+                  </button>
+                ))}
+                {configs.length === 0 && !repoConfigs.isLoading && <EmptyList>No repo configs yet.</EmptyList>}
+              </div>
+              <label className="block space-y-1 text-xs text-neutral-400">
+                <span>Work tree name</span>
+                <input
+                  value={selection?.type === 'repoConfig' ? selection.worktreeName : ''}
+                  onChange={(event) => {
+                    const fallbackConfigId = configs[0]?.id ?? ''
+                    setSelection({
+                      type: 'repoConfig',
+                      configId: selection?.type === 'repoConfig' ? selection.configId : fallbackConfigId,
+                      worktreeName: event.target.value,
+                    })
                   }}
-                  disabled={busy}
-                  className="ml-2 shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-50"
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
-            {existingWorktrees.length === 0 && !worktrees.isLoading && (
-              <div className="rounded border border-neutral-800 p-3 text-xs text-neutral-500">No cloned work trees yet.</div>
-            )}
-          </section>
-          <section className="space-y-2">
-            <div className="text-[10px] uppercase tracking-wide text-neutral-500">Clone repo config</div>
-            {repoConfigs.isLoading && <div className="text-xs text-neutral-500">Loading repo configs…</div>}
-            {configs.map((config) => (
-              <button
-                key={config.id}
-                onClick={() => setSelection({
-                  type: 'repoConfig',
-                  configId: config.id,
-                  worktreeName: selection?.type === 'repoConfig' ? selection.worktreeName : '',
-                })}
-                className={choiceClass(selection?.type === 'repoConfig' && selection.configId === config.id)}
-              >
-                <span className="truncate text-neutral-100">{config.name}</span>
-                <span className="truncate text-[10px] text-neutral-500">{config.githubFullName ?? config.originUrl ?? config.id}</span>
-              </button>
-            ))}
-            {configs.length === 0 && !repoConfigs.isLoading && (
-              <div className="rounded border border-neutral-800 p-3 text-xs text-neutral-500">No repo configs yet.</div>
-            )}
-            <label className="block space-y-1 pt-2 text-xs text-neutral-400">
-              <span>Work tree name</span>
-              <input
-                value={selection?.type === 'repoConfig' ? selection.worktreeName : ''}
-                onChange={(event) => {
-                  const fallbackConfigId = configs[0]?.id ?? ''
-                  setSelection({
-                    type: 'repoConfig',
-                    configId: selection?.type === 'repoConfig' ? selection.configId : fallbackConfigId,
-                    worktreeName: event.target.value,
-                  })
-                }}
-                placeholder="bug-shell-resize"
-                className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-100 outline-none focus:border-brand-500"
-              />
-            </label>
-            {clonePreview && (
-              <div className="rounded border border-neutral-800 bg-neutral-900/40 p-2 text-[10px] text-neutral-500">
-                Will clone to <span className="font-mono text-neutral-300">{clonePreview}</span>
-              </div>
-            )}
-          </section>
+                  placeholder="bug-shell-resize"
+                  className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-100 outline-none focus:border-brand-500"
+                />
+              </label>
+              {clonePreview && (
+                <div className="truncate rounded border border-neutral-800 bg-neutral-900/40 p-2 text-[10px] text-neutral-500" title={clonePreview}>
+                  Will clone to <span className="font-mono text-neutral-300">{clonePreview}</span>
+                </div>
+              )}
+            </section>
+          )}
         </div>
         {error && <div className="mx-4 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>}
         <div className="flex justify-end gap-2 border-t border-neutral-800 px-4 py-3">
@@ -244,11 +281,36 @@ export function NewAgentChatOverlay({
   )
 }
 
-function choiceClass(selected: boolean, layout: 'col' | 'row' = 'col'): string {
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
   return (
-    `flex w-full ${layout === 'col' ? 'flex-col' : 'items-start'} rounded border px-3 py-2 text-left text-xs hover:border-brand-500/60 hover:bg-neutral-900 ` +
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        'border-b px-3 py-2 text-xs font-medium ' +
+        (active
+          ? 'border-brand-500 text-neutral-100'
+          : 'border-transparent text-neutral-500 hover:text-neutral-300')
+      }
+    >
+      {children}
+    </button>
+  )
+}
+
+function EmptyList({ children }: { children: ReactNode }) {
+  return <div className="p-4 text-center text-xs text-neutral-500">{children}</div>
+}
+
+function compactChoiceClass(selected: boolean, layout: 'col' | 'row' = 'col'): string {
+  return (
+    `flex w-full min-w-0 ${layout === 'col' ? 'items-center' : 'items-start'} rounded border px-2.5 py-2 text-left text-xs hover:border-brand-500/60 hover:bg-neutral-900 ` +
     (selected ? 'border-brand-500 bg-brand-500/10' : 'border-neutral-800 bg-neutral-900/40')
   )
+}
+
+function folderName(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? path
 }
 
 function slugify(name: string): string {
