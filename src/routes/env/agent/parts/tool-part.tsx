@@ -453,7 +453,16 @@ function SubagentTranscript({
         }
         if ((p as { synthetic?: boolean }).synthetic) return null
         const role = transcript.messages.get(p.messageID)?.role ?? 'assistant'
-        if (p.type === 'text') return <TextPart key={p.id} part={p} role={role} />
+        if (p.type === 'text') {
+          return (
+            <TextPart
+              key={p.id}
+              part={p}
+              role={role}
+              onOpenBrowserPane={(url) => onOpenShell?.({ type: 'browser', url })}
+            />
+          )
+        }
         if (p.type === 'reasoning') return <ReasoningPart key={p.id} part={p} />
         if (p.type === 'tool') {
           const callID = (p as { callID?: string }).callID

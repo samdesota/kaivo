@@ -24,7 +24,13 @@ export function PartRenderer({
 }) {
   switch (part.type) {
     case 'text':
-      return <TextPart part={part} role={role} />
+      return (
+        <TextPart
+          part={part}
+          role={role}
+          onOpenBrowserPane={(url) => onOpenShell?.({ type: 'browser', url })}
+        />
+      )
     case 'reasoning':
       return <ReasoningPart part={part} />
     case 'tool': {
