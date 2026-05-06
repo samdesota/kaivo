@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { SplitPane } from './split-pane'
 
@@ -14,6 +14,7 @@ export function ShellChrome({
   splitInitialRatio = 0.7,
   onSplitRatioChange,
   className = 'h-screen',
+  style,
 }: {
   title: string
   subtitle?: string
@@ -26,9 +27,10 @@ export function ShellChrome({
   splitInitialRatio?: number
   onSplitRatioChange?: (ratio: number) => void
   className?: string
+  style?: CSSProperties
 }) {
   return (
-    <div className={`flex flex-col bg-neutral-950 text-neutral-100 ${className}`}>
+    <div className={`flex flex-col bg-neutral-950 text-neutral-100 ${className}`} style={style}>
       <header className="window-drag flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
         <div className="flex min-w-0 items-center gap-3">
           {backTo && (

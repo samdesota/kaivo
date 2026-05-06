@@ -56,6 +56,7 @@ type SessionSummary = {
 
 const PENDING_WORKSPACE_RENAME_KEY = 'cloud-code.pendingWorkspaceRenameId'
 const WORKSPACE_SIDEBAR_ORDER_KEY = 'cloud-code.workspaceTabOrder'
+const WORKSPACE_SIDEBAR_WIDTH = '16rem'
 
 export function WorkspacePage() {
   const { workspaceId } = useParams({ from: '/w/$workspaceId' })
@@ -243,7 +244,7 @@ function WorkspaceShell({
   }, [agentCollapsed, setAgentCollapsed])
 
   return (
-    <div className="flex h-screen min-w-0 overflow-hidden bg-neutral-950 text-neutral-100">
+    <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {!sidebarHidden && (
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
@@ -251,7 +252,8 @@ function WorkspaceShell({
         />
       )}
       <ShellChrome
-        className="min-h-0 min-w-0 flex-1"
+        className="h-screen max-h-screen overflow-hidden"
+        style={{ width: sidebarHidden ? '100vw' : `calc(100vw - ${WORKSPACE_SIDEBAR_WIDTH})` }}
         title={ctx.workspace.name}
         subtitle={ctx.localEnvTarget ? `local · ${ctx.localEnvTarget.env.label}` : 'local env unavailable'}
         splitStorageKey={`workspace.${ctx.workspace.id}.splitRatio`}
@@ -397,7 +399,11 @@ function WorkspaceSidebar({
   }, [ctx.workspace, list.data, optimisticWorkspace, workspaceOrder])
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-neutral-800 bg-neutral-950/95" aria-label="Workspaces">
+    <aside
+      className="flex h-screen max-h-screen shrink-0 flex-col overflow-hidden border-r border-neutral-800 bg-neutral-950/95"
+      style={{ width: WORKSPACE_SIDEBAR_WIDTH }}
+      aria-label="Workspaces"
+    >
       <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
         <div className="min-w-0">
           <div className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">Cloud Code</div>
