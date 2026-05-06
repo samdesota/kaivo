@@ -38,6 +38,31 @@ export interface OpenCodeEndpoint {
   password: string
 }
 
+interface OpenCodeStartOptions {
+  allowOpenAIOAuthOnly?: boolean
+}
+
+const OPENAI_OAUTH_PLUGIN = 'oc-codex-multi-auth'
+const OPENAI_OAUTH_PLACEHOLDER_KEY = 'cloud-code-openai-oauth-placeholder'
+
+function openAIOAuthMarkerPath(): string {
+  return path.join(config.CC_STATE_DIR, 'openai-oauth-enabled')
+}
+
+export async function markOpenAIOAuthEnabled(): Promise<void> {
+  await fs.mkdir(config.CC_STATE_DIR, { recursive: true })
+  await fs.writeFile(openAIOAuthMarkerPath(), new Date().toISOString())
+}
+
+export async function hasOpenAIOAuthMarker(): Promise<boolean> {
+  try {
+    await fs.access(openAIOAuthMarkerPath())
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const OPENCODE_BASIC_USERNAME = 'opencode'
 
 export function opencodeBasicAuthHeader(password: string): string {
@@ -242,9 +267,9 @@ class OpenCodeSupervisor {
    * start is already in flight, waits for that one to finish and returns
    * its result rather than racing a second spawn.
    */
-  async start(): Promise<OpenCodeEndpoint> {
+  async start(options: OpenCodeStartOptions = {}): Promise<OpenCodeEndpoint> {
     if (this.state.bootstrapInFlight) return this.state.bootstrapInFlight
-    const p = this.startInner()
+    const p = this.startInner(options)
     this.state.bootstrapInFlight = p
     try {
       return await p
@@ -253,7 +278,7 @@ class OpenCodeSupervisor {
     }
   }
 
-  private async startInner(): Promise<OpenCodeEndpoint> {
+  private async startInner(options: OpenCodeStartOptions): Promise<OpenCodeEndpoint> {
     // Pull provider keys from identity. No provider → skip (UI will prompt
     // the user to configure one, then call agent.restart()).
     let providerEnv: Record<string, string> = {}
@@ -269,10 +294,14 @@ class OpenCodeSupervisor {
       throw err
     }
     if (!providerEnv.ANTHROPIC_API_KEY && !providerEnv.OPENAI_API_KEY) {
-      throw new OpenCodeError(
-        'no_provider',
-        'no provider API key configured in identity service',
-      )
+      if (options.allowOpenAIOAuthOnly || (await hasOpenAIOAuthMarker())) {
+        providerEnv.OPENAI_API_KEY = OPENAI_OAUTH_PLACEHOLDER_KEY
+      } else {
+        throw new OpenCodeError(
+          'no_provider',
+          'no provider API key configured in identity service',
+        )
+      }
     }
     // Rewrite loopback URLs based on this env's kind. Identity returns raw
     // URLs; we adapt them to the container/local boundary.
@@ -448,7 +477,7 @@ class OpenCodeSupervisor {
     const dir = path.join(xdgConfigHome, 'opencode')
     await fs.mkdir(dir, { recursive: true })
     const cfg = {
-      plugin: [config.CC_OPENCODE_PLUGIN_PATH],
+      plugin: [config.CC_OPENCODE_PLUGIN_PATH, OPENAI_OAUTH_PLUGIN],
       agent: {
         plan: { mode: 'primary', model: 'openai/gpt-5.5' },
         build: { mode: 'primary', model: 'openai/gpt-5.5' },
@@ -457,11 +486,26 @@ class OpenCodeSupervisor {
       },
       provider: {
         openai: {
+          options: {
+            reasoningEffort: 'medium',
+            reasoningSummary: 'auto',
+            textVerbosity: 'medium',
+            include: ['reasoning.encrypted_content'],
+            store: false,
+          },
           models: {
             'gpt-5.5': {
+              name: 'GPT 5.5 (OAuth)',
+              limit: {
+                context: 1_050_000,
+                output: 128_000,
+              },
+              modalities: {
+                input: ['text', 'image'],
+                output: ['text'],
+              },
               variants: {
                 none: { reasoningEffort: 'none' },
-                minimal: { reasoningEffort: 'minimal' },
                 low: { reasoningEffort: 'low' },
                 medium: { reasoningEffort: 'medium' },
                 high: { reasoningEffort: 'high' },

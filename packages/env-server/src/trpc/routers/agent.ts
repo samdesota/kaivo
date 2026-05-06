@@ -67,6 +67,16 @@ export const agentRouter = router({
     }
   }),
 
+  openAIOAuthStatus: authedProcedure.query(() => agentService.openAIOAuthStatusGet()),
+
+  openAIOAuthStart: authedProcedure.mutation(async () => {
+    try {
+      return await agentService.openAIOAuthStart()
+    } catch (err) {
+      throw toTrpcError(err)
+    }
+  }),
+
   sessionList: authedProcedure
     .input(z.object({ workspaceId: z.string().min(1).optional() }).optional())
     .query(({ input }) => agentService.sessionList(input ?? {})),

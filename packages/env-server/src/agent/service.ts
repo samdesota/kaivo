@@ -8,6 +8,8 @@ import { recentFolderService } from '../recent-folders/service.js'
 import { getMeta, setDefaultModel as setEnvDefaultModel } from '../envmeta/service.js'
 import {
   OpenCodeError,
+  hasOpenAIOAuthMarker,
+  markOpenAIOAuthEnabled,
   opencodeBasicAuthHeader,
   opencodeSupervisor,
 } from './opencode.js'
@@ -20,6 +22,13 @@ export type SessionModelSelection = {
   providerID: string | null
   modelID: string | null
   variant: ReasoningEffortVariant | null
+}
+
+type OpenAIOAuthStatus = {
+  state: 'idle' | 'pending' | 'connected' | 'failed'
+  message: string | null
+  startedAt: Date | null
+  completedAt: Date | null
 }
 
 const CLOUD_TOOL_OVERRIDES = {
@@ -78,6 +87,12 @@ export class AgentError extends Error {
     super(message)
     this.name = 'AgentError'
   }
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name
+  if (typeof err === 'string') return err
+  return 'OpenAI OAuth failed'
 }
 
 export interface AgentSessionSummary {
@@ -203,12 +218,18 @@ class AgentService {
   private childrenByParent = new Map<string, string[]>()
   private sessionModels = new Map<string, SessionModelSelection>()
   private contextLimitCache = new Map<string, number>()
+  private openAIOAuthStatus: OpenAIOAuthStatus = {
+    state: 'idle',
+    message: null,
+    startedAt: null,
+    completedAt: null,
+  }
 
   async agentStatus(): Promise<{ ready: boolean; hasProvider: boolean }> {
     const ready = opencodeSupervisor.isReady()
     try {
       const providerEnv = await resolveProviderKeys()
-      return { ready, hasProvider: Object.keys(providerEnv).length > 0 }
+      return { ready, hasProvider: Object.keys(providerEnv).length > 0 || (await hasOpenAIOAuthMarker()) }
     } catch (err) {
       if (err instanceof IdentityAuthError || err instanceof IdentityUnreachableError) {
         return { ready, hasProvider: false }
@@ -239,6 +260,77 @@ class AgentService {
       }
       throw err
     }
+  }
+
+  async openAIOAuthStatusGet(): Promise<OpenAIOAuthStatus> {
+    if (this.openAIOAuthStatus.state === 'idle' && (await hasOpenAIOAuthMarker())) {
+      return {
+        state: 'connected',
+        message: 'OpenAI ChatGPT OAuth is connected.',
+        startedAt: null,
+        completedAt: null,
+      }
+    }
+    return { ...this.openAIOAuthStatus }
+  }
+
+  async openAIOAuthStart(): Promise<{ url: string; methodIndex: number }> {
+    this.invalidateClient()
+    await opencodeSupervisor.stopAndWait()
+    await opencodeSupervisor.start({ allowOpenAIOAuthOnly: true })
+    const client = await this.getClient()
+    const authMethods = await client.provider.auth({ throwOnError: true })
+    const openaiMethods = (authMethods.data as Record<string, Array<{ type: string; label: string }>>).openai ?? []
+    const methodIndex = openaiMethods.findIndex((m) => {
+      const label = m.label.toLowerCase()
+      return m.type === 'oauth' && (label.includes('chatgpt') || label.includes('codex'))
+    })
+    if (methodIndex < 0) {
+      throw new AgentError(
+        'unavailable',
+        'OpenAI ChatGPT OAuth method is unavailable; the OpenCode OAuth plugin did not load',
+      )
+    }
+
+    const authorization = await client.provider.oauth.authorize({
+      path: { id: 'openai' },
+      body: { method: methodIndex },
+      throwOnError: true,
+    })
+
+    this.openAIOAuthStatus = {
+      state: 'pending',
+      message: 'Waiting for OpenAI browser login to complete.',
+      startedAt: new Date(),
+      completedAt: null,
+    }
+
+    void client.provider.oauth
+      .callback({
+        path: { id: 'openai' },
+        body: { method: methodIndex },
+        throwOnError: true,
+      })
+      .then((result) => {
+        if (result.data !== true) throw new Error('OpenAI OAuth callback did not complete')
+        void markOpenAIOAuthEnabled().catch((err) => logger.warn({ err }, 'failed to persist OpenAI OAuth marker'))
+        this.openAIOAuthStatus = {
+          state: 'connected',
+          message: 'OpenAI ChatGPT OAuth is connected.',
+          startedAt: this.openAIOAuthStatus.startedAt,
+          completedAt: new Date(),
+        }
+      })
+      .catch((err) => {
+        this.openAIOAuthStatus = {
+          state: 'failed',
+          message: errorMessage(err),
+          startedAt: this.openAIOAuthStatus.startedAt,
+          completedAt: new Date(),
+        }
+      })
+
+    return { url: authorization.data.url, methodIndex }
   }
 
   private async getClient(): Promise<OpencodeClient> {
