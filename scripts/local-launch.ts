@@ -11,6 +11,8 @@ import { runDevSeed } from './seed-dev'
 const runtimeModule = runtime as typeof runtime & { default?: typeof runtime }
 const resolveRuntimeConfig = runtime.resolveInstanceRuntimeConfig ?? runtimeModule.default?.resolveInstanceRuntimeConfig
 if (!resolveRuntimeConfig) throw new Error('Unable to load instance runtime resolver')
+const desktopBrowserSocketPath = runtime.desktopBrowserSocketPath ?? runtimeModule.default?.desktopBrowserSocketPath
+if (!desktopBrowserSocketPath) throw new Error('Unable to load desktop browser socket path helper')
 const desktopPairingModule = desktopPairing as typeof desktopPairing & { default?: typeof desktopPairing }
 const ensureDesktopPairing = desktopPairing.ensureDesktopPairing ?? desktopPairingModule.default?.ensureDesktopPairing
 if (!ensureDesktopPairing) throw new Error('Unable to load desktop pairing helper')
@@ -146,6 +148,7 @@ async function seedApp(config: InstanceRuntimeConfig, options: RequiredLocalLaun
       CC_SEED_TARGET: 'desktop-dev',
       CC_INSTANCE_ID: config.instanceId,
       CC_INSTANCE_ROOT: config.rootDir,
+      CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
       CC_APP_DATA_DIR: config.app.dataDir,
       CC_APP_SQLITE_PATH: config.app.sqlitePath,
       DATA_DIR: config.app.dataDir,
@@ -284,6 +287,8 @@ function appLaunchSpec(config: InstanceRuntimeConfig, cwd: string): ServiceLaunc
       NODE_ENV: 'test',
       APP_SQLITE_PATH: config.app.sqlitePath,
       CC_INSTANCE_ID: config.instanceId,
+      CC_INSTANCE_ROOT: config.rootDir,
+      CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
       CC_SERVE_CLIENT: 'true',
       DATA_DIR: config.app.dataDir,
       PORT: String(config.app.port),
@@ -305,6 +310,8 @@ function envLaunchSpec(config: InstanceRuntimeConfig, cwd: string): ServiceLaunc
       NODE_ENV: 'test',
       CC_KIND: 'local',
       CC_INSTANCE_ID: config.instanceId,
+      CC_INSTANCE_ROOT: config.rootDir,
+      CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
       CC_LABEL: config.env.label,
       CC_PORT: String(config.env.port),
       CC_HOST: config.env.host,
@@ -328,6 +335,8 @@ function clientLaunchSpec(config: InstanceRuntimeConfig, cwd: string): ServiceLa
       ...process.env,
       NODE_ENV: 'development',
       CC_INSTANCE_ID: config.instanceId,
+      CC_INSTANCE_ROOT: config.rootDir,
+      CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
       CC_APP_URL: config.app.url,
       CC_CLIENT_HOST: config.client.host,
       CC_CLIENT_PORT: String(config.client.port),
