@@ -243,7 +243,7 @@ function WorkspaceShell({
   }, [agentCollapsed, setAgentCollapsed])
 
   return (
-    <div className="flex h-screen bg-neutral-950 text-neutral-100">
+    <div className="flex h-screen min-w-0 overflow-hidden bg-neutral-950 text-neutral-100">
       {!sidebarHidden && (
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
@@ -251,7 +251,7 @@ function WorkspaceShell({
         />
       )}
       <ShellChrome
-        className="min-h-0 flex-1"
+        className="min-h-0 min-w-0 flex-1"
         title={ctx.workspace.name}
         subtitle={ctx.localEnvTarget ? `local · ${ctx.localEnvTarget.env.label}` : 'local env unavailable'}
         splitStorageKey={`workspace.${ctx.workspace.id}.splitRatio`}
