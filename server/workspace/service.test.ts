@@ -127,6 +127,12 @@ vi.mock('../db/schema.js', () => ({
   },
 }))
 
+vi.mock('../envauth/service.js', () => ({
+  resolveEnvAuthToken: vi.fn(async (token: string) =>
+    token === 'identity-token' ? { tokenHash: 'hash-1', label: 'test env', issuedBy: 'test' } : null,
+  ),
+}))
+
 function rowsFor(table: { _table: string }) {
   if (table._table === 'workspaces') return workspaceRows
   if (table._table === 'workspace_ui_states') return uiStateRows
@@ -235,6 +241,15 @@ function makeCtx() {
     res: {} as unknown as import('@trpc/server/adapters/fastify').CreateFastifyContextOptions['res'],
     ip: '127.0.0.1',
     session: { id: 'sess-1', createdAt: new Date(), expiresAt: new Date(Date.now() + 60_000), lastSeen: new Date() } as import('../auth/service.js').Session,
+  }
+}
+
+function makeIdentityCtx(token = 'identity-token') {
+  return {
+    req: { headers: { authorization: `Bearer ${token}` } } as unknown as import('@trpc/server/adapters/fastify').CreateFastifyContextOptions['req'],
+    res: {} as unknown as import('@trpc/server/adapters/fastify').CreateFastifyContextOptions['res'],
+    ip: '127.0.0.1',
+    session: null,
   }
 }
 
@@ -348,6 +363,62 @@ describe('workspace router', () => {
     ])
   })
 
+  it('opens a new backend-owned pane tab and activates it', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Open pane workspace' })
+
+    const opened = await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'file', path: '/tmp/a.ts' },
+      title: 'a.ts',
+    })
+
+    expect(tabRows).toHaveLength(1)
+    expect(opened).toMatchObject({ type: 'file', envId: 'env-1', path: '/tmp/a.ts', position: 0 })
+    expect(viewStateRows.find((row) => row.workspaceId === workspace.id)?.activeWorkspaceTabId).toBe(opened.id)
+  })
+
+  it('focuses an existing backend-owned pane tab without duplicating it', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Duplicate pane workspace' })
+
+    const first = await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'preview', port: 5173 },
+    })
+    await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'browser', url: 'https://example.com' },
+    })
+    const second = await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'preview', port: 5173 },
+    })
+
+    expect(second.id).toBe(first.id)
+    expect(tabRows).toHaveLength(2)
+    expect(viewStateRows.find((row) => row.workspaceId === workspace.id)?.activeWorkspaceTabId).toBe(first.id)
+  })
+
+  it('opens a backend-owned pane tab without changing active tab when activate is false', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Inactive pane workspace' })
+
+    const active = await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'shell', shellId: 'shell-1' },
+    })
+    const inactive = await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'file', path: '/tmp/a.ts' },
+      activate: false,
+    })
+
+    expect(inactive.id).not.toBe(active.id)
+    expect(tabRows).toHaveLength(2)
+    expect(viewStateRows.find((row) => row.workspaceId === workspace.id)?.activeWorkspaceTabId).toBe(active.id)
+  })
+
   it('persists workspace agent tab order through granular endpoints', async () => {
     const { workspaceRouter } = await import('../trpc/routers/workspace.js')
     const caller = workspaceRouter.createCaller(makeCtx())
@@ -365,6 +436,85 @@ describe('workspace router', () => {
     await caller.deleteAgentTab({ workspaceId: workspace.id, sessionId: 'session-2' })
     await expect(caller.listAgentTabs({ workspaceId: workspace.id })).resolves.toMatchObject([
       { workspaceId: workspace.id, sessionId: 'session-1', position: 2 },
+    ])
+  })
+})
+
+describe('env api router', () => {
+  it('accepts an identity token and persists a file pane tab', async () => {
+    const { workspaceService } = await import('./service.js')
+    const { envApiRouter } = await import('../trpc/routers/env-api.js')
+    const workspace = await workspaceService.create({ name: 'Env API workspace' })
+    const caller = envApiRouter.createCaller(makeIdentityCtx())
+
+    const result = await caller.openPane({
+      workspaceId: workspace.id,
+      envId: 'local-default',
+      content: { type: 'file', path: '/tmp/a.ts' },
+      title: 'a.ts',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(tabRows).toHaveLength(1)
+    expect(tabRows[0]).toMatchObject({ workspaceId: workspace.id, type: 'file', envId: 'local-default', path: '/tmp/a.ts' })
+  })
+
+  it('returns a typed error for a missing workspace', async () => {
+    const { envApiRouter } = await import('../trpc/routers/env-api.js')
+    const caller = envApiRouter.createCaller(makeIdentityCtx())
+
+    await expect(caller.openPane({
+      workspaceId: 'missing-workspace',
+      envId: 'local-default',
+      content: { type: 'file', path: '/tmp/a.ts' },
+    })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('persists and activates a pane with no frontend subscriber, then exposes it through workspace reads', async () => {
+    const { workspaceService } = await import('./service.js')
+    const { envApiRouter } = await import('../trpc/routers/env-api.js')
+    const workspace = await workspaceService.create({ name: 'No frontend workspace' })
+    const caller = envApiRouter.createCaller(makeIdentityCtx())
+
+    const result = await caller.openPane({
+      workspaceId: workspace.id,
+      envId: 'local-default',
+      content: { type: 'file', path: '/tmp/no-frontend.ts' },
+    })
+    const tabs = await workspaceService.listTabs(workspace.id)
+    const viewState = await workspaceService.getViewState(workspace.id)
+
+    expect(tabs).toHaveLength(1)
+    expect(tabs[0]).toMatchObject({ type: 'file', envId: 'local-default', path: '/tmp/no-frontend.ts' })
+    expect(viewState.activeWorkspaceTabId).toBe(result.tab.id)
+  })
+
+  it('persists shell, preview, and browser panes with correct identity fields', async () => {
+    const { workspaceService } = await import('./service.js')
+    const { envApiRouter } = await import('../trpc/routers/env-api.js')
+    const workspace = await workspaceService.create({ name: 'Pane types workspace' })
+    const caller = envApiRouter.createCaller(makeIdentityCtx())
+
+    await caller.openPane({
+      workspaceId: workspace.id,
+      envId: 'local-default',
+      content: { type: 'shell', shellId: 'shell-1' },
+    })
+    await caller.openPane({
+      workspaceId: workspace.id,
+      envId: 'local-default',
+      content: { type: 'preview', port: 5173 },
+    })
+    await caller.openPane({
+      workspaceId: workspace.id,
+      envId: 'local-default',
+      content: { type: 'browser', url: 'https://example.com', browserTabId: 'native-1' },
+    })
+
+    await expect(workspaceService.listTabs(workspace.id)).resolves.toMatchObject([
+      { type: 'shell', envId: 'local-default', shellId: 'shell-1', position: 0 },
+      { type: 'preview', envId: 'local-default', port: 5173, position: 1 },
+      { type: 'browser', url: 'https://example.com', browserTabId: 'native-1', position: 2 },
     ])
   })
 })

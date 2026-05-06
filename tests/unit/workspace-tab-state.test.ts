@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  emptyWorkspaceUiState,
-  workspaceTabKey,
-  workspaceUiReducer,
-  type WorkspaceTab,
-} from '../../src/routes/workspace/tab-state'
+import { workspaceTabKey, type WorkspaceTab } from '../../shared/workspace-pane'
+import { emptyWorkspaceUiState, workspaceUiReducer } from '../../src/routes/workspace/tab-state'
 
 describe('workspace tab state', () => {
   it('treats the same preview port in different envs as distinct', () => {

@@ -38,6 +38,7 @@ interface SessionSummary {
 
 export function AgentSessionView({
   onOpenPane,
+  onOpenPaneRefreshHint,
   onActiveSessionChange,
   onSessionListChange,
   workspaceId,
@@ -47,6 +48,7 @@ export function AgentSessionView({
   onOpenNewChat,
 }: {
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
+  onOpenPaneRefreshHint?: () => void
   /**
    * Fires whenever the focused session changes. Lets EnvTabShell forward
    * the active session id (and thus its working dir) to the command
@@ -164,6 +166,7 @@ export function AgentSessionView({
             key={sessionId}
             sessionId={sessionId}
             onOpenPane={onOpenPane}
+            onOpenPaneRefreshHint={onOpenPaneRefreshHint}
           />
         ) : (
           <EmptySessionState workspaceId={workspaceId} onCreated={(id) => setSessionId(id)} />
@@ -243,9 +246,11 @@ function RestartAgentButton() {
 function SessionPane({
   sessionId,
   onOpenPane,
+  onOpenPaneRefreshHint,
 }: {
   sessionId: string
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
+  onOpenPaneRefreshHint?: () => void
 }) {
   const chat = useChatSession(sessionId)
   const chatStore = useChatStateStore()
@@ -271,7 +276,11 @@ function SessionPane({
     { sessionId },
     {
       onData(evt) {
-        handleAgentUiOpenPaneEvent(evt as { type: string; content: PaneContent; title?: string; activate: boolean }, onOpenPane)
+        handleAgentUiOpenPaneEvent(
+          evt as { type: string; content: PaneContent; title?: string; activate: boolean },
+          onOpenPane,
+          onOpenPaneRefreshHint,
+        )
       },
     },
   )

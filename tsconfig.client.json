@@ -11,6 +11,7 @@
     }
   },
   "include": [
+    "shared/**/*.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
     "server/trpc/router.ts",

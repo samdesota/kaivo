@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { ulid } from 'ulid'
+import { workspaceTabFromPaneContent, workspaceTabKey, type PaneContent } from '../../shared/workspace-pane'
 import { db, type Db } from '../db/client.js'
 import {
   workspaceAgentTabs,
@@ -18,7 +19,7 @@ export type Workspace = typeof workspaces.$inferSelect
 
 export class WorkspaceError extends Error {
   constructor(
-    public readonly code: 'not_found' | 'invalid_name',
+    public readonly code: 'not_found' | 'invalid_name' | 'invalid_pane',
     message: string,
   ) {
     super(message)
@@ -44,6 +45,13 @@ export type WorkspaceViewStateInput = {
 export type WorkspaceTabInput = {
   tab: WorkspaceTab
   position: number
+}
+
+export type WorkspaceOpenPaneInput = {
+  envId: string
+  content: PaneContent
+  title?: string
+  activate?: boolean
 }
 
 export type WorkspaceAgentTabInput = {
@@ -253,6 +261,28 @@ export function createWorkspaceService(database: Db = db) {
     return rows.find((tab) => tab.id === input.tab.id) ?? row
   }
 
+  async function openPane(workspaceId: string, input: WorkspaceOpenPaneInput): Promise<WorkspaceTabRow> {
+    await get(workspaceId)
+    const tab = workspaceTabFromPaneContent(input.content, input.envId, { title: input.title })
+    if (!tab) throw new WorkspaceError('invalid_pane', 'pane content cannot be opened in a workspace')
+
+    const rows = await listTabs(workspaceId)
+    const key = workspaceTabKey(tab)
+    const existing = rows.find((row) => {
+      const current = rowToTab(row)
+      return current ? workspaceTabKey(current) === key : false
+    })
+    const opened = existing ?? (await upsertTab(workspaceId, {
+      tab,
+      position: rows.reduce((max, row) => Math.max(max, row.position), -1) + 1,
+    }))
+
+    if (input.activate !== false) {
+      await saveViewState(workspaceId, { activeWorkspaceTabId: opened.id })
+    }
+    return opened
+  }
+
   async function deleteTab(workspaceId: string, tabId: string): Promise<void> {
     await get(workspaceId)
     await database.delete(workspaceTabs).where(and(eq(workspaceTabs.workspaceId, workspaceId), eq(workspaceTabs.id, tabId)))
@@ -368,6 +398,8 @@ export function createWorkspaceService(database: Db = db) {
     listTabs,
 
     upsertTab,
+
+    openPane,
 
     deleteTab,
 

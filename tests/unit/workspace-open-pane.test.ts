@@ -1,7 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { workspaceTabFromPaneContent } from '../../src/routes/workspace/open-pane'
+import { workspaceTabFromPaneContent, workspaceTabKey } from '../../shared/workspace-pane'
 
 describe('workspaceTabFromPaneContent', () => {
+  it('creates shell, file, preview, and browser tabs with expected titles and keys', () => {
+    const shell = workspaceTabFromPaneContent({ type: 'shell', shellId: 'shell-12345678' }, 'env-a')
+    const file = workspaceTabFromPaneContent({ type: 'file', path: '/tmp/a.ts' }, 'env-a')
+    const preview = workspaceTabFromPaneContent({ type: 'preview', port: 5173 }, 'env-a')
+    const browser = workspaceTabFromPaneContent({ type: 'browser', url: 'https://example.com' }, undefined)
+
+    expect(shell).toMatchObject({ type: 'shell', envId: 'env-a', shellId: 'shell-12345678', title: 'shell 12345678' })
+    expect(file).toMatchObject({ type: 'file', envId: 'env-a', path: '/tmp/a.ts', title: 'a.ts' })
+    expect(preview).toMatchObject({ type: 'preview', envId: 'env-a', port: 5173, title: 'preview :5173' })
+    expect(browser).toMatchObject({ type: 'browser', url: 'https://example.com', title: 'https://example.com' })
+
+    expect(shell && workspaceTabKey(shell)).toBe('shell:env-a:shell-12345678')
+    expect(file && workspaceTabKey(file)).toBe('file:env-a::/tmp/a.ts')
+    expect(preview && workspaceTabKey(preview)).toBe('preview:env-a:5173')
+    expect(browser && workspaceTabKey(browser)).toBe('browser:https://example.com')
+  })
+
+  it('uses stable logical keys for duplicate tabs even when tab ids differ', () => {
+    const first = workspaceTabFromPaneContent({ type: 'file', path: '/tmp/a.ts' }, 'env-a')
+    const second = workspaceTabFromPaneContent({ type: 'file', path: '/tmp/a.ts' }, 'env-a')
+
+    expect(first?.id).not.toBe(second?.id)
+    expect(first && second && workspaceTabKey(first)).toBe(second && workspaceTabKey(second))
+  })
+
   it('creates preview tabs instead of dropping preview open requests', () => {
     expect(workspaceTabFromPaneContent({ type: 'preview', port: 5173 }, 'env-a')).toMatchObject({
       type: 'preview',

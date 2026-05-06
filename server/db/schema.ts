@@ -1,5 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { check, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import type { WorkspaceTab } from '../../shared/workspace-pane'
+
+export type { WorkspaceTab }
 
 export type SandboxStatus = 'active' | 'archived' | 'crashed'
 export type JobState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -7,12 +10,6 @@ export type RepoSource = 'github' | 'url'
 export type AgentSessionStatus = 'active' | 'archived' | 'unavailable'
 export type ShellOwnerKind = 'human' | 'agent'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
-
-export type WorkspaceTab =
-  | { id: string; type: 'shell'; envId: string; shellId: string; title: string }
-  | { id: string; type: 'file'; envId: string; path: string; sessionId?: string; title: string }
-  | { id: string; type: 'preview'; envId: string; port: number; title: string }
-  | { id: string; type: 'browser'; url: string; browserTabId?: string; title: string }
 
 export type WorkspaceUiState = {
   activeAgentSessionId: string | null

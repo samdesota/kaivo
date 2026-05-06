@@ -7,6 +7,7 @@ import { agentShellProcedure, authedProcedure, router } from '../trpc.js'
 import { config } from '../../config.js'
 import { db } from '../../db/client.js'
 import { agentSessions } from '../../db/schema.js'
+import { openPane as persistOpenPane } from '../../identity/client.js'
 import { terminalService } from '../../terminal/service.js'
 import { paneContentSchema, type AgentPaneContent } from './agent-ui-schema.js'
 
@@ -28,15 +29,25 @@ function publish(evt: AgentUiEvent): void {
   for (const l of listeners) l(evt)
 }
 
-export function openPaneForAgent(input: {
+export async function openPaneForAgent(input: {
   opencodeSessionId: string
   content: AgentPaneContent
   title?: string
   activate?: boolean
-}): { ok: true } {
+}): Promise<{ ok: true }> {
   const session = resolveSession(input.opencodeSessionId)
+  if (!session.workspaceId) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'agent session is not attached to a workspace' })
+  }
   const content = validateContent(input.content, session.workingDir)
   const title = input.title?.trim() || undefined
+  await persistOpenPane({
+    workspaceId: session.workspaceId,
+    envId: `local-${config.CC_INSTANCE_ID}`,
+    content,
+    title,
+    activate: input.activate,
+  })
   publish({
     type: 'open_pane',
     sessionId: session.id,
@@ -60,9 +71,9 @@ function subscribe(sessionId: string, listener: Listener): () => void {
   }
 }
 
-function resolveSession(opencodeSessionId: string): { id: string; workingDir: string | null } {
+function resolveSession(opencodeSessionId: string): { id: string; workspaceId: string | null; workingDir: string | null } {
   const row = db
-    .select({ id: agentSessions.id, workingDir: agentSessions.workingDir })
+    .select({ id: agentSessions.id, workspaceId: agentSessions.workspaceId, workingDir: agentSessions.workingDir })
     .from(agentSessions)
     .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
     .limit(1)

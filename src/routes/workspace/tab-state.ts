@@ -1,8 +1,7 @@
-export type WorkspaceTab =
-  | { id: string; type: 'shell'; envId: string; shellId: string; title: string }
-  | { id: string; type: 'file'; envId: string; path: string; sessionId?: string; title: string }
-  | { id: string; type: 'preview'; envId: string; port: number; title: string }
-  | { id: string; type: 'browser'; url: string; browserTabId?: string; title: string }
+import { workspaceTabKey, type WorkspaceTab } from '../../../shared/workspace-pane'
+
+export type { WorkspaceTab }
+export { workspaceTabKey }
 
 export type WorkspaceUiState = {
   activeAgentSessionId: string | null
@@ -33,13 +32,6 @@ export function emptyWorkspaceUiState(): WorkspaceUiState {
     agentCollapsed: false,
     tabOrder: [],
   }
-}
-
-export function workspaceTabKey(tab: WorkspaceTab): string {
-  if (tab.type === 'shell') return `shell:${tab.envId}:${tab.shellId}`
-  if (tab.type === 'file') return `file:${tab.envId}:${tab.sessionId ?? ''}:${tab.path}`
-  if (tab.type === 'preview') return `preview:${tab.envId}:${tab.port}`
-  return `browser:${tab.url}`
 }
 
 export function workspaceUiReducer(
