@@ -55,6 +55,33 @@ function resolveCwd(
   return config.CC_WORKING_DIR
 }
 
+function resolveWorkspaceId(
+  workspaceId: string | null,
+  ownerAgentSessionId: string | null,
+  ownerSessionId: string | null,
+): string | null {
+  if (workspaceId) return workspaceId
+  if (ownerAgentSessionId) {
+    const row = db
+      .select({ workspaceId: agentSessions.workspaceId })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, ownerAgentSessionId))
+      .limit(1)
+      .all()[0]
+    if (row?.workspaceId) return row.workspaceId
+  }
+  if (ownerSessionId) {
+    const row = db
+      .select({ workspaceId: agentSessions.workspaceId })
+      .from(agentSessions)
+      .where(eq(agentSessions.opencodeSessionId, ownerSessionId))
+      .limit(1)
+      .all()[0]
+    if (row?.workspaceId) return row.workspaceId
+  }
+  return null
+}
+
 const localRequire = createRequire(import.meta.url)
 const { Terminal: HeadlessTerminal } = localRequire('@xterm/headless') as {
   Terminal: new (
@@ -228,9 +255,9 @@ class TerminalService {
     const cols = opts.cols ?? DEFAULT_COLS
     const rows = opts.rows ?? DEFAULT_ROWS
     const ownerKind: ShellOwnerKind = opts.ownerKind ?? 'human'
-    const workspaceId = opts.workspaceId ?? null
     const ownerSessionId = opts.ownerSessionId ?? null
     const ownerAgentSessionId = opts.ownerAgentSessionId ?? null
+    const workspaceId = resolveWorkspaceId(opts.workspaceId ?? null, ownerAgentSessionId, ownerSessionId)
     const cwd = resolveCwd(opts.cwd, ownerAgentSessionId, ownerSessionId)
 
     const term = new HeadlessTerminal({
@@ -432,8 +459,8 @@ class TerminalService {
     const cols = opts.cols ?? DEFAULT_COLS
     const rows = opts.rows ?? DEFAULT_ROWS
     const ownerSessionId = opts.ownerSessionId ?? null
-    const workspaceId = opts.workspaceId ?? null
     const ownerAgentSessionId = opts.ownerAgentSessionId ?? null
+    const workspaceId = resolveWorkspaceId(opts.workspaceId ?? null, ownerAgentSessionId, ownerSessionId)
     const cwd = resolveCwd(opts.cwd, ownerAgentSessionId, ownerSessionId)
 
     const term = new HeadlessTerminal({

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type AgentRow = {
   id: string
+  workspaceId: string | null
   opencodeSessionId: string
   workingDir: string | null
 }
@@ -51,6 +52,7 @@ vi.mock('../db/schema.js', () => ({
   agentSessions: {
     _table: 'agent_sessions',
     id: { _col: 'id' },
+    workspaceId: { _col: 'workspaceId' },
     opencodeSessionId: { _col: 'opencodeSessionId' },
     workingDir: { _col: 'workingDir' },
   },
@@ -187,7 +189,7 @@ afterEach(() => {
 
 describe('terminal service workspace shells', () => {
   it('shell create records workspace, cwd, and owner agent session', async () => {
-    agentRows.push({ id: 'agent-a', opencodeSessionId: 'oc-a', workingDir: '/tmp/project-a' })
+    agentRows.push({ id: 'agent-a', workspaceId: 'workspace-a', opencodeSessionId: 'oc-a', workingDir: '/tmp/project-a' })
     const { terminalService } = await import('./service.js')
 
     const shell = await terminalService.create({
@@ -208,6 +210,17 @@ describe('terminal service workspace shells', () => {
       cwd: '/tmp/project-a',
       ownerAgentSessionId: 'agent-a',
     })
+  })
+
+  it('infers workspace from opencode session for agent shells', async () => {
+    agentRows.push({ id: 'agent-a', workspaceId: 'workspace-a', opencodeSessionId: 'oc-a', workingDir: '/tmp/project-a' })
+    const { terminalService } = await import('./service.js')
+
+    const shell = await terminalService.create({ ownerKind: 'agent', ownerSessionId: 'oc-a' })
+
+    expect(shell.workspaceId).toBe('workspace-a')
+    expect(terminalService.list({ workspaceId: 'workspace-a' }).map((s) => s.id)).toEqual([shell.id])
+    expect(shellRows[0]?.workspaceId).toBe('workspace-a')
   })
 
   it('shell list filters by workspace and does not mix sessions', async () => {
