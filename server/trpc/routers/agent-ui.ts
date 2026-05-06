@@ -31,6 +31,25 @@ function publish(evt: AgentUiEvent): void {
   for (const l of listeners) l(evt)
 }
 
+export async function openPaneForAgent(input: {
+  sandboxId: string
+  opencodeSessionId: string
+  content: AgentPaneContent
+  title?: string
+  activate?: boolean
+}): Promise<{ ok: true }> {
+  const sessionId = await resolveSessionId(input.sandboxId, input.opencodeSessionId)
+  const content = await validateContent(input.sandboxId, input.content)
+  publish({
+    type: 'open_pane',
+    sessionId,
+    content,
+    title: input.title,
+    activate: input.activate ?? true,
+  })
+  return { ok: true as const }
+}
+
 function subscribe(sessionId: string, listener: Listener): () => void {
   let listeners = listenersBySession.get(sessionId)
   if (!listeners) {
@@ -104,16 +123,7 @@ export const agentUiRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const sandboxId = resolveAgentSandboxId(ctx, input.sandboxId)
-      const sessionId = await resolveSessionId(sandboxId, input.opencodeSessionId)
-      const content = await validateContent(sandboxId, input.content)
-      publish({
-        type: 'open_pane',
-        sessionId,
-        content,
-        title: input.title,
-        activate: input.activate ?? true,
-      })
-      return { ok: true as const }
+      return openPaneForAgent({ ...input, sandboxId })
     }),
 
   events: protectedProcedure

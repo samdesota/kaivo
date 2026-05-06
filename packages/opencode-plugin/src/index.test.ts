@@ -90,6 +90,141 @@ describe('cloud-code opencode plugin', () => {
     expect(success?.metadata?.exit_code).toBe(0)
   })
 
+  it('registers every browser tool when credentials exist', () => {
+    const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000' })
+
+    expect(Object.keys(hooks.tool!).filter((name) => name.startsWith('cloud_browser_')).sort()).toEqual([
+      'cloud_browser_connect_tab',
+      'cloud_browser_disconnect',
+      'cloud_browser_execute_js',
+      'cloud_browser_interact',
+      'cloud_browser_list_tabs',
+      'cloud_browser_open_and_connect',
+      'cloud_browser_screenshot',
+      'cloud_browser_snapshot',
+    ])
+  })
+
+  it('browser tools call expected procedures with opencodeSessionId', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const requestUrl = new URL(String(url))
+      const parsed = init?.body
+        ? JSON.parse(init.body as string)
+        : JSON.parse(requestUrl.searchParams.get('input') ?? '{}')
+      calls.push({ url: `${requestUrl.origin}${requestUrl.pathname}`, body: parsed.json })
+      const procedure = requestUrl.pathname.split('/trpc/')[1]
+      const payload = procedure?.endsWith('snapshot')
+        ? { text: 'snapshot text', url: 'https://example.com', title: 'Example', interactiveCount: 0, durationMs: 1 }
+        : procedure?.endsWith('screenshot')
+          ? { format: 'jpeg', width: 10, height: 10, base64: 'abc', byteLength: 2 }
+          : procedure?.endsWith('listTabs')
+            ? []
+            : procedure?.endsWith('disconnect')
+              ? { ok: true }
+              : { cdpId: 'cdp-1', browserTabId: 'tab-1' }
+      return new Response(JSON.stringify({ result: { data: { json: payload } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
+    const ctx = makeCtx('oc-browser')
+
+    await hooks.tool!.cloud_browser_list_tabs!.execute({}, ctx as never)
+    await hooks.tool!.cloud_browser_connect_tab!.execute({ browserTabId: 'tab-1' }, ctx as never)
+    await hooks.tool!.cloud_browser_open_and_connect!.execute({ url: 'https://example.com' }, ctx as never)
+    await hooks.tool!.cloud_browser_disconnect!.execute({ cdpId: 'cdp-1' }, ctx as never)
+    await hooks.tool!.cloud_browser_snapshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
+    await hooks.tool!.cloud_browser_interact!.execute({ cdpId: 'cdp-1', action: { type: 'wait' } }, ctx as never)
+    await hooks.tool!.cloud_browser_screenshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
+    await hooks.tool!.cloud_browser_execute_js!.execute({ cdpId: 'cdp-1', expression: 'document.title' }, ctx as never)
+
+    expect(calls.map((call) => call.url)).toEqual([
+      'http://app:3000/trpc/agentBrowser.listTabs',
+      'http://app:3000/trpc/agentBrowser.connectTab',
+      'http://app:3000/trpc/agentBrowser.openAndConnect',
+      'http://app:3000/trpc/agentBrowser.disconnect',
+      'http://app:3000/trpc/agentBrowser.snapshot',
+      'http://app:3000/trpc/agentBrowser.interact',
+      'http://app:3000/trpc/agentBrowser.screenshot',
+      'http://app:3000/trpc/agentBrowser.executeJs',
+    ])
+    expect(calls.every((call) => (call.body as { opencodeSessionId?: string }).opencodeSessionId === 'oc-browser')).toBe(true)
+    expect(calls[5]?.body).toMatchObject({ cdpId: 'cdp-1', action: { type: 'wait' } })
+  })
+
+  it('browser snapshot omits empty optional filter strings', async () => {
+    const calls: Array<{ body: unknown }> = []
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      const requestUrl = new URL(String(url))
+      const parsed = JSON.parse(requestUrl.searchParams.get('input') ?? '{}')
+      calls.push({ body: parsed.json })
+      return new Response(JSON.stringify({ result: { data: { json: { text: 'snapshot text' } } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
+
+    await hooks.tool!.cloud_browser_snapshot!.execute(
+      { cdpId: 'cdp-1', filter: '', filterFlags: '', viewportOnly: true },
+      makeCtx('oc-browser') as never,
+    )
+
+    expect(calls[0]?.body).toEqual({ cdpId: 'cdp-1', viewportOnly: true, opencodeSessionId: 'oc-browser' })
+  })
+
+  it('browser interact normalizes shorthand action shapes', async () => {
+    const calls: Array<{ body: unknown }> = []
+    const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      const parsed = JSON.parse(init!.body as string)
+      calls.push({ body: parsed.json })
+      return new Response(JSON.stringify({ result: { data: { json: { ok: true } } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
+
+    await hooks.tool!.cloud_browser_interact!.execute(
+      { cdpId: 'cdp-1', action: { type: 'click', id: 28 }, postSnapshot: { filter: '', viewportOnly: true } },
+      makeCtx('oc-browser') as never,
+    )
+    await hooks.tool!.cloud_browser_interact!.execute(
+      { cdpId: 'cdp-1', action: { type: 'fill', id: 28, value: 'OpenAI' } },
+      makeCtx('oc-browser') as never,
+    )
+
+    expect(calls[0]?.body).toMatchObject({
+      cdpId: 'cdp-1',
+      opencodeSessionId: 'oc-browser',
+      action: { type: 'click', elementId: '28' },
+      postSnapshot: { viewportOnly: true },
+    })
+    expect(calls[1]?.body).toMatchObject({
+      cdpId: 'cdp-1',
+      opencodeSessionId: 'oc-browser',
+      action: { type: 'fill', fields: [{ elementId: '28', text: 'OpenAI' }] },
+    })
+  })
+
+  it('browser tools map app errors to structured metadata', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('network down')
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://nope', fetchImpl, backoffMs: [1] })
+
+    const result = (await hooks.tool!.cloud_browser_snapshot!.execute(
+      { cdpId: 'cdp-1' },
+      makeCtx() as never,
+    )) as { output: string; metadata: Record<string, unknown> }
+
+    expect(result.output).toBe('')
+    expect(result.metadata.status).toBe('error')
+    expect(result.metadata.stderr).toBe('cloud-code app unreachable')
+  })
+
   it('cloud_bash: returns structured error if app is unreachable', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('ECONNREFUSED')

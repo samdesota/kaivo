@@ -28,6 +28,25 @@ function publish(evt: AgentUiEvent): void {
   for (const l of listeners) l(evt)
 }
 
+export function openPaneForAgent(input: {
+  opencodeSessionId: string
+  content: AgentPaneContent
+  title?: string
+  activate?: boolean
+}): { ok: true } {
+  const session = resolveSession(input.opencodeSessionId)
+  const content = validateContent(input.content, session.workingDir)
+  const title = input.title?.trim() || undefined
+  publish({
+    type: 'open_pane',
+    sessionId: session.id,
+    content,
+    title,
+    activate: input.activate ?? true,
+  })
+  return { ok: true as const }
+}
+
 function subscribe(sessionId: string, listener: Listener): () => void {
   let listeners = listenersBySession.get(sessionId)
   if (!listeners) {
@@ -88,17 +107,7 @@ export const agentUiRouter = router({
       }),
     )
     .mutation(({ input }) => {
-      const session = resolveSession(input.opencodeSessionId)
-      const content = validateContent(input.content, session.workingDir)
-      const title = input.title?.trim() || undefined
-      publish({
-        type: 'open_pane',
-        sessionId: session.id,
-        content,
-        title,
-        activate: input.activate ?? true,
-      })
-      return { ok: true as const }
+      return openPaneForAgent(input)
     }),
 
   events: authedProcedure

@@ -13,6 +13,8 @@ const api = {
   forward: vi.fn(async () => undefined),
   reload: vi.fn(async () => undefined),
   openDevTools: vi.fn(async () => undefined),
+  getAgentConnections: vi.fn(async () => ({ browserTabIds: [] })),
+  disconnectAgent: vi.fn(async () => undefined),
   closeTab: vi.fn(async () => undefined),
   setSlot: vi.fn(async () => undefined),
   onTabChange: vi.fn(() => () => undefined),
@@ -34,6 +36,7 @@ describe('BrowserPane', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.isAvailable.mockReturnValue(true)
+    api.getAgentConnections.mockResolvedValue({ browserTabIds: [] })
     rect = { x: 10, y: 20, width: 300, height: 200 }
     Object.defineProperty(globalThis, 'ResizeObserver', {
       value: TestResizeObserver,
@@ -195,5 +198,17 @@ describe('BrowserPane', () => {
 
     await act(async () => view.unmount())
     expect(api.closeTab).not.toHaveBeenCalled()
+  })
+
+  it('renders connected-agent banner and disconnects the agent', async () => {
+    api.getAgentConnections.mockResolvedValue({ browserTabIds: ['native-tab-1'] })
+    const view = render(
+      <BrowserPane paneId="pane-1" browserTabId="native-tab-1" url="https://example.com" active={true} />,
+    )
+
+    await waitFor(() => expect(view.getByText('Agent connected to this tab')).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Disconnect' }))
+
+    await waitFor(() => expect(api.disconnectAgent).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' }))
   })
 })

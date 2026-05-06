@@ -26,6 +26,7 @@ test('browser API creates and navigates a webframe tab from the chrome page', as
       env: {
         ...process.env,
         NODE_ENV: 'development',
+        CC_INSTANCE_ID: 'desktop-browser-api-test',
         CC_DESKTOP_CHROME_URL: chromeUrl,
         CC_DESKTOP_TEST_LOG: desktopLogPath,
         CC_DESKTOP_TEST_STATE_DIR: desktopStateDir,
@@ -116,6 +117,7 @@ declare global {
     getState: () => Promise<{
       config: { chromeUrl: string }
       windowIds: string[]
+      browserAgentSocketPath?: string
       tabRecords: Array<{ id: string; url: string }>
       windowInfo: Array<{ slots: Array<{ name: string }> }>
       nativeViews: Array<{ children: Array<{ bounds?: { x: number; y: number; width: number; height: number } }> }>

@@ -22,6 +22,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
   const [address, setAddress] = useState(url ?? '')
+  const [agentConnected, setAgentConnected] = useState(false)
 
   browserTabIdRef.current = browserTabId
   onBrowserTabIdRef.current = onBrowserTabId
@@ -113,6 +114,26 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   }, [])
 
   useEffect(() => {
+    if (!browserApi.isAvailable()) return
+    let cancelled = false
+    async function refresh() {
+      const id = browserTabIdRef.current
+      if (!id) {
+        if (!cancelled) setAgentConnected(false)
+        return
+      }
+      const connections = await browserApi.getAgentConnections()
+      if (!cancelled) setAgentConnected(connections.browserTabIds.includes(id))
+    }
+    void refresh()
+    const interval = window.setInterval(() => void refresh(), 1000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [browserTabId])
+
+  useEffect(() => {
     return () => {
       if (!closeOnUnmount) return
       const ownedTabId = browserTabIdRef.current ?? createdTabIdRef.current
@@ -169,6 +190,12 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     await browserApi.openDevTools({ browserTabId: activeBrowserTabId })
   }
 
+  async function disconnectAgent() {
+    if (!activeBrowserTabId) return
+    await browserApi.disconnectAgent({ browserTabId: activeBrowserTabId })
+    setAgentConnected(false)
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-neutral-950">
       <form
@@ -218,6 +245,18 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
           spellCheck={false}
         />
       </form>
+      {agentConnected ? (
+        <div className="flex shrink-0 items-center justify-between border-b border-amber-500/30 bg-amber-950/50 px-3 py-1.5 text-xs text-amber-100">
+          <span>Agent connected to this tab</span>
+          <button
+            type="button"
+            onClick={() => void disconnectAgent()}
+            className="rounded border border-amber-400/40 px-2 py-0.5 text-amber-50 hover:bg-amber-900"
+          >
+            Disconnect
+          </button>
+        </div>
+      ) : null}
       <div ref={slotRef} className="min-h-0 flex-1 bg-neutral-950" aria-label="Browser pane slot" />
     </div>
   )

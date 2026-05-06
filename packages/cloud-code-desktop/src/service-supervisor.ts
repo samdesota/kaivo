@@ -3,6 +3,7 @@ import path from 'node:path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { app } from 'electron'
 import type { InstanceRuntimeConfig } from './instance-runtime'
+import { desktopBrowserSocketPath } from './instance-runtime'
 import { ensureDesktopPairing, type DesktopPairingResult } from './desktop-pairing'
 
 export type ServiceName = 'app' | 'env'
@@ -170,6 +171,8 @@ function packagedLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig)
         NODE_ENV: 'production',
         APP_SQLITE_PATH: config.app.sqlitePath,
         CC_INSTANCE_ID: config.instanceId,
+        CC_INSTANCE_ROOT: config.rootDir,
+        CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
         CC_SERVE_CLIENT: 'true',
         DATA_DIR: config.app.dataDir,
         PORT: String(config.app.port),
@@ -194,6 +197,8 @@ function packagedLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig)
       NODE_ENV: 'production',
       CC_KIND: 'local',
       CC_INSTANCE_ID: config.instanceId,
+      CC_INSTANCE_ROOT: config.rootDir,
+      CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
       CC_LABEL: config.env.label,
       CC_PORT: String(config.env.port),
       CC_HOST: config.env.host,
@@ -219,6 +224,8 @@ function devLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, cwd:
         NODE_ENV: 'test',
         APP_SQLITE_PATH: config.app.sqlitePath,
         CC_INSTANCE_ID: config.instanceId,
+        CC_INSTANCE_ROOT: config.rootDir,
+        CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
         CC_SERVE_CLIENT: 'true',
         DATA_DIR: config.app.dataDir,
         PORT: String(config.app.port),
@@ -241,6 +248,8 @@ function devLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, cwd:
       NODE_ENV: 'test',
       CC_KIND: 'local',
       CC_INSTANCE_ID: config.instanceId,
+      CC_INSTANCE_ROOT: config.rootDir,
+      CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
       CC_LABEL: config.env.label,
       CC_PORT: String(config.env.port),
       CC_HOST: config.env.host,
