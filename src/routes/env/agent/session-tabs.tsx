@@ -181,7 +181,7 @@ export function NewSessionPopover({
             else setOpen(true)
           }}
           disabled={start.isPending}
-          className="shrink-0 rounded px-2 py-1 text-xs text-brand-400 hover:bg-neutral-900 hover:text-brand-300"
+          className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-brand-400 hover:bg-neutral-900 hover:text-brand-300"
           title="New agent chat"
           aria-label="New agent chat"
         >
