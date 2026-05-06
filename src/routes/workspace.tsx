@@ -424,7 +424,7 @@ function WorkspaceSidebar({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {workspaces.map((workspace) => {
-          const active = workspace.id === ctx.workspace.id
+          const active = workspace.id === ctx.workspace.id && !ctx.uiState.activeAgentSessionId
           const editing = edit.editingId === workspace.id
           return (
             <div key={workspace.id} className="mb-2">
