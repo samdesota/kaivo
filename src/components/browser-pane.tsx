@@ -21,6 +21,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   const onTitleChangeRef = useRef(onTitleChange)
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
+  const slotReadyRef = useRef<Promise<void>>(Promise.resolve())
   const [address, setAddress] = useState(url ?? '')
   const [agentConnected, setAgentConnected] = useState(false)
 
@@ -39,9 +40,11 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
 
     function updateSlot() {
       const rect = active ? slot!.getBoundingClientRect() : HIDDEN_RECT
-      void browserApi.setSlot({
+      slotReadyRef.current = browserApi.setSlot({
         paneId,
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      }).catch((error) => {
+        console.info('Native browser slot update failed', error)
       })
     }
 
@@ -52,7 +55,9 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', updateSlot)
-      void browserApi.setSlot({ paneId, rect: HIDDEN_RECT })
+      void browserApi.setSlot({ paneId, rect: HIDDEN_RECT }).catch((error) => {
+        console.info('Native browser slot cleanup failed', error)
+      })
     }
   }, [active, paneId])
 
@@ -64,6 +69,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     let cancelled = false
 
     async function ensureTab() {
+      await slotReadyRef.current
       const existingTabId = browserTabIdRef.current
       if (existingTabId) {
         const tabKey = `${existingTabId}:${paneId}`
@@ -138,7 +144,9 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
       if (!closeOnUnmount) return
       const ownedTabId = browserTabIdRef.current ?? createdTabIdRef.current
       if (ownedTabId && browserApi.isAvailable()) {
-        void browserApi.closeTab({ browserTabId: ownedTabId })
+        void browserApi.closeTab({ browserTabId: ownedTabId }).catch((error) => {
+          console.info('Native browser tab cleanup failed', error)
+        })
       }
     }
   }, [closeOnUnmount])
