@@ -37,6 +37,10 @@ describe('agent browser schemas', () => {
       expect(
         contracts.executeJsInputSchema.parse({ ...sessionInput, cdpId: 'cdp-1', expression: 'document.title' }),
       ).toMatchObject({ cdpId: 'cdp-1', expression: 'document.title' })
+      expect(contracts.readLogsInputSchema.parse({ ...sessionInput, cdpId: 'cdp-1', maxEntries: 25 })).toMatchObject({
+        cdpId: 'cdp-1',
+        maxEntries: 25,
+      })
     }
   })
 
@@ -57,6 +61,9 @@ describe('agent browser schemas', () => {
       ).toBe(false)
       expect(
         contracts.executeJsInputSchema.safeParse({ ...sessionInput, cdpId: 'cdp-1', expression: '' }).success,
+      ).toBe(false)
+      expect(
+        contracts.readLogsInputSchema.safeParse({ ...sessionInput, cdpId: 'cdp-1', maxEntries: 0 }).success,
       ).toBe(false)
       expect(
         contracts.executeJsInputSchema.safeParse({

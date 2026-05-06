@@ -173,6 +173,23 @@ export const executeJsOutputSchema = z.object({
   exception: z.string().optional(),
 })
 
+export const readLogsInputSchema = cdpConnectionInputSchema.extend({
+  maxEntries: z.number().int().min(1).max(500).optional(),
+})
+
+export const browserLogEntrySchema = z.object({
+  ts: z.string().datetime(),
+  level: z.string().min(1),
+  message: z.string(),
+  line: z.number().int().optional(),
+  sourceId: z.string().optional(),
+})
+
+export const readLogsOutputSchema = z.object({
+  entries: z.array(browserLogEntrySchema),
+  truncated: z.boolean(),
+})
+
 export type BrowserConnection = z.infer<typeof browserConnectionSchema>
 export type BrowserTabSummary = z.infer<typeof browserTabSummarySchema>
 export type InteractAction = z.infer<typeof interactActionSchema>
@@ -180,3 +197,5 @@ export type SnapshotOutput = z.infer<typeof snapshotOutputSchema>
 export type InteractOutput = z.infer<typeof interactOutputSchema>
 export type ScreenshotOutput = z.infer<typeof screenshotOutputSchema>
 export type ExecuteJsOutput = z.infer<typeof executeJsOutputSchema>
+export type BrowserLogEntry = z.infer<typeof browserLogEntrySchema>
+export type ReadLogsOutput = z.infer<typeof readLogsOutputSchema>

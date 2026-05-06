@@ -8,6 +8,7 @@ import {
   interactInputSchema,
   listTabsInputSchema,
   openAndConnectInputSchema,
+  readLogsInputSchema,
   screenshotInputSchema,
   snapshotInputSchema,
 } from './agent-browser-schema.js'
@@ -62,6 +63,13 @@ export const agentBrowserRouter = router({
     return getAgentBrowserService().executeJs(scope(input), {
       cdpId: input.cdpId,
       expression: input.expression,
+    })
+  }),
+
+  readLogs: agentShellProcedure.input(readLogsInputSchema).query(({ input }) => {
+    return getAgentBrowserService().readLogs(scope(input), {
+      cdpId: input.cdpId,
+      maxEntries: input.maxEntries,
     })
   }),
 })

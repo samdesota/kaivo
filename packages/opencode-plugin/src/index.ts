@@ -191,6 +191,13 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runBrowserTool(client, 'agentBrowser.snapshot', stripEmptyStrings(args), context as unknown as ToolCtxLike, 'query')
         },
       }),
+      cloud_browser_read_logs: tool({
+        description: 'Read buffered console logs from a connected browser tab. Logs are collected after the tab is connected with cloud_browser_connect_tab or cloud_browser_open_and_connect.',
+        args: { cdpId: z.string().min(1), maxEntries: z.number().int().optional() },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.readLogs', args, context as unknown as ToolCtxLike, 'query')
+        },
+      }),
       cloud_browser_interact: tool({
         description: 'Perform a browser action on a connected tab by element ID or navigation action.',
         args: { cdpId: z.string().min(1), action: z.any(), postSnapshot: z.any().optional() },
@@ -563,8 +570,9 @@ function normalizeInteractArgs<T extends Record<string, unknown>>(input: T): T {
       })
     }
   }
-  if (next.postSnapshot && typeof next.postSnapshot === 'object') {
-    next.postSnapshot = stripEmptyStrings({ ...(next.postSnapshot as Record<string, unknown>) })
+  const normalizedNext = next as Record<string, unknown>
+  if (normalizedNext.postSnapshot && typeof normalizedNext.postSnapshot === 'object') {
+    normalizedNext.postSnapshot = stripEmptyStrings({ ...(normalizedNext.postSnapshot as Record<string, unknown>) })
   }
   return { ...next, action } as T
 }

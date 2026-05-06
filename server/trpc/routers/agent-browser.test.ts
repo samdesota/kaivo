@@ -66,6 +66,9 @@ function fakeBrowserService(): AgentBrowserService {
     async executeJs() {
       throw new Error('unused')
     },
+    async readLogs() {
+      throw new Error('unused')
+    },
   }
 }
 

@@ -61,4 +61,5 @@ export const desktopBrowserSocketService: AgentBrowserService = {
   interact: (scope, input) => call('interact', withScope(scope, input as Record<string, unknown>)),
   screenshot: (scope, input) => call('screenshot', withScope(scope, input)),
   executeJs: (scope, input) => call('executeJs', withScope(scope, input)),
+  readLogs: (scope, input) => call('readLogs', withScope(scope, input)),
 }

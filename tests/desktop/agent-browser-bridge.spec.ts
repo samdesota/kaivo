@@ -99,9 +99,16 @@ test('agent browser bridge connects existing tabs', async ({ desktopLogPath, des
         sandboxId: 'sb-a',
         opencodeSessionId: 'oc-a',
         cdpId: connected.cdpId,
-        expression: 'document.body.dataset.saved',
+        expression: 'console.warn("agent bridge log probe"); document.body.dataset.saved',
       })
       expect(js.value).toBe('Ada')
+      const logs = await bridgeCall<{ entries: Array<{ level: string; message: string }>; truncated: boolean }>(socketPath, 'readLogs', {
+        sandboxId: 'sb-a',
+        opencodeSessionId: 'oc-a',
+        cdpId: connected.cdpId,
+      })
+      expect(logs.truncated).toBe(false)
+      expect(logs.entries).toContainEqual(expect.objectContaining({ level: 'warning', message: 'agent bridge log probe' }))
       const image = await bridgeCall<{ base64: string; byteLength: number }>(socketPath, 'screenshot', {
         sandboxId: 'sb-a',
         opencodeSessionId: 'oc-a',

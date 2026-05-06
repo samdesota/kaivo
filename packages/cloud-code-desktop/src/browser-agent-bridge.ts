@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import type { Server } from 'node:net'
-import type { WebContents } from 'electron'
+import type { Event as ElectronEvent, WebContents } from 'electron'
 import type { WebframeApp } from '@samdesota/webframe'
 import { BrowserAgentConnectionRegistry, type BrowserAgentScope } from './browser-agent-registry'
 import { AGENT_TREE_SOURCE, serializeSnapshot, snapshotToText } from './agent-tree-snapshot'
@@ -32,6 +32,19 @@ type BrowserTabSummary = {
   connectedByCurrentAgent: boolean
 }
 
+type BrowserLogEntry = {
+  ts: string
+  level: string
+  message: string
+  line?: number
+  sourceId?: string
+}
+
+type BrowserLogState = {
+  buffers: Map<string, BrowserLogEntry[]>
+  disposers: Map<string, () => void>
+}
+
 type SnapshotOutput = {
   url: string
   title: string
@@ -59,6 +72,7 @@ export async function startBrowserAgentBridge(options: BrowserAgentBridgeOptions
   fs.mkdirSync(path.dirname(options.socketPath), { recursive: true })
   if (fs.existsSync(options.socketPath)) fs.unlinkSync(options.socketPath)
   const registry = new BrowserAgentConnectionRegistry()
+  const logs: BrowserLogState = { buffers: new Map(), disposers: new Map() }
   const server = net.createServer((socket) => {
     socket.setEncoding('utf8')
     let buffer = ''
@@ -68,7 +82,7 @@ export async function startBrowserAgentBridge(options: BrowserAgentBridgeOptions
       while (index !== -1) {
         const line = buffer.slice(0, index).trim()
         buffer = buffer.slice(index + 1)
-        if (line) void handleLine(line, socket, options, registry)
+        if (line) void handleLine(line, socket, options, registry, logs)
         index = buffer.indexOf('\n')
       }
     })
@@ -91,11 +105,17 @@ export async function startBrowserAgentBridge(options: BrowserAgentBridgeOptions
     disconnectTab: (browserTabId: string) => {
       const removed = registry.disconnectTab(browserTabId)
       if (removed.length) {
+        logs.disposers.get(browserTabId)?.()
+        logs.disposers.delete(browserTabId)
         const contents = options.findTabWebContents(browserTabId)
         if (contents?.debugger.isAttached()) contents.debugger.detach()
       }
     },
-    close: () => closeServer(server, options.socketPath),
+    close: () => {
+      for (const dispose of logs.disposers.values()) dispose()
+      logs.disposers.clear()
+      return closeServer(server, options.socketPath)
+    },
   }
 }
 
@@ -108,12 +128,13 @@ async function handleLine(
   socket: net.Socket,
   options: BrowserAgentBridgeOptions,
   registry: BrowserAgentConnectionRegistry,
+  logs: BrowserLogState,
 ): Promise<void> {
   let request: BridgeRequest
   try {
     request = JSON.parse(line) as BridgeRequest
     if (!request.id || !request.method) throw new Error('invalid bridge request')
-    const result = await dispatch(request.method, request.params ?? {}, options, registry)
+    const result = await dispatch(request.method, request.params ?? {}, options, registry, logs)
     socket.write(`${JSON.stringify({ id: request.id, result })}\n`)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -127,16 +148,18 @@ async function dispatch(
   params: Record<string, unknown>,
   options: BrowserAgentBridgeOptions,
   registry: BrowserAgentConnectionRegistry,
+  logs: BrowserLogState,
 ): Promise<unknown> {
   const scope = parseScope(params)
   if (method === 'listTabs') return listTabs(scope, options, registry)
-  if (method === 'connectTab') return connectTab(scope, String(params.browserTabId ?? ''), options, registry)
+  if (method === 'connectTab') return connectTab(scope, String(params.browserTabId ?? ''), options, registry, logs)
   if (method === 'openAndConnect') return openAndConnect(scope, params, options, registry)
-  if (method === 'disconnect') return disconnect(scope, String(params.cdpId ?? ''), options, registry)
+  if (method === 'disconnect') return disconnect(scope, String(params.cdpId ?? ''), options, registry, logs)
   if (method === 'snapshot') return snapshot(scope, params, options, registry)
   if (method === 'interact') return interact(scope, params, options, registry)
   if (method === 'screenshot') return screenshot(scope, params, options, registry)
   if (method === 'executeJs') return executeJs(scope, params, options, registry)
+  if (method === 'readLogs') return readLogs(scope, params, options, registry, logs)
   throw new Error(`unsupported browser bridge method: ${method}`)
 }
 
@@ -161,10 +184,12 @@ async function connectTab(
   browserTabId: string,
   options: BrowserAgentBridgeOptions,
   registry: BrowserAgentConnectionRegistry,
+  logs: BrowserLogState,
 ): Promise<BrowserConnection> {
   if (!browserTabId) throw new Error('browserTabId is required')
   const contents = options.findTabWebContents(browserTabId)
   if (!contents || contents.isDestroyed()) throw new Error('browser tab closed')
+  installLogCollector(browserTabId, contents, logs)
   if (!contents.debugger.isAttached()) contents.debugger.attach('1.3')
   contents.once('destroyed', () => registry.disconnectTab(browserTabId))
   contents.debugger.once('detach', () => registry.disconnectTab(browserTabId))
@@ -197,6 +222,7 @@ async function disconnect(
   cdpId: string,
   options: BrowserAgentBridgeOptions,
   registry: BrowserAgentConnectionRegistry,
+  logs: BrowserLogState,
 ): Promise<{ ok: true }> {
   if (!cdpId) throw new Error('cdpId is required')
   const connection = registry.disconnect(scope, cdpId)
@@ -204,6 +230,10 @@ async function disconnect(
   const stillConnected = registry.isConnected(connection.browserTabId)
   const contents = options.findTabWebContents(connection.browserTabId)
   if (!stillConnected && contents?.debugger.isAttached()) contents.debugger.detach()
+  if (!stillConnected) {
+    logs.disposers.get(connection.browserTabId)?.()
+    logs.disposers.delete(connection.browserTabId)
+  }
   return { ok: true }
 }
 
@@ -357,6 +387,55 @@ async function executeJs(
   } catch (error) {
     return { type: 'error', exception: error instanceof Error ? error.message : String(error) }
   }
+}
+
+async function readLogs(
+  scope: BrowserAgentScope,
+  params: Record<string, unknown>,
+  options: BrowserAgentBridgeOptions,
+  registry: BrowserAgentConnectionRegistry,
+  logs: BrowserLogState,
+): Promise<{ entries: BrowserLogEntry[]; truncated: boolean }> {
+  const { connection } = connectedContents(scope, String(params.cdpId ?? ''), options, registry)
+  const maxEntries = Math.min(Math.max(Number(params.maxEntries ?? 100), 1), 500)
+  const entries = logs.buffers.get(connection.browserTabId) ?? []
+  return {
+    entries: entries.slice(-maxEntries),
+    truncated: entries.length > maxEntries,
+  }
+}
+
+function installLogCollector(browserTabId: string, contents: WebContents, logs: BrowserLogState): void {
+  if (logs.disposers.has(browserTabId)) return
+  const onConsoleMessage = (_event: ElectronEvent, level: number, message: string, line: number, sourceId: string) => {
+    appendLog(logs, browserTabId, {
+      ts: new Date().toISOString(),
+      level: consoleLevel(level),
+      message,
+      line,
+      sourceId,
+    })
+  }
+  const dispose = () => contents.off('console-message', onConsoleMessage)
+  contents.on('console-message', onConsoleMessage)
+  contents.once('destroyed', dispose)
+  logs.disposers.set(browserTabId, dispose)
+  if (!logs.buffers.has(browserTabId)) logs.buffers.set(browserTabId, [])
+}
+
+function appendLog(logs: BrowserLogState, browserTabId: string, entry: BrowserLogEntry): void {
+  const buffer = logs.buffers.get(browserTabId) ?? []
+  buffer.push(entry)
+  if (buffer.length > 1000) buffer.splice(0, buffer.length - 1000)
+  logs.buffers.set(browserTabId, buffer)
+}
+
+function consoleLevel(level: number): string {
+  if (level === 0) return 'verbose'
+  if (level === 1) return 'info'
+  if (level === 2) return 'warning'
+  if (level === 3) return 'error'
+  return String(level)
 }
 
 function connectedContents(

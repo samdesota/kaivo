@@ -100,6 +100,7 @@ describe('cloud-code opencode plugin', () => {
       'cloud_browser_interact',
       'cloud_browser_list_tabs',
       'cloud_browser_open_and_connect',
+      'cloud_browser_read_logs',
       'cloud_browser_screenshot',
       'cloud_browser_snapshot',
     ])
@@ -116,10 +117,12 @@ describe('cloud-code opencode plugin', () => {
       const procedure = requestUrl.pathname.split('/trpc/')[1]
       const payload = procedure?.endsWith('snapshot')
         ? { text: 'snapshot text', url: 'https://example.com', title: 'Example', interactiveCount: 0, durationMs: 1 }
-        : procedure?.endsWith('screenshot')
-          ? { format: 'jpeg', width: 10, height: 10, base64: 'abc', byteLength: 2 }
-          : procedure?.endsWith('listTabs')
-            ? []
+          : procedure?.endsWith('screenshot')
+            ? { format: 'jpeg', width: 10, height: 10, base64: 'abc', byteLength: 2 }
+            : procedure?.endsWith('readLogs')
+              ? { entries: [], truncated: false }
+            : procedure?.endsWith('listTabs')
+              ? []
             : procedure?.endsWith('disconnect')
               ? { ok: true }
               : { cdpId: 'cdp-1', browserTabId: 'tab-1' }
@@ -137,6 +140,7 @@ describe('cloud-code opencode plugin', () => {
     await hooks.tool!.cloud_browser_disconnect!.execute({ cdpId: 'cdp-1' }, ctx as never)
     await hooks.tool!.cloud_browser_snapshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
     await hooks.tool!.cloud_browser_interact!.execute({ cdpId: 'cdp-1', action: { type: 'wait' } }, ctx as never)
+    await hooks.tool!.cloud_browser_read_logs!.execute({ cdpId: 'cdp-1' }, ctx as never)
     await hooks.tool!.cloud_browser_screenshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
     await hooks.tool!.cloud_browser_execute_js!.execute({ cdpId: 'cdp-1', expression: 'document.title' }, ctx as never)
 
@@ -147,6 +151,7 @@ describe('cloud-code opencode plugin', () => {
       'http://app:3000/trpc/agentBrowser.disconnect',
       'http://app:3000/trpc/agentBrowser.snapshot',
       'http://app:3000/trpc/agentBrowser.interact',
+      'http://app:3000/trpc/agentBrowser.readLogs',
       'http://app:3000/trpc/agentBrowser.screenshot',
       'http://app:3000/trpc/agentBrowser.executeJs',
     ])

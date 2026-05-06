@@ -5,6 +5,7 @@ import type {
   BrowserTabSummary,
   ExecuteJsOutput,
   InteractOutput,
+  ReadLogsOutput,
   ScreenshotOutput,
   SnapshotOutput,
 } from '../trpc/routers/agent-browser-schema.js'
@@ -23,6 +24,7 @@ export interface AgentBrowserService {
   interact(scope: AgentBrowserScope, input: { cdpId: string; action: unknown; postSnapshot?: unknown }): Promise<InteractOutput>
   screenshot(scope: AgentBrowserScope, input: { cdpId: string }): Promise<ScreenshotOutput>
   executeJs(scope: AgentBrowserScope, input: { cdpId: string; expression: string }): Promise<ExecuteJsOutput>
+  readLogs(scope: AgentBrowserScope, input: { cdpId: string; maxEntries?: number }): Promise<ReadLogsOutput>
 }
 
 function unavailable(): never {
@@ -55,6 +57,9 @@ export const unavailableAgentBrowserService: AgentBrowserService = {
     unavailable()
   },
   async executeJs() {
+    unavailable()
+  },
+  async readLogs() {
     unavailable()
   },
 }
