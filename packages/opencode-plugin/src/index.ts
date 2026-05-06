@@ -51,7 +51,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     return {}
   }
   console.error(
-    `[cloud-code-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane (appUrl=${creds.appUrl})`,
+    `[cloud-code-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane, cloud_browser_* (appUrl=${creds.appUrl})`,
   )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
@@ -154,6 +154,62 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
         },
         async execute(args, context) {
           return runCloudOpenPane(client, args, context as unknown as ToolCtxLike)
+        },
+      }),
+      cloud_browser_list_tabs: tool({
+        description: 'List Cloud Code browser tabs available for agent connection.',
+        args: {},
+        async execute(_args, context) {
+          return runBrowserTool(client, 'agentBrowser.listTabs', {}, context as unknown as ToolCtxLike, 'query')
+        },
+      }),
+      cloud_browser_connect_tab: tool({
+        description: 'Connect the agent to an existing Cloud Code browser tab and return a cdpId for subsequent browser tools.',
+        args: { browserTabId: z.string().min(1) },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.connectTab', args, context as unknown as ToolCtxLike, 'mutate')
+        },
+      }),
+      cloud_browser_open_and_connect: tool({
+        description: 'Open a URL in a Cloud Code browser tab and connect the agent to it in one step.',
+        args: { url: z.string().min(1), title: z.string().optional(), activate: z.boolean().optional() },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.openAndConnect', args, context as unknown as ToolCtxLike, 'mutate')
+        },
+      }),
+      cloud_browser_disconnect: tool({
+        description: 'Disconnect a previously connected browser tab by cdpId.',
+        args: { cdpId: z.string().min(1) },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.disconnect', args, context as unknown as ToolCtxLike, 'mutate')
+        },
+      }),
+      cloud_browser_snapshot: tool({
+        description: 'Read a connected browser tab as a semantic tree of interactive elements. Use element IDs from this output with cloud_browser_interact.',
+        args: { cdpId: z.string().min(1), filter: z.string().optional(), filterFlags: z.string().optional(), viewportOnly: z.boolean().optional() },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.snapshot', stripEmptyStrings(args), context as unknown as ToolCtxLike, 'query')
+        },
+      }),
+      cloud_browser_interact: tool({
+        description: 'Perform a browser action on a connected tab by element ID or navigation action.',
+        args: { cdpId: z.string().min(1), action: z.any(), postSnapshot: z.any().optional() },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.interact', normalizeInteractArgs(args), context as unknown as ToolCtxLike, 'mutate')
+        },
+      }),
+      cloud_browser_screenshot: tool({
+        description: 'Capture a screenshot from a connected browser tab.',
+        args: { cdpId: z.string().min(1), format: z.enum(['jpeg', 'png']).optional(), quality: z.number().int().optional(), fullPage: z.boolean().optional() },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.screenshot', args, context as unknown as ToolCtxLike, 'query')
+        },
+      }),
+      cloud_browser_execute_js: tool({
+        description: 'Execute JavaScript in a connected browser tab. Prefer snapshot and interact first; use this for explicit inspection or one-off DOM operations.',
+        args: { cdpId: z.string().min(1), expression: z.string().min(1), awaitPromise: z.boolean().optional(), timeoutMs: z.number().int().optional() },
+        async execute(args, context) {
+          return runBrowserTool(client, 'agentBrowser.executeJs', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
     },
@@ -438,6 +494,79 @@ async function runCloudOpenPane(
 function truncateTitle(s: string): string {
   const trimmed = s.trim().replace(/\s+/g, ' ')
   return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed
+}
+
+async function runBrowserTool(
+  client: AgentShellClient,
+  procedure: string,
+  args: Record<string, unknown>,
+  ctx: ToolCtxLike,
+  mode: 'query' | 'mutate',
+): Promise<{ output: string; metadata: Record<string, unknown> }> {
+  try {
+    const input = { ...args, opencodeSessionId: ctx.sessionID }
+    const result = mode === 'query'
+      ? await client.query<unknown>(procedure, input)
+      : await client.mutate<unknown>(procedure, input)
+    const metadata = {
+      status: 'success',
+      procedure,
+      cdpId: typeof result === 'object' && result && 'cdpId' in result ? (result as { cdpId?: string }).cdpId : args.cdpId,
+      browserTabId: typeof result === 'object' && result && 'browserTabId' in result ? (result as { browserTabId?: string }).browserTabId : undefined,
+    }
+    ctx.metadata({ title: truncateTitle(procedure.replace('agentBrowser.', 'browser ')), metadata })
+    return { output: browserOutput(result), metadata }
+  } catch (err) {
+    return {
+      output: '',
+      metadata: {
+        status: 'error',
+        procedure,
+        cdpId: args.cdpId,
+        stderr: err instanceof AppUnreachableError ? 'cloud-code app unreachable' : (err as Error).message,
+        error: (err as Error).message,
+      },
+    }
+  }
+}
+
+function browserOutput(result: unknown): string {
+  if (typeof result === 'object' && result && 'text' in result && typeof (result as { text?: unknown }).text === 'string') {
+    return (result as { text: string }).text
+  }
+  return JSON.stringify(result, null, 2)
+}
+
+function stripEmptyStrings<T extends Record<string, unknown>>(input: T): T {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== '')) as T
+}
+
+function normalizeInteractArgs<T extends Record<string, unknown>>(input: T): T {
+  const next = stripEmptyStrings(input)
+  const rawAction = next.action
+  if (!rawAction || typeof rawAction !== 'object') return next
+  const action = stripEmptyStrings({ ...(rawAction as Record<string, unknown>) })
+  const id = action.elementId ?? action.id
+  if ((action.type === 'click' || action.type === 'type') && id !== undefined) action.elementId = String(id)
+  if (action.type === 'type' && action.text === undefined && action.value !== undefined) action.text = String(action.value)
+  if (action.type === 'fill') {
+    if (!Array.isArray(action.fields) && id !== undefined) {
+      action.fields = [{ elementId: String(id), text: String(action.text ?? action.value ?? ''), clear: action.clear }]
+    } else if (Array.isArray(action.fields)) {
+      action.fields = action.fields.map((field) => {
+        if (!field || typeof field !== 'object') return field
+        const normalized = stripEmptyStrings({ ...(field as Record<string, unknown>) })
+        const fieldId = normalized.elementId ?? normalized.id
+        if (fieldId !== undefined) normalized.elementId = String(fieldId)
+        if (normalized.text === undefined && normalized.value !== undefined) normalized.text = String(normalized.value)
+        return normalized
+      })
+    }
+  }
+  if (next.postSnapshot && typeof next.postSnapshot === 'object') {
+    next.postSnapshot = stripEmptyStrings({ ...(next.postSnapshot as Record<string, unknown>) })
+  }
+  return { ...next, action } as T
 }
 
 /**

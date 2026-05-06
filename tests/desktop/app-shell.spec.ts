@@ -26,6 +26,7 @@ test('desktop harness reaches the React app shell through webframe', async ({ de
       env: {
         ...process.env,
         NODE_ENV: 'development',
+        CC_INSTANCE_ID: 'desktop-app-shell-test',
         CC_DESKTOP_CHROME_URL: viteUrl,
         CC_DESKTOP_TEST_LOG: desktopLogPath,
         CC_DESKTOP_TEST_STATE_DIR: desktopStateDir,
@@ -100,6 +101,7 @@ declare global {
     getState: () => Promise<{
       config: { chromeUrl: string }
       windowIds: string[]
+      browserAgentSocketPath?: string
       tabRecords: Array<{ id: string; url: string }>
       windowInfo: Array<{ slots: Array<{ name: string }> }>
       nativeViews: Array<{ children: Array<{ bounds?: { x: number; y: number; width: number; height: number } }> }>

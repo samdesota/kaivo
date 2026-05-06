@@ -3,7 +3,9 @@ import path from 'node:path'
 import { app, ipcMain, webContents as electronWebContents, type BrowserWindow, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
+import { desktopBrowserSocketPath } from './instance-runtime'
 import { ensureDesktopServices, type ServiceSupervisor } from './service-supervisor'
+import { startBrowserAgentBridge, type BrowserAgentBridge } from './browser-agent-bridge'
 
 type DesktopLogKind = 'main' | 'chrome-renderer' | 'tab-renderer' | 'crash' | 'exception'
 
@@ -12,6 +14,7 @@ const stateDir = process.env.CC_DESKTOP_TEST_STATE_DIR
 
 let webframeApp: WebframeApp | undefined
 let serviceSupervisor: ServiceSupervisor | undefined
+let browserAgentBridge: BrowserAgentBridge | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 
@@ -64,6 +67,14 @@ function installIpcHandlers(): void {
     contents.openDevTools({ mode: 'detach', activate: true })
     return { ok: true as const }
   })
+  ipcMain.handle('cloud-code/browser/agent-connections', () => ({
+    browserTabIds: browserAgentBridge?.connectedTabs() ?? [],
+  }))
+  ipcMain.handle('cloud-code/browser/disconnect-agent', (_event, input: { browserTabId?: string }) => {
+    if (!input.browserTabId) throw new Error('browserTabId is required')
+    browserAgentBridge?.disconnectTab(input.browserTabId)
+    return { ok: true as const }
+  })
 }
 
 process.on('uncaughtException', (error) => {
@@ -94,6 +105,12 @@ async function main(): Promise<void> {
     tabStore: createMemoryTabStore(),
   })
   writeLog('main', 'info', 'desktop app starting', { stateDir, config })
+  browserAgentBridge = await startBrowserAgentBridge({
+    socketPath: desktopBrowserSocketPath(config.instance),
+    getWebframeApp: () => webframeApp,
+    findTabWebContents,
+    log: (message, ctx) => writeLog('main', 'info', message, ctx),
+  })
 
   const handle = await webframeApp.windows.create({
     chromeUrl: config.chromeUrl,
@@ -139,6 +156,7 @@ async function main(): Promise<void> {
           nativeViews,
           logPath,
           stateDir,
+          browserAgentSocketPath: browserAgentBridge?.socketPath,
         }
       },
     },
@@ -154,6 +172,11 @@ app.on('before-quit', () => {
   })
   void webframeApp?.stop().catch((error) => {
     writeLog('exception', 'error', 'webframe shutdown failed', {
+      message: error instanceof Error ? error.message : String(error),
+    })
+  })
+  void browserAgentBridge?.close().catch((error) => {
+    writeLog('exception', 'error', 'browser agent bridge shutdown failed', {
       message: error instanceof Error ? error.message : String(error),
     })
   })

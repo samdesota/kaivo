@@ -6,8 +6,12 @@
   </head>
   <body>
     <h1>Browser API Tab</h1>
+    <label>Name <input id="name-input" placeholder="Name" /></label>
+    <button id="save-button" onclick="window.__saved = document.getElementById('name-input').value; document.body.dataset.saved = window.__saved">Save</button>
+    <div id="status" aria-live="polite"></div>
     <script>
       console.log('browser api tab ready')
+      window.__saved = ''
     </script>
   </body>
 </html>

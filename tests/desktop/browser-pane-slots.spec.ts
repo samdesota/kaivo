@@ -26,6 +26,7 @@ test('desktop harness verifies native browser tab slot bounds and active z-order
       env: {
         ...process.env,
         NODE_ENV: 'development',
+        CC_INSTANCE_ID: 'desktop-browser-pane-slots-test',
         CC_DESKTOP_CHROME_URL: chromeUrl,
         CC_DESKTOP_TEST_LOG: desktopLogPath,
         CC_DESKTOP_TEST_STATE_DIR: desktopStateDir,

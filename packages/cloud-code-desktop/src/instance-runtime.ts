@@ -56,6 +56,10 @@ export type InstanceRuntimeConfig = {
   }
 }
 
+export function desktopBrowserSocketPath(config: Pick<InstanceRuntimeConfig, 'instanceId' | 'rootDir'>): string {
+  return path.join('/tmp', `cloud-code-browser-${sanitizeId(config.instanceId)}-${shortHash(config.rootDir)}.sock`)
+}
+
 export type ResolveInstanceRuntimeOptions = {
   cwd?: string
   homeDir?: string

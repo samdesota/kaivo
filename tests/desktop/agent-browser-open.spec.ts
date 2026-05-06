@@ -1,5 +1,7 @@
 import http from 'node:http'
+import net from 'node:net'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { _electron as electron } from '@playwright/test'
 import { expect, test } from './harness/electron-fixture'
@@ -26,6 +28,7 @@ test('agent browser open_pane path attaches a real webframe tab', async ({ deskt
       env: {
         ...process.env,
         NODE_ENV: 'development',
+        CC_INSTANCE_ID: 'desktop-agent-browser-open-test',
         CC_DESKTOP_CHROME_URL: chromeUrl,
         CC_DESKTOP_TEST_LOG: desktopLogPath,
         CC_DESKTOP_TEST_STATE_DIR: desktopStateDir,
@@ -44,6 +47,24 @@ test('agent browser open_pane path attaches a real webframe tab', async ({ deskt
 
       const state = await app.evaluate(() => globalThis.cloudCodeDesktopTest.getState())
       expect(state.windowInfo[0]?.slots.some((slot) => slot.name.startsWith('browser-pane:'))).toBe(true)
+
+      const browserTabId = state.tabRecords.find((tab) => tab.url === tabUrl)!.id
+      const socketPath = state.browserAgentSocketPath!
+      const connection = await bridgeCall<{ cdpId: string }>(socketPath, 'connectTab', {
+        sandboxId: 'sb-a',
+        opencodeSessionId: 'oc-a',
+        browserTabId,
+      })
+      await expect(page.getByText('Agent connected to this tab')).toBeVisible({ timeout: 3_000 })
+      await page.getByRole('button', { name: 'Disconnect' }).click()
+      await expect.poll(async () => {
+        const result = await bridgeCall<{ ok?: true }>(socketPath, 'disconnect', {
+          sandboxId: 'sb-a',
+          opencodeSessionId: 'oc-a',
+          cdpId: connection.cdpId,
+        }).catch((error: Error) => ({ error: error.message }))
+        return 'error' in result ? result.error : 'still-connected'
+      }).toBe('browser connection not found')
 
       await expect.poll(() =>
         parseDesktopLogFile(desktopLogPath).some(
@@ -71,6 +92,26 @@ async function waitForHttp(url: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
   throw new Error(`Timed out waiting for ${url}`)
+}
+
+function bridgeCall<T>(socketPath: string, method: string, params: Record<string, unknown>): Promise<T> {
+  const id = randomUUID()
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(socketPath)
+    let buffer = ''
+    socket.setEncoding('utf8')
+    socket.once('connect', () => socket.write(`${JSON.stringify({ id, method, params })}\n`))
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      const index = buffer.indexOf('\n')
+      if (index === -1) return
+      socket.end()
+      const response = JSON.parse(buffer.slice(0, index)) as { result?: T; error?: { message: string } }
+      if (response.error) reject(new Error(response.error.message))
+      else resolve(response.result as T)
+    })
+    socket.once('error', reject)
+  })
 }
 
 function canGet(url: string): Promise<boolean> {

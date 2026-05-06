@@ -7,6 +7,7 @@ import { repoRouter } from './routers/repo.js'
 import { jobRouter } from './routers/job.js'
 import { agentRouter } from './routers/agent.js'
 import { agentShellRouter } from './routers/agent-shell.js'
+import { agentBrowserRouter } from './routers/agent-browser.js'
 import { agentUiRouter } from './routers/agent-ui.js'
 import { previewRouter } from './routers/preview.js'
 
@@ -19,6 +20,7 @@ export const appRouter = router({
   job: jobRouter,
   agent: agentRouter,
   agentShell: agentShellRouter,
+  agentBrowser: agentBrowserRouter,
   agentUi: agentUiRouter,
   preview: previewRouter,
 })

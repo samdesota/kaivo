@@ -9,6 +9,7 @@ import { previewRouter } from './routers/preview.js'
 import { jobRouter } from './routers/job.js'
 import { agentRouter } from './routers/agent.js'
 import { agentShellRouter } from './routers/agent-shell.js'
+import { agentBrowserRouter } from './routers/agent-browser.js'
 import { agentUiRouter } from './routers/agent-ui.js'
 import { settingsRouter } from './routers/settings.js'
 import { envAuthRouter } from './routers/env-auth.js'
@@ -28,6 +29,7 @@ export const appRouter = router({
   job: jobRouter,
   agent: agentRouter,
   agentShell: agentShellRouter,
+  agentBrowser: agentBrowserRouter,
   agentUi: agentUiRouter,
   settings: settingsRouter,
   envAuth: envAuthRouter,
