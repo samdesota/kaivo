@@ -49,6 +49,18 @@ export interface RepoConfigBundle {
   files: Array<{ path: string; contents: string }>
 }
 
+export interface OpenPaneInput {
+  workspaceId: string
+  envId: string
+  content:
+    | { type: 'shell'; shellId: string }
+    | { type: 'file'; path: string; absolute?: boolean }
+    | { type: 'preview'; port: number }
+    | { type: 'browser'; url?: string; browserTabId?: string }
+  title?: string
+  activate?: boolean
+}
+
 // Superjson wire format matches what the plugin client uses: `{ json: <val> }`.
 // We don't use any special Date/Map/Set values on this surface, so the
 // identity shape round-trips cleanly.
@@ -129,6 +141,39 @@ async function query<T>(procedure: string, input: Record<string, unknown> = {}):
   }
 }
 
+async function mutation<T>(procedure: string, input: Record<string, unknown>): Promise<T> {
+  try {
+    const res = await undiciRequest(url(procedure), {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(sjEncode(input)),
+      headersTimeout: 10_000,
+      bodyTimeout: 10_000,
+    })
+    if (res.statusCode === 401 || res.statusCode === 403) {
+      throw new IdentityAuthError(`identity auth rejected: ${res.statusCode}`)
+    }
+    const body = (await res.body.json()) as {
+      result?: { data?: unknown }
+      error?: { message?: string }
+    }
+    if (res.statusCode >= 400) {
+      throw new IdentityUnreachableError(
+        `identity ${procedure} http ${res.statusCode}: ${body.error?.message ?? ''}`,
+      )
+    }
+    if (body.error) {
+      throw new IdentityUnreachableError(`identity ${procedure} error: ${body.error.message}`)
+    }
+    return sjDecode(body.result?.data) as T
+  } catch (err) {
+    if (err instanceof IdentityAuthError || err instanceof IdentityUnreachableError) throw err
+    throw new IdentityUnreachableError(
+      `identity ${procedure} failed: ${(err as Error).message}`,
+    )
+  }
+}
+
 /** Fetches the provider env map (ANTHROPIC_API_KEY, etc.) from identity. */
 export async function resolveProviderKeys(): Promise<Record<string, string>> {
   return query<Record<string, string>>('envApi.resolveProviderKeys')
@@ -140,4 +185,8 @@ export async function listRepoConfigs(): Promise<RepoConfigSummary[]> {
 
 export async function getRepoConfig(configId: string): Promise<RepoConfigBundle> {
   return query<RepoConfigBundle>('envApi.getRepoConfig', { configId })
+}
+
+export async function openPane(input: OpenPaneInput): Promise<{ ok: true; tab: unknown }> {
+  return mutation<{ ok: true; tab: unknown }>('envApi.openPane', input as unknown as Record<string, unknown>)
 }

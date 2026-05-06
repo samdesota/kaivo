@@ -140,6 +140,7 @@ export interface TranscriptEvent {
     | 'message.part.updated'
     | 'permission.updated'
     | 'permission.replied'
+    | 'session.busy'
     | 'session.idle'
     | 'session.error'
     | 'child.session.created'
@@ -525,6 +526,7 @@ class AgentService {
   async runCommand(input: { sessionId: string; command: string; arguments: string }): Promise<void> {
     const { row, client, model, variant, dirOpts } = await this.sessionContext(input.sessionId)
     this.ensureSubscription(row.workingDir ?? '')
+    this.emitTranscriptEvent(row.opencodeSessionId, 'session.busy', { sessionID: row.opencodeSessionId })
     await client.session.command({
       path: { id: row.opencodeSessionId },
       body: {
@@ -567,6 +569,7 @@ class AgentService {
   async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
     const { row, client, model, variant, dirOpts } = await this.sessionContext(input.sessionId)
     this.ensureSubscription(row.workingDir ?? '')
+    this.emitTranscriptEvent(row.opencodeSessionId, 'session.busy', { sessionID: row.opencodeSessionId })
     await client.session.promptAsync({
       path: { id: row.opencodeSessionId },
       body: promptBody({ text: input.message, model, variant }),
@@ -1186,6 +1189,26 @@ class AgentService {
         logger.warn({ err }, 'transcript listener threw')
       }
     }
+  }
+
+  private emitTranscriptEvent(
+    opencodeSessionId: string,
+    type: TranscriptEvent['type'],
+    payload: Record<string, unknown>,
+  ): TranscriptEvent {
+    const evt = this.recordReplayEvent(opencodeSessionId, {
+      type,
+      sessionId: opencodeSessionId,
+      payload,
+    })
+    for (const l of this.listeners) {
+      try {
+        l(evt)
+      } catch (err) {
+        logger.warn({ err }, 'transcript listener threw')
+      }
+    }
+    return evt
   }
 
   private recordReplayEvent(opencodeSessionId: string, evt: TranscriptEvent): TranscriptEvent {

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { createCollection, useLiveQuery, type Collection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { appTrpcMutation, appTrpcQuery } from '../../lib/trpc-plain'
-import { type WorkspaceTab, workspaceTabKey } from './tab-state'
+import { workspaceTabKey, type WorkspaceTab } from '../../../shared/workspace-pane'
 
 export type WorkspaceTabRecord = {
   workspaceId: string

@@ -313,7 +313,12 @@ function WorkspaceAgentPane({
   dispatchWorkspaceState: WorkspaceUiDispatch
 }) {
   const ctx = useWorkspaceContext()
+  const queryClient = useQueryClient()
   const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
+  const refreshWorkspacePanes = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['workspace-tabs', ctx.workspace.id] })
+    void queryClient.invalidateQueries({ queryKey: ['workspace-view-state', ctx.workspace.id] })
+  }, [ctx.workspace.id, queryClient])
   if (collapsed) {
     return <AgentCollapsedRail onExpand={onToggleCollapsed} />
   }
@@ -354,6 +359,7 @@ function WorkspaceAgentPane({
           onActiveSessionChange={(sessionId) => dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })}
           onSessionListChange={onSessionListChange}
           onOpenPane={openPane}
+          onOpenPaneRefreshHint={refreshWorkspacePanes}
           headerTrailing={collapseButton}
           onOpenNewChat={() =>
             openNewAgentChatOverlay({
