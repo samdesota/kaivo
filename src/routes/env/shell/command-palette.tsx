@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
@@ -60,7 +60,24 @@ export function CommandPalette({
     if (open) {
       setQuery('')
       setActive(0)
-      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+  }, [open])
+
+  useLayoutEffect(() => {
+    if (!open) return
+
+    const focusInput = () => {
+      window.focus()
+      inputRef.current?.focus()
+    }
+    focusInput()
+    const frame = requestAnimationFrame(focusInput)
+    const shortRetry = window.setTimeout(focusInput, 25)
+    const attachRetry = window.setTimeout(focusInput, 100)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(shortRetry)
+      window.clearTimeout(attachRetry)
     }
   }, [open])
 
@@ -190,6 +207,7 @@ export function CommandPalette({
       >
         <input
           ref={inputRef}
+          autoFocus
           type="text"
           value={query}
           onChange={(e) => {

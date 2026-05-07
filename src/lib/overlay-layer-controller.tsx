@@ -145,6 +145,7 @@ async function openElectronOverlay(request: OverlayRequest): Promise<OverlayResp
   const width = Math.max(1, window.innerWidth)
   const height = Math.max(1, window.innerHeight)
   await browserApi.attachOverlay({ overlayId: detachedOverlayId, placement: { x: 0, y: 0, w: width, h: height } })
+  await browserApi.focusOverlay({ overlayId: detachedOverlayId })
 
   const channel = new BroadcastChannel(OVERLAY_CHANNEL)
   try {

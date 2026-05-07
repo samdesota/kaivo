@@ -85,7 +85,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
         <span className="text-neutral-500">▾</span>
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-96 rounded border border-neutral-800 bg-neutral-950 shadow-lg">
+        <div className="absolute bottom-full left-0 z-30 mb-1 w-96 rounded border border-neutral-800 bg-neutral-950 shadow-lg">
           <input
             autoFocus
             value={filter}

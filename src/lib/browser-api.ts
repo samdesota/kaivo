@@ -33,6 +33,7 @@ export type BrowserApi = {
   setSlot(input: BrowserSlotUpdate): Promise<void>
   createDetachedOverlay(input: { url: string; transparent?: boolean; clickThrough?: boolean }): Promise<{ overlayId: string }>
   attachOverlay(input: { overlayId: string; placement: { x: number; y: number; w: number; h: number } }): Promise<void>
+  focusOverlay(input: { overlayId: string }): Promise<void>
   detachOverlay(input: { overlayId: string }): Promise<void>
   closeOverlay(input: { overlayId: string }): Promise<void>
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
@@ -90,6 +91,7 @@ type DesktopWindowLike = Window & {
       openBrowserDevTools?: (input: { browserTabId: string }) => Promise<unknown>
       getAgentBrowserConnections?: () => Promise<{ browserTabIds: string[] }>
       disconnectAgentBrowser?: (input: { browserTabId: string }) => Promise<unknown>
+      focusOverlay?: (input: { overlayId: string }) => Promise<unknown>
     }
 }
 
@@ -233,6 +235,11 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
         windowId: await getWindowId(),
         placement: input.placement,
       })
+    },
+
+    async focusOverlay(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      await desktop?.cloudCodeDesktop?.focusOverlay?.(input)
     },
 
     async detachOverlay(input) {

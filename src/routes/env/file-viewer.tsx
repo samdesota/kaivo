@@ -20,6 +20,7 @@ const workspaceEditorTheme = EditorView.theme({
   '.cm-scroller': { backgroundColor: '#111318' },
   '.cm-content': { backgroundColor: '#111318' },
   '.cm-gutters': { backgroundColor: '#111318', borderRightColor: '#2c313a' },
+  '.cm-gutter, .cm-gutterElement, .cm-activeLineGutter': { backgroundColor: '#111318' },
 })
 
 export function FileViewer({
@@ -218,7 +219,7 @@ function CodeMirrorPane({
 }) {
   const lang = useMemo(() => languageForPath(path), [path])
   const extensions = useMemo(
-    () => [EditorView.lineWrapping, workspaceEditorTheme, ...(lang ? [lang] : [])],
+    () => [EditorView.lineWrapping, oneDark, workspaceEditorTheme, ...(lang ? [lang] : [])],
     [lang],
   )
   return (
@@ -226,7 +227,6 @@ function CodeMirrorPane({
       <CodeMirror
         value={value}
         height="100%"
-        theme={oneDark}
         extensions={extensions}
         onChange={onChange}
         basicSetup={{

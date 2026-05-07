@@ -18,6 +18,15 @@ let browserAgentBridge: BrowserAgentBridge | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 
+type AppShortcutInput = {
+  key: string
+  code?: string
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+}
+
 function writeLog(kind: DesktopLogKind, level: 'info' | 'error', msg: string, ctx?: Record<string, unknown>): void {
   if (!logPath) return
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
@@ -32,6 +41,20 @@ function trackWindow(win: BrowserWindow): void {
 function trackWebContents(contents: WebContents): void {
   if (trackedWebContentsIds.has(contents.id)) return
   trackedWebContentsIds.add(contents.id)
+  contents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !isAppShortcut(input)) return
+    const chrome = findChromeWebContentsForShortcutSender(contents)
+    if (!chrome) return
+    event.preventDefault()
+    chrome.send('cloud-code/app-shortcut', {
+      key: input.key,
+      code: input.code,
+      metaKey: input.meta,
+      ctrlKey: input.control,
+      altKey: input.alt,
+      shiftKey: input.shift,
+    } satisfies AppShortcutInput)
+  })
   contents.on('console-message', (_event, level, message, line, sourceId) => {
     const kind = chromeWebContentsIds.has(contents.id) ? 'chrome-renderer' : 'tab-renderer'
     writeLog(kind, level === 2 ? 'error' : 'info', message, { webContentsId: contents.id, line, sourceId })
@@ -44,6 +67,27 @@ function trackWebContents(contents: WebContents): void {
   })
 }
 
+function isAppShortcut(input: Electron.Input): boolean {
+  if (!input.meta && !input.control) return false
+  if (input.alt) return false
+  const key = input.key.toLowerCase()
+  return key === 'k' || key === 'b' || key === 'g'
+}
+
+function findChromeWebContentsForShortcutSender(contents: WebContents): WebContents | null {
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
+  } | undefined
+  const caller = bridge?.callerForWebContents?.(contents)
+  if (caller?.kind !== 'tab' || !caller.tabId) return null
+  const tabId = caller.tabId
+
+  const windows = webframeApp?.windows.list() as Array<{ tabIds?: string[]; electronWindow: BrowserWindow }> | undefined
+  const owner = windows?.find((window) => window.tabIds?.includes(tabId))
+  if (!owner || owner.electronWindow.isDestroyed()) return null
+  return owner.electronWindow.webContents.isDestroyed() ? null : owner.electronWindow.webContents
+}
+
 function findTabWebContents(browserTabId: string): WebContents | null {
   const bridge = webframeApp?._debug.bridge as unknown as {
     callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
@@ -54,6 +98,20 @@ function findTabWebContents(browserTabId: string): WebContents | null {
     if (contents.isDestroyed()) continue
     const caller = bridge.callerForWebContents(contents)
     if (caller.kind === 'tab' && caller.tabId === browserTabId) return contents
+  }
+  return null
+}
+
+function findOverlayWebContents(overlayId: string): WebContents | null {
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string; overlayId?: string }
+  } | undefined
+  if (!bridge?.callerForWebContents) return null
+
+  for (const contents of electronWebContents.getAllWebContents()) {
+    if (contents.isDestroyed()) continue
+    const caller = bridge.callerForWebContents(contents)
+    if (caller.kind === 'overlay' && caller.overlayId === overlayId) return contents
   }
   return null
 }
@@ -73,6 +131,16 @@ function installIpcHandlers(): void {
   ipcMain.handle('cloud-code/browser/disconnect-agent', (_event, input: { browserTabId?: string }) => {
     if (!input.browserTabId) throw new Error('browserTabId is required')
     browserAgentBridge?.disconnectTab(input.browserTabId)
+    return { ok: true as const }
+  })
+  ipcMain.handle('cloud-code/browser/focus-overlay', (_event, input: { overlayId?: string }) => {
+    const overlayId = input.overlayId
+    if (!overlayId) throw new Error('overlayId is required')
+    const contents = findOverlayWebContents(overlayId)
+    if (!contents) throw new Error(`Overlay ${overlayId} not found`)
+    const owner = (contents as WebContents & { getOwnerBrowserWindow?: () => BrowserWindow | null }).getOwnerBrowserWindow?.()
+    owner?.focus()
+    contents.focus()
     return { ok: true as const }
   })
   ipcMain.handle('cloud-code/services/restart-terminal', async () => {

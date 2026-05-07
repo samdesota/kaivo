@@ -9,6 +9,7 @@ type AgentRow = {
   workingDir: string | null
   selectedProviderId: string | null
   selectedModelId: string | null
+  selectedModelVariant: string | null
   createdAt: string
   lastActivityAt: string
 }
@@ -53,6 +54,7 @@ vi.mock('../db/schema.js', () => ({
     workingDir: { _col: 'workingDir' },
     selectedProviderId: { _col: 'selectedProviderId' },
     selectedModelId: { _col: 'selectedModelId' },
+    selectedModelVariant: { _col: 'selectedModelVariant' },
     createdAt: { _col: 'createdAt' },
     lastActivityAt: { _col: 'lastActivityAt' },
   },
@@ -237,5 +239,24 @@ describe('agent service workspace sessions', () => {
       sessionId: session.opencodeSessionId,
     })
     expect(await agentService.transcriptReplay(session.id, 1)).toEqual([])
+  })
+
+  it('normalizes Anthropic fast-tier session model selections to standard tier', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+
+    await agentService.setSessionModel(session.id, {
+      providerID: 'anthropic',
+      modelID: 'claude-opus-4-6-fast',
+    })
+
+    await expect(agentService.getSessionModel(session.id)).resolves.toMatchObject({
+      providerID: 'anthropic',
+      modelID: 'claude-opus-4-6',
+    })
+    expect(agentRows[0]).toMatchObject({
+      selectedProviderId: 'anthropic',
+      selectedModelId: 'claude-opus-4-6',
+    })
   })
 })

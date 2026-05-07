@@ -60,12 +60,27 @@ function promptBody(input: {
   model: { providerID: string; modelID: string }
   variant?: ReasoningEffortVariant | null
 }) {
+  const model = normalizeModel(input.model)
   return {
     parts: [{ type: 'text' as const, text: input.text }],
     tools: CLOUD_TOOL_OVERRIDES,
-    model: input.model,
+    model,
     ...(input.variant ? { variant: input.variant } : {}),
   }
+}
+
+function isAnthropicFastModel(providerID: string, modelID: string): boolean {
+  return providerID === 'anthropic' && modelID.endsWith('-fast')
+}
+
+function normalizeModel(model: { providerID: string; modelID: string }): { providerID: string; modelID: string } {
+  if (!isAnthropicFastModel(model.providerID, model.modelID)) return model
+  return { ...model, modelID: model.modelID.slice(0, -'-fast'.length) }
+}
+
+function normalizeSessionModelSelection(selection: SessionModelSelection): SessionModelSelection {
+  if (!selection.providerID || !selection.modelID) return selection
+  return { ...selection, ...normalizeModel({ providerID: selection.providerID, modelID: selection.modelID }) }
 }
 
 function truncatePromptForTitle(msg: string): string {
@@ -522,6 +537,7 @@ class AgentService {
     const models: ModelInfo[] = []
     for (const p of body.providers) {
       for (const m of Object.values(p.models ?? {})) {
+        if (isAnthropicFastModel(p.id, m.id)) continue
         models.push({ providerID: p.id, modelID: m.id, label: `${p.id}/${m.id}` })
       }
     }
@@ -543,7 +559,8 @@ class AgentService {
   }
 
   setDefaultModel(model: { providerID: string; modelID: string }): void {
-    setEnvDefaultModel(model.providerID, model.modelID)
+    const normalized = normalizeModel(model)
+    setEnvDefaultModel(normalized.providerID, normalized.modelID)
   }
 
   async setSessionModel(
@@ -551,16 +568,16 @@ class AgentService {
     model: { providerID: string; modelID: string } | null,
   ): Promise<void> {
     const current = await this.getSessionModel(sessionId)
-    const next: SessionModelSelection = {
+    const next: SessionModelSelection = normalizeSessionModelSelection({
       providerID: model?.providerID ?? null,
       modelID: model?.modelID ?? null,
       variant: current?.variant ?? null,
-    }
+    })
     this.sessionModels.set(sessionId, next)
     db.update(agentSessions)
       .set({
-        selectedProviderId: model?.providerID ?? null,
-        selectedModelId: model?.modelID ?? null,
+        selectedProviderId: next.providerID,
+        selectedModelId: next.modelID,
       })
       .where(eq(agentSessions.id, sessionId))
       .run()
@@ -600,11 +617,11 @@ class AgentService {
       .all()
     const r = rows[0]
     if (!r) return null
-    const hydrated = {
+    const hydrated = normalizeSessionModelSelection({
       providerID: r.providerID ?? null,
       modelID: r.modelID ?? null,
       variant: isReasoningEffortVariant(r.variant) ? r.variant : null,
-    }
+    })
     if (!hydrated.providerID && !hydrated.modelID && !hydrated.variant) return null
     this.sessionModels.set(sessionId, hydrated)
     return hydrated
