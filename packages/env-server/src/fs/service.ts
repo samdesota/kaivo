@@ -234,6 +234,29 @@ export function watchWorkspace(fn: (evt: FsEvent) => void): () => void {
   }
 }
 
+export function watchFilePath(
+  filePath: string,
+  opts: { absolute?: boolean } = {},
+  fn: (evt: FsEvent) => void,
+): () => void {
+  const abs = opts.absolute ? requireAbsolute(filePath) : resolveWorkspacePath(filePath)
+  const watcher = chokidar.watch(abs, {
+    ignoreInitial: true,
+    persistent: true,
+    usePolling: true,
+    interval: 500,
+    binaryInterval: 1000,
+  })
+  const reportedPath = opts.absolute ? abs : toWorkspaceRelative(abs)
+  for (const type of ['add', 'change', 'unlink'] as const) {
+    watcher.on(type, () => fn({ type, path: reportedPath }))
+  }
+  watcher.on('error', (err) => logger.warn({ err }, 'file watcher error'))
+  return () => {
+    void watcher.close()
+  }
+}
+
 export function isWatcherReady(): boolean {
   return ready
 }

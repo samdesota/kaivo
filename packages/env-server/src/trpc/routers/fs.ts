@@ -8,6 +8,7 @@ import {
   browseHome,
   listDirectory,
   readFile,
+  watchFilePath,
   watchWorkspace,
   writeFile,
 } from '../../fs/service.js'
@@ -71,12 +72,21 @@ export const fsRouter = router({
       }
     }),
 
-  watch: authedProcedure.subscription(() => {
-    return observable<FsEvent>((emit) => {
-      const unsub = watchWorkspace((evt) => emit.next(evt))
-      return unsub
-    })
-  }),
+  watch: authedProcedure
+    .input(
+      z.object({
+        path: z.string().min(1).max(2048),
+        absolute: z.boolean().optional(),
+      }).optional(),
+    )
+    .subscription(({ input }) => {
+      return observable<FsEvent>((emit) => {
+        const unsub = input
+          ? watchFilePath(input.path, { absolute: input.absolute }, (evt) => emit.next(evt))
+          : watchWorkspace((evt) => emit.next(evt))
+        return unsub
+      })
+    }),
 
   /**
    * Folder picker source. Lists directories under $HOME so the new-session
