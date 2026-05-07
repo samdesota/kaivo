@@ -8,7 +8,48 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 desktop_dir="$repo_root/packages/cloud-code-desktop"
 bundle_dir="$desktop_dir/bundle"
+package_cache_dir="${CC_PACKAGE_CACHE_DIR:-$repo_root/node_modules/.cache/cloud-code-desktop-package}"
 install_app=false
+
+runtime_cache_key() {
+  local package_json="$1"
+  local lock_file="$2"
+  {
+    shasum -a 256 "$package_json"
+    shasum -a 256 "$lock_file"
+    node -p "process.platform + '-' + process.arch + '-abi' + process.versions.modules"
+    npm --version
+    echo "runtime-cache-v1"
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+install_runtime_deps() {
+  local runtime_dir="$1"
+  local cache_name="$2"
+  local lock_file="$3"
+  local cache_dir="$package_cache_dir/$cache_name"
+  local key
+  key=$(runtime_cache_key "$runtime_dir/package.json" "$lock_file")
+
+  if [ -d "$cache_dir/node_modules" ] && [ -f "$cache_dir/.cache-key" ] && [ "$(cat "$cache_dir/.cache-key")" = "$key" ]; then
+    echo "==> reusing cached $cache_name dependencies"
+  else
+    echo "==> installing $cache_name dependencies into cache"
+    local tmp_dir="$cache_dir.tmp.$$"
+    rm -rf "$tmp_dir"
+    mkdir -p "$tmp_dir"
+    cp "$runtime_dir/package.json" "$tmp_dir/package.json"
+    (cd "$tmp_dir" && npm install --omit=dev --no-audit --no-fund --silent)
+    echo "$key" > "$tmp_dir/.cache-key"
+    rm -rf "$cache_dir"
+    mkdir -p "$(dirname "$cache_dir")"
+    mv "$tmp_dir" "$cache_dir"
+  fi
+
+  echo "==> staging cached $cache_name dependencies"
+  mkdir -p "$runtime_dir/node_modules"
+  rsync -a --delete "$cache_dir/node_modules/" "$runtime_dir/node_modules/"
+}
 
 for arg in "$@"; do
   case "$arg" in
@@ -65,8 +106,7 @@ node --input-type=module -e "
   fs.writeFileSync('${bundle_dir}/app-server/package.json', JSON.stringify(out, null, 2) + '\n')
 "
 
-echo "==> installing app server dependencies"
-(cd "$bundle_dir/app-server" && npm install --omit=dev --no-audit --no-fund --silent)
+install_runtime_deps "$bundle_dir/app-server" "app-server" "$repo_root/package-lock.json"
 
 echo "==> building env-server"
 (cd "$repo_root/packages/env-server" && npm run build)
@@ -89,8 +129,7 @@ node --input-type=module -e "
   fs.writeFileSync('${bundle_dir}/env-server/package.json', JSON.stringify(out, null, 2) + '\n')
 "
 
-echo "==> installing env-server dependencies"
-(cd "$bundle_dir/env-server" && npm install --omit=dev --no-audit --no-fund --silent)
+install_runtime_deps "$bundle_dir/env-server" "env-server" "$repo_root/packages/env-server/package-lock.json"
 
 # node-pty spawn-helper needs execute permission
 find "$bundle_dir/env-server/node_modules/node-pty/prebuilds" -name spawn-helper -type f -exec chmod 755 {} + 2>/dev/null || true
