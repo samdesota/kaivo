@@ -216,9 +216,6 @@ export class ChatStateStore {
     const entry = this.sessions.get(sessionId)
     if (!entry) return
     entry.retainCount = Math.max(0, entry.retainCount - 1)
-    if (entry.retainCount > 0) return
-    this.stop(sessionId)
-    this.sessions.delete(sessionId)
     this.emit(sessionId)
   }
 
@@ -407,7 +404,7 @@ export class ChatStateStore {
   }
 
   private isRetained(sessionId: string, entry: SessionEntry): boolean {
-    return this.sessions.get(sessionId) === entry && entry.retainCount > 0
+    return this.sessions.get(sessionId) === entry
   }
 
   private emit(sessionId: string): void {
