@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -15,6 +15,13 @@ export function XTermAttached({ shellId }: { shellId: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const { env, envToken } = useEnv()
   const resize = envTrpc.shell.resize.useMutation()
+  const wsUrl = useMemo(
+    () => envWsUrl(env, `/ws/shell/${encodeURIComponent(shellId)}`) +
+      `?token=${encodeURIComponent(envToken)}`,
+    [env.id, env.url, envToken, shellId],
+  )
+  const wsEndpoint = useMemo(() => wsUrl.split('?')[0], [wsUrl])
+  const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('connecting')
 
   useEffect(() => {
     const el = containerRef.current
@@ -45,24 +52,23 @@ export function XTermAttached({ shellId }: { shellId: string }) {
     })
 
     let mounted = true
-    const pending: string[] = []
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let reconnectAttempt = 0
     let reconnecting = false
 
     const connect = () => {
-      const wsUrl = envWsUrl(env, `/ws/shell/${encodeURIComponent(shellId)}`) +
-        `?token=${encodeURIComponent(envToken)}`
       const socket = new WebSocket(wsUrl)
       ws = socket
       socket.binaryType = 'arraybuffer'
       let openedSnapshot = false
+      setConnectionState(reconnecting ? 'reconnecting' : 'connecting')
+      console.info('[shell-ws] connecting', { shellId, wsEndpoint })
 
       socket.onopen = () => {
         reconnectAttempt = 0
-        for (const q of pending) socket.send(q)
-        pending.length = 0
+        setConnectionState('connected')
+        console.info('[shell-ws] open', { shellId, wsEndpoint })
       }
       socket.onmessage = (evt) => {
         if (!mounted || ws !== socket) return
@@ -87,11 +93,13 @@ export function XTermAttached({ shellId }: { shellId: string }) {
         if (!mounted || ws !== socket) return
         ws = null
         if (evt.code === 4401 || evt.code === 4404) {
-          term.writeln(`\r\n\x1b[31m[disconnected: ${evt.reason || 'unauthorized'}]\x1b[0m`)
+          setConnectionState('disconnected')
+          console.info('[shell-ws] closed permanently', { shellId, wsEndpoint, code: evt.code, reason: evt.reason })
           return
         }
         const delay = Math.min(1_000 * 2 ** reconnectAttempt++, 10_000)
-        term.writeln(`\r\n\x1b[2m[disconnected, reconnecting in ${Math.round(delay / 1000)}s]\x1b[0m`)
+        setConnectionState('reconnecting')
+        console.info('[shell-ws] closed, retrying', { shellId, wsEndpoint, code: evt.code, reason: evt.reason, delay })
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null
           if (!mounted) return
@@ -101,7 +109,7 @@ export function XTermAttached({ shellId }: { shellId: string }) {
       }
       socket.onerror = () => {
         if (!mounted || ws !== socket) return
-        term.writeln('\r\n\x1b[31m[ws error]\x1b[0m')
+        console.info('[shell-ws] error', { shellId, wsEndpoint })
         socket.close()
       }
     }
@@ -111,8 +119,6 @@ export function XTermAttached({ shellId }: { shellId: string }) {
     const send = (data: string) => {
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(data)
-      } else {
-        pending.push(data)
       }
     }
 
@@ -142,7 +148,16 @@ export function XTermAttached({ shellId }: { shellId: string }) {
       term.dispose()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shellId, env.id, envToken])
+  }, [shellId, wsUrl, wsEndpoint])
 
-  return <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-neutral-975" />
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-neutral-975">
+      <div ref={containerRef} className="h-full w-full" />
+      {connectionState !== 'connected' && (
+        <div className="pointer-events-none absolute right-3 top-3 rounded border border-neutral-800 bg-neutral-950/90 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 shadow">
+          {connectionState}
+        </div>
+      )}
+    </div>
+  )
 }

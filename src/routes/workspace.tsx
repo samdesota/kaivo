@@ -27,7 +27,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
-import { envTrpc, makeEnvReactClient } from '../env-trpc'
+import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
 import { openNewAgentChatOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
@@ -1395,12 +1395,20 @@ function WorkspaceAgentEnvProvider({ children }: { children: ReactNode }) {
   const target = ctx.localEnvTarget
   const queryClient = useMemo(
     () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-    [target?.env.id, target?.token],
+    [target?.env.id, target?.env.url, target?.token],
   )
-  const client = useMemo(() => {
+  const managedClient = useMemo(() => {
     if (!target?.token) return null
-    return makeEnvReactClient(target.env, target.token)
-  }, [target?.env, target?.token])
+    return makeManagedEnvReactClient(target.env, target.token)
+  }, [target?.env.id, target?.env.url, target?.token])
+
+  useEffect(() => {
+    return () => {
+      void managedClient?.close()
+    }
+  }, [managedClient])
+
+  const client = managedClient?.client ?? null
 
   if (!target?.token || !client) return <>{children}</>
   return (
