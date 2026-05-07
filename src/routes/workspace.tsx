@@ -1230,7 +1230,7 @@ function WorkspaceAgentPane({
   const queryClient = useQueryClient()
   const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
   const refreshWorkspacePanes = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['workspace-tabs', ctx.workspace.id] })
+    void queryClient.invalidateQueries({ queryKey: ['sync', 'workspace_tabs'] })
     void queryClient.invalidateQueries({ queryKey: ['workspace-view-state', ctx.workspace.id] })
   }, [ctx.workspace.id, queryClient])
   if (collapsed) {

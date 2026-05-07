@@ -16,6 +16,7 @@ import { loadMasterKey } from './secrets/index.js'
 import { seedAdminFromEnv, purgeExpiredSessions } from './auth/service.js'
 import { appRouter, type AppRouter } from './trpc/router.js'
 import { createContext } from './trpc/context.js'
+import { initializeAppRealtime } from './realtime/app-realtime.js'
 import { registerShellWsRoutes } from './ws/shell.js'
 import { registerGitHubRoutes } from './http/github.js'
 import { registerPreviewProxy } from './preview/proxy.js'
@@ -58,6 +59,7 @@ export async function buildServer() {
   registerPreviewProxy(server)
   registerAgentProxy(server)
   registerGitHubRoutes(server)
+  initializeAppRealtime()
 
   server.get('/healthz', async () => ({ ok: true, instanceId: env.CC_INSTANCE_ID }))
 

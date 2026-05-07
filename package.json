@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "npm run dev:desktop",
     "dev:web": "npm run dev:local",
-    "dev:local": "tsx --env-file=.env scripts/local-launch.ts",
+    "dev:local": "npm run build:plugin && tsx --env-file=.env scripts/local-launch.ts",
     "dev:server": "CC_SERVICE_CREDENTIAL=local-desktop-service-credential tsx watch --env-file=.env --tsconfig tsconfig.server.json server/index.ts",
     "dev:client": "vite",
     "build": "npm run build:client && npm run build:server",
@@ -19,7 +19,7 @@
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json && (cd packages/opencode-plugin && npm run typecheck) && (cd packages/env-server && npm run typecheck) && npm run typecheck:desktop",
     "typecheck:desktop": "cd packages/cloud-code-desktop && npm run typecheck",
-    "dev:desktop": "npm run build:client && cd packages/cloud-code-desktop && npm run dev:managed",
+    "dev:desktop": "npm run build:plugin && npm run build:client && cd packages/cloud-code-desktop && npm run dev:managed",
     "dev:desktop:external": "cd packages/cloud-code-desktop && npm run dev",
     "dev:desktop:stack": "concurrently -n server,client,webframe,desktop -c blue,magenta,cyan,green \"npm:dev:server\" \"npm:dev:client\" \"cd ../webframe && npm run build:watch\" \"npm:dev:desktop:external\"",
     "lint": "eslint .",

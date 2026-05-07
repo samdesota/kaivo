@@ -1,5 +1,7 @@
 import { createRequire } from 'node:module'
+import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import { spawn as ptySpawn, type IPty } from 'node-pty'
 import { spawn as procSpawn, type ChildProcess } from 'node:child_process'
 import type {
@@ -101,6 +103,21 @@ const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
 const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
 const DEFAULT_LOGIN_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 const ENV_CAPTURE_DELIMITER = '_CLOUD_CODE_SHELL_ENV_DELIMITER_'
+
+function ensureNodePtyHelperExecutable(): void {
+  if (process.platform !== 'darwin' && process.platform !== 'linux') return
+  const root = path.dirname(localRequire.resolve('node-pty/package.json'))
+  const candidates = [
+    path.join(root, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'),
+    path.join(root, 'build', 'Release', 'spawn-helper'),
+  ]
+  for (const helper of candidates) {
+    if (!fs.existsSync(helper)) continue
+    const stat = fs.statSync(helper)
+    if ((stat.mode & 0o111) === 0) fs.chmodSync(helper, stat.mode | 0o755)
+    return
+  }
+}
 
 function baseLoginEnv(): NodeJS.ProcessEnv {
   const user = os.userInfo()
@@ -271,6 +288,7 @@ class TerminalService {
 
     const env = await userShellEnv({ TERM: 'xterm-256color' })
     const shell = env.SHELL ?? '/bin/bash'
+    ensureNodePtyHelperExecutable()
     const pty = ptySpawn(shell, ['-l'], {
       name: 'xterm-256color',
       cols,
