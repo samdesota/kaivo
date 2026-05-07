@@ -1,4 +1,5 @@
 import { workspaceTabKey, type WorkspaceTab } from '../../../shared/workspace-pane'
+import type { FileEditorState } from '../env/file-editor-state'
 
 export type { WorkspaceTab }
 export { workspaceTabKey }
@@ -22,6 +23,19 @@ export type WorkspaceUiAction =
   | { type: 'setActiveAgentSession'; sessionId: string | null }
   | { type: 'setSplitRatio'; splitRatio: number | null }
   | { type: 'setAgentCollapsed'; collapsed: boolean }
+
+export type FileEditorStatesByTabId = Record<string, FileEditorState>
+
+export function updateFileEditorStateForTab(
+  states: FileEditorStatesByTabId,
+  tabId: string,
+  editorState: FileEditorState,
+): FileEditorStatesByTabId {
+  return {
+    ...states,
+    [tabId]: editorState,
+  }
+}
 
 export function emptyWorkspaceUiState(): WorkspaceUiState {
   return {

@@ -39,6 +39,7 @@ import { ShellsDropdown } from './env/shell/dropdowns'
 import { NewSessionPopover } from './env/agent/session-tabs'
 import { NewAgentChatModal } from './env/agent/new-agent-chat-modal'
 import { useChatSession, useRetainChatSessions } from './env/agent/chat-state'
+import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
 import { BrowserTabContent } from './env/tabs/browser-tab'
@@ -58,6 +59,7 @@ import {
   type WorkspaceTab,
   type WorkspaceUiAction,
   type WorkspaceUiState,
+  updateFileEditorStateForTab,
 } from './workspace/tab-state'
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
@@ -1465,6 +1467,7 @@ function WorkspaceTabPane({
 }) {
   const ctx = useWorkspaceContext()
   const tabsRef = useRef(ctx.uiState.workspaceTabs)
+  const [fileEditorStates, setFileEditorStates] = useState<Record<string, FileEditorState>>({})
 
   tabsRef.current = ctx.uiState.workspaceTabs
 
@@ -1525,6 +1528,11 @@ function WorkspaceTabPane({
             key={`${ctx.workspace.id}:${activeTab.id}`}
             tab={activeTab}
             onClose={() => closeWorkspaceTab(activeTab, dispatchWorkspaceState)}
+            fileEditorState={activeTab.type === 'file' ? (fileEditorStates[activeTab.id] ?? emptyFileEditorState) : undefined}
+            onFileEditorStateChange={(editorState) => {
+              if (activeTab.type !== 'file') return
+              setFileEditorStates((states) => updateFileEditorStateForTab(states, activeTab.id, editorState))
+            }}
             onBrowserTabId={(browserTabId) =>
               dispatchWorkspaceState({ type: 'setBrowserTabId', tabId: activeTab.id, browserTabId })
             }
@@ -1550,11 +1558,15 @@ function workspaceTabLabel(tab: WorkspaceTab): string {
 function WorkspaceTabContent({
   tab,
   onClose,
+  fileEditorState,
+  onFileEditorStateChange,
   onBrowserTabId,
   onTitleChange,
 }: {
   tab: WorkspaceTab
   onClose: () => void
+  fileEditorState?: FileEditorState
+  onFileEditorStateChange?: (editorState: FileEditorState) => void
   onBrowserTabId: (browserTabId: string) => void
   onTitleChange: (title: string) => void
 }) {
@@ -1572,7 +1584,12 @@ function WorkspaceTabContent({
     return (
       <div className="h-full min-h-0 w-full">
         <WorkspaceEnvTargetProvider>
-          <FileTabContent path={tab.path} absolute />
+          <FileTabContent
+            path={tab.path}
+            absolute
+            editorState={fileEditorState}
+            onEditorStateChange={onFileEditorStateChange}
+          />
         </WorkspaceEnvTargetProvider>
       </div>
     )

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { workspaceTabKey, type WorkspaceTab } from '../../shared/workspace-pane'
-import { emptyWorkspaceUiState, workspaceUiReducer } from '../../src/routes/workspace/tab-state'
+import { emptyWorkspaceUiState, updateFileEditorStateForTab, workspaceUiReducer } from '../../src/routes/workspace/tab-state'
 
 describe('workspace tab state', () => {
   it('treats the same preview port in different envs as distinct', () => {
@@ -65,5 +65,23 @@ describe('workspace tab state', () => {
       browserTabId: 'native-1',
     })
     expect(state.workspaceTabs[0]).toMatchObject({ browserTabId: 'native-1' })
+  })
+
+  it('updates file editor state for the target tab only', () => {
+    const states = {
+      'file-a': { draft: 'local a', draftBaseMtime: '2026-05-07T00:00:00.000Z' },
+      'file-b': { draft: 'local b', draftBaseMtime: '2026-05-07T00:00:01.000Z' },
+    }
+
+    const next = updateFileEditorStateForTab(states, 'file-a', {
+      draft: 'updated a',
+      draftBaseMtime: '2026-05-07T00:00:02.000Z',
+    })
+
+    expect(next['file-a']).toEqual({
+      draft: 'updated a',
+      draftBaseMtime: '2026-05-07T00:00:02.000Z',
+    })
+    expect(next['file-b']).toBe(states['file-b'])
   })
 })
