@@ -208,7 +208,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     <div className="flex h-full min-h-0 flex-col bg-neutral-975">
       <form
         onSubmit={submitAddress}
-        className="flex flex-none basis-8 items-center gap-1 border-b border-neutral-800 bg-neutral-975 px-2"
+        className="flex shrink-0 items-center gap-1 border-b border-neutral-800 bg-neutral-975 px-2 py-1.5"
         aria-label="Browser controls"
       >
         <BrowserControlButton

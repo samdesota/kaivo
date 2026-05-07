@@ -431,6 +431,7 @@ function SessionPane({
         skippedSynthetic++
         continue
       }
+      if (p.type === 'patch') continue
       const role = state.messages.get(p.messageID)?.role ?? 'assistant'
       out.push({ part: p, role, childTranscript })
     }
@@ -504,6 +505,7 @@ function SessionPane({
             ))}
           </div>
         )}
+        <TodosPanel todos={state.todos} />
         <Composer
           sessionId={sessionId}
           pendingApprovalReason={
@@ -543,7 +545,6 @@ function SessionPane({
           </div>
         </div>
       </div>
-      <TodosPanel todos={state.todos} />
     </div>
   )
 }

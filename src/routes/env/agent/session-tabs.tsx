@@ -304,7 +304,7 @@ function ClosedDropdown({
     <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
+        className="px-2 py-1 text-xs text-neutral-500 hover:text-neutral-200"
         title="Closed sessions — click to reopen"
       >
         Closed ({archived.length}) ▾

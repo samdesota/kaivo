@@ -27,22 +27,25 @@ export function TodosPanel({ todos }: { todos: TodoItem[] }) {
 
   if (todos.length === 0 && collapsed) return null
 
+  const counts = countByStatus(todos)
+
   if (collapsed) {
     return (
       <button
         onClick={toggle}
         title={`${todos.length} todo${todos.length === 1 ? '' : 's'}`}
-        className="flex w-7 shrink-0 flex-col items-center justify-start gap-2 border-l border-neutral-800 bg-neutral-950 py-3 text-[10px] uppercase tracking-wider text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+        className="flex shrink-0 items-center gap-2 border-t border-neutral-800 bg-neutral-975 px-3 py-1.5 text-left text-xs text-neutral-500 hover:text-neutral-300"
       >
-        <span style={{ writingMode: 'vertical-rl' }}>Todos · {todos.length}</span>
+        <span className="font-medium uppercase tracking-wide">Todos</span>
+        <span className="text-[10px]">{counts.completed}/{todos.length}</span>
+        <span className="ml-auto text-[10px] uppercase tracking-wide">show</span>
       </button>
     )
   }
 
-  const counts = countByStatus(todos)
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l border-neutral-800 bg-neutral-950">
-      <header className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
+    <section className="flex max-h-40 shrink-0 flex-col border-t border-neutral-800 bg-neutral-975">
+      <header className="flex items-center justify-between px-3 py-1.5">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-300">Todos</h3>
           <span className="text-[10px] text-neutral-500">
@@ -54,19 +57,19 @@ export function TodosPanel({ todos }: { todos: TodoItem[] }) {
           className="rounded px-1.5 py-0.5 text-[10px] uppercase text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
           title="Collapse"
         >
-          →
+          hide
         </button>
       </header>
       {todos.length === 0 ? (
-        <div className="p-3 text-xs text-neutral-500">No todos yet.</div>
+        <div className="px-3 pb-2 text-xs text-neutral-500">No todos yet.</div>
       ) : (
-        <ul className="min-h-0 flex-1 overflow-auto p-2">
+        <ul className="min-h-0 flex-1 overflow-auto px-2 pb-2">
           {todos.map((t) => (
             <TodoRow key={t.id} todo={t} />
           ))}
         </ul>
       )}
-    </aside>
+    </section>
   )
 }
 

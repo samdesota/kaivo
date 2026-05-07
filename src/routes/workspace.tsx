@@ -628,7 +628,7 @@ export function WorkspaceSidebar({
         className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-brand-500/40"
         aria-hidden="true"
       />
-      <div className="flex flex-none basis-8 items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-3">
+      <div className="window-drag flex flex-none basis-8 items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-3">
         <div className="min-w-0">
           <div className="truncate text-xs font-medium text-neutral-300">cloud code</div>
         </div>
