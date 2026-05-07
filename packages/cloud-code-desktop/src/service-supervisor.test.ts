@@ -18,6 +18,7 @@ describe('ensureDesktopServices', () => {
     const supervisor = await ensureDesktopServices(config, {
       fetchHealth: async (url) => {
         if (url === `${config.app.url}/healthz`) return { ok: true, instanceId: config.instanceId }
+        if (url === `unix:${config.terminal.socketPath}/healthz`) return { ok: true, instanceId: config.instanceId, pid: 123 }
         if (url === `${config.env.url}/healthz`) return { ok: true, instanceId: config.instanceId, label: config.env.label }
         return null
       },
@@ -28,6 +29,7 @@ describe('ensureDesktopServices', () => {
     })
 
       expect(supervisor.app.launched).toBe(false)
+      expect(supervisor.terminal.launched).toBe(false)
       expect(supervisor.env.launched).toBe(false)
       expect(supervisor.pairing).toEqual({ envId: `local-${config.instanceId}`, envToken: 'test-token', reused: true })
   })
@@ -42,6 +44,7 @@ describe('ensureDesktopServices', () => {
       ensureDesktopServices(config, {
         fetchHealth: async (url) => {
           if (url === `${config.app.url}/healthz`) return { ok: true, instanceId: config.instanceId }
+          if (url === `unix:${config.terminal.socketPath}/healthz`) return { ok: true, instanceId: config.instanceId, pid: 123 }
           if (url === `${config.env.url}/healthz`) return { ok: true, instanceId: 'other-instance' }
           return null
         },
@@ -70,6 +73,7 @@ describe('ensureDesktopServices', () => {
 
     try {
       expect(supervisor.app.launched).toBe(true)
+      expect(supervisor.terminal.launched).toBe(true)
       expect(supervisor.env.launched).toBe(true)
       expect(supervisor.pairing.reused).toBe(false)
       await expect(fetchJson(`${config.app.url}/healthz`)).resolves.toMatchObject({ ok: true, instanceId: config.instanceId })

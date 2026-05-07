@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   openBrowserDevTools: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/open-devtools', input),
   getAgentBrowserConnections: () => ipcRenderer.invoke('cloud-code/browser/agent-connections'),
   disconnectAgentBrowser: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/disconnect-agent', input),
+  restartTerminalService: () => ipcRenderer.invoke('cloud-code/services/restart-terminal'),
 })

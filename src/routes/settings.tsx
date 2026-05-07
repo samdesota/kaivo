@@ -11,11 +11,18 @@ import { FONT_SIZE_BOUNDS, useFontSize } from '../lib/ui-prefs'
 import { RepoConfigCreateButton, RepoConfigsManager } from './repo-config-manager'
 import { SettingsPanel } from './settings/panel'
 
-type SettingsPageId = 'agent' | 'repos' | 'appearance'
+type SettingsPageId = 'agent' | 'repos' | 'terminal' | 'appearance'
+
+type DesktopSettingsWindow = Window & {
+  cloudCodeDesktop?: {
+    restartTerminalService?: () => Promise<unknown>
+  }
+}
 
 const SETTINGS_PAGES: { id: SettingsPageId; label: string; description: string }[] = [
   { id: 'agent', label: 'Agent', description: 'Models, providers, and agent credentials.' },
   { id: 'repos', label: 'Repos', description: 'Repository templates and GitHub integration.' },
+  { id: 'terminal', label: 'Terminal', description: 'Local terminal daemon controls.' },
   { id: 'appearance', label: 'Appearance', description: 'Local interface preferences.' },
 ]
 
@@ -210,6 +217,7 @@ export function SettingsPage() {
               </SettingsPanel>
             </>
           )}
+          {activePage === 'terminal' && <TerminalSection />}
           {activePage === 'appearance' && <AppearanceSection />}
         </div>
       </main>
@@ -218,7 +226,60 @@ export function SettingsPage() {
 }
 
 function parseSettingsPage(page: string | undefined): SettingsPageId {
-  return page === 'repos' || page === 'appearance' ? page : 'agent'
+  return page === 'repos' || page === 'terminal' || page === 'appearance' ? page : 'agent'
+}
+
+function TerminalSection() {
+  const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const restartTerminalService = (window as DesktopSettingsWindow).cloudCodeDesktop?.restartTerminalService
+
+  async function onRestart() {
+    setError(null)
+    setStatus(null)
+    const confirmed = await openConfirmOverlay({
+      title: 'Restart Terminal Daemon?',
+      message: 'This restarts only the local terminal daemon and closes active Cloud Code terminal shells. cc-env is not restarted.',
+      confirmLabel: 'Restart terminal daemon',
+      destructive: true,
+    })
+    if (!confirmed) return
+    if (!restartTerminalService) {
+      setError('Terminal daemon restart is only available in the desktop app.')
+      return
+    }
+    setPending(true)
+    try {
+      await restartTerminalService()
+      setStatus('Terminal daemon restarted.')
+    } catch (err) {
+      setError(extractTrpcMessage(err))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <SettingsPanel
+      id="terminal-daemon"
+      title="Terminal daemon"
+      description="Packaged desktop app restarts leave this daemon running so Cloud Code shells survive cc-env and app relaunches."
+    >
+      <div className="space-y-3">
+        <Button
+          onClick={() => void onRestart()}
+          disabled={pending || !restartTerminalService}
+          className="bg-red-700 px-2.5 py-1.5 text-xs hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending ? 'Restarting…' : 'Restart terminal daemon'}
+        </Button>
+        {!restartTerminalService && <p className="text-xs text-neutral-500">Only available in the desktop app.</p>}
+        {status && <p className="text-xs text-emerald-400">{status}</p>}
+        {error && <FormError>{error}</FormError>}
+      </div>
+    </SettingsPanel>
+  )
 }
 
 function AgentDefaultModelSection() {

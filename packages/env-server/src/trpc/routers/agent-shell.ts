@@ -3,6 +3,7 @@ import { observable } from '@trpc/server/observable'
 import { z } from 'zod'
 import { agentShellProcedure, router } from '../trpc.js'
 import { ShellError, terminalService } from '../../terminal/service.js'
+import { terminalDaemonClient, useTerminalDaemon } from '../../terminal/daemon-client.js'
 import { logger } from '../../logger.js'
 
 function toTrpcError(err: unknown): TRPCError {
@@ -101,7 +102,7 @@ export const agentShellRouter = router({
     )
     .mutation(async ({ input }) => {
       try {
-        const info = await terminalService.create({
+        const info = await (useTerminalDaemon() ? terminalDaemonClient.create({
           workspaceId: input.workspaceId ?? null,
           cwd: input.cwd,
           cols: input.cols,
@@ -109,7 +110,15 @@ export const agentShellRouter = router({
           ownerKind: 'agent',
           ownerSessionId: input.opencodeSessionId ?? null,
           ownerAgentSessionId: input.ownerAgentSessionId ?? null,
-        })
+        }) : terminalService.create({
+          workspaceId: input.workspaceId ?? null,
+          cwd: input.cwd,
+          cols: input.cols,
+          rows: input.rows,
+          ownerKind: 'agent',
+          ownerSessionId: input.opencodeSessionId ?? null,
+          ownerAgentSessionId: input.ownerAgentSessionId ?? null,
+        }))
         return { shellId: info.id }
       } catch (err) {
         throw toTrpcError(err)
@@ -124,19 +133,21 @@ export const agentShellRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
-      const info = terminalService.get(input.shellId)
+      const info = useTerminalDaemon() ? await terminalDaemonClient.get(input.shellId) : terminalService.get(input.shellId)
       if (!info || !info.alive) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'shell not running' })
       }
       const data = Buffer.from(input.b64, 'base64').toString('utf8')
-      terminalService.sendKeys(input.shellId, data)
+      if (useTerminalDaemon()) await terminalDaemonClient.write(input.shellId, data)
+      else terminalService.sendKeys(input.shellId, data)
       return { ok: true as const }
     }),
 
   close: agentShellProcedure
     .input(z.object({ shellId: z.string().min(1) }))
     .mutation(async ({ input }) => {
-      terminalService.dispose(input.shellId)
+      if (useTerminalDaemon()) await terminalDaemonClient.dispose(input.shellId)
+      else terminalService.dispose(input.shellId)
       return { ok: true as const }
     }),
 
@@ -149,6 +160,21 @@ export const agentShellRouter = router({
     )
     .query(async ({ input }) => {
       const max = input.maxBytes ?? 64 * 1024
+      if (useTerminalDaemon()) {
+        try {
+          const snap = await terminalDaemonClient.snapshot(input.shellId)
+          const bytes = Buffer.from(snap.b64, 'base64')
+          const tail = bytes.length > max ? bytes.subarray(bytes.length - max) : bytes
+          return {
+            b64: tail.toString('base64'),
+            truncated: bytes.length > max,
+            exitCode: snap.exitCode,
+            alive: snap.alive,
+          }
+        } catch (err) {
+          throw toTrpcError(err)
+        }
+      }
       const snap = terminalService.snapshot(input.shellId)
       if (snap === null) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'shell no longer retained' })

@@ -73,6 +73,7 @@ echo "==> building env-server"
 
 echo "==> staging env-server bundle"
 cp "$repo_root/packages/env-server/dist/main.js" "$bundle_dir/env-server/main.js"
+cp "$repo_root/packages/env-server/dist/terminal-daemon.js" "$bundle_dir/env-server/terminal-daemon.js"
 rsync -a "$repo_root/packages/env-server/migrations/" "$bundle_dir/env-server/migrations/"
 
 node --input-type=module -e "

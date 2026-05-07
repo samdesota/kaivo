@@ -47,6 +47,10 @@ export type InstanceRuntimeConfig = {
     logPath: string
     portSelection: RuntimePortSelection
   }
+  terminal: {
+    socketPath: string
+    logPath: string
+  }
   client: {
     host: string
     port: number
@@ -134,6 +138,10 @@ export function resolveInstanceRuntimeConfig(
       label: envLabel,
       logPath: path.resolve(env.CC_ENV_LOG_PATH ?? path.join(logsDir, 'cc-env.log')),
       portSelection: portSelections.env,
+    },
+    terminal: {
+      socketPath: path.resolve(env.CC_TERMINAL_SOCKET ?? path.join(rootDir, 'terminal.sock')),
+      logPath: path.resolve(env.CC_TERMINAL_LOG_PATH ?? path.join(logsDir, 'terminal.log')),
     },
     client: {
       host,

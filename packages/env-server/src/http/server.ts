@@ -9,6 +9,7 @@ import { createContext } from '../trpc/trpc.js'
 import { getMeta, hashEnvToken, hasEnvTokenHash, isPaired } from '../envmeta/service.js'
 import { desktopPair, PairError } from '../pair/service.js'
 import { terminalService } from '../terminal/service.js'
+import { terminalDaemonClient, useTerminalDaemon } from '../terminal/daemon-client.js'
 import { opencodeSupervisor } from '../agent/opencode.js'
 import { registerAgentProxy } from '../agent/proxy.js'
 import { getIdentityToken } from '../identity/client.js'
@@ -99,6 +100,30 @@ export async function buildServer(): Promise<FastifyInstance> {
 
       if (!ok) {
         socket.close(4401, 'unauthorized')
+        return
+      }
+
+      if (useTerminalDaemon()) {
+        const upstream = terminalDaemonClient.attachWebSocket(id)
+        upstream.on('message', (data) => {
+          try {
+            socket.send(data.toString())
+          } catch (err) {
+            logger.warn({ err, id }, 'shell daemon proxy send failed')
+          }
+        })
+        upstream.on('close', (code, reason) => {
+          const closeCode = code >= 1000 && code < 5000 && code !== 1006 ? code : 1011
+          socket.close(closeCode, reason.toString())
+        })
+        upstream.on('error', (err) => {
+          logger.warn({ err, id }, 'shell daemon proxy failed')
+          socket.close(4404, 'shell daemon unavailable')
+        })
+        socket.on('message', (data) => {
+          if (upstream.readyState === 1) upstream.send(data)
+        })
+        socket.on('close', () => upstream.close())
         return
       }
 

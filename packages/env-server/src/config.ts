@@ -41,6 +41,11 @@ const schema = z.object({
   // container mode the Dockerfile bakes it to /opt; in local mode
   // install.sh writes it under the state dir.
   CC_OPENCODE_PLUGIN_PATH: z.string().default('file:///opt/cloud-code-plugin/index.js'),
+
+  // Desktop-managed local envs proxy persistent PTY shells to a sibling
+  // terminal daemon over this Unix socket. Container/manual envs leave it unset
+  // and keep the historical in-process terminal service behavior.
+  CC_TERMINAL_SOCKET: z.string().optional(),
 })
 
 const parsed = schema.safeParse(process.env)

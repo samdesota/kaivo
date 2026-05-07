@@ -75,6 +75,11 @@ function installIpcHandlers(): void {
     browserAgentBridge?.disconnectTab(input.browserTabId)
     return { ok: true as const }
   })
+  ipcMain.handle('cloud-code/services/restart-terminal', async () => {
+    if (!serviceSupervisor) throw new Error('desktop service supervisor unavailable')
+    await serviceSupervisor.restartTerminal()
+    return { ok: true as const }
+  })
 }
 
 process.on('uncaughtException', (error) => {
@@ -93,7 +98,7 @@ async function main(): Promise<void> {
     NODE_ENV: app.isPackaged ? 'production' : process.env.NODE_ENV,
   })
   if (config.manageServices) {
-    serviceSupervisor = await ensureDesktopServices(config.instance)
+    serviceSupervisor = await ensureDesktopServices(config.instance, { preserveTerminalOnStop: app.isPackaged })
   }
 
   app.on('web-contents-created', (_event, contents) => {
