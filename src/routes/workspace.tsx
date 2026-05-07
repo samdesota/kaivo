@@ -49,6 +49,7 @@ import {
   unavailableReasonForWorkspaceTab,
   resolveWorkspaceEnvTarget,
   selectLocalEnvTarget,
+  type WorkspaceEnvTarget,
   type WorkspaceEnvRow,
 } from './workspace/env-targets'
 import { WorkspaceContextProvider, useWorkspaceContext } from './workspace/context'
@@ -111,6 +112,27 @@ const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
 const WORKSPACE_CHAT_EXPANDED_KEY = 'cloud-code.workspaceChatExpanded'
 const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
+
+type WorkspaceEnvResources = {
+  queryClient: QueryClient
+  managedClient: ReturnType<typeof makeManagedEnvReactClient>
+}
+
+const workspaceEnvResources = new Map<string, WorkspaceEnvResources>()
+
+function getWorkspaceEnvResources(target: WorkspaceEnvTarget): WorkspaceEnvResources | null {
+  if (!target.token) return null
+  const key = `${target.env.id}:${target.env.url}:${target.token}`
+  let resources = workspaceEnvResources.get(key)
+  if (!resources) {
+    resources = {
+      queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+      managedClient: makeManagedEnvReactClient(target.env, target.token),
+    }
+    workspaceEnvResources.set(key, resources)
+  }
+  return resources
+}
 
 export function WorkspacePage() {
   const { workspaceId } = useParams({ from: '/w/$workspaceId' })
@@ -1395,24 +1417,14 @@ function WorkspaceEnvTargetProvider({ children }: { children: ReactNode }) {
 function WorkspaceAgentEnvProvider({ children }: { children: ReactNode }) {
   const ctx = useWorkspaceContext()
   const target = ctx.localEnvTarget
-  const queryClient = useMemo(
-    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  const resources = useMemo(
+    () => (target?.token ? getWorkspaceEnvResources(target) : null),
     [target?.env.id, target?.env.url, target?.token],
   )
-  const managedClient = useMemo(() => {
-    if (!target?.token) return null
-    return makeManagedEnvReactClient(target.env, target.token)
-  }, [target?.env.id, target?.env.url, target?.token])
+  const queryClient = resources?.queryClient ?? null
+  const client = resources?.managedClient.client ?? null
 
-  useEffect(() => {
-    return () => {
-      void managedClient?.close()
-    }
-  }, [managedClient])
-
-  const client = managedClient?.client ?? null
-
-  if (!target?.token || !client) return <>{children}</>
+  if (!target?.token || !client || !queryClient) return <>{children}</>
   return (
     <envTrpc.Provider client={client} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
