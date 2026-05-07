@@ -1,6 +1,6 @@
 # SQLite Realtime Tables
 
-This project uses trigger-based SQLite CDC for TanStack DB collections that need backend-to-frontend realtime updates.
+This project uses trigger-based SQLite CDC for TanStack DB collections that need backend-to-frontend realtime updates. Current app tables using this path are `workspace_tabs` and `workspace_agent_tabs`.
 
 ## Architecture
 

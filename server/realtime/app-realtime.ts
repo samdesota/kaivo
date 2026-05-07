@@ -24,6 +24,16 @@ export function getAppRealtime(): SqliteRealtimeEngine {
         { name: 'updated_at', jsonName: 'updatedAt' },
       ],
     },
+    {
+      table: 'workspace_agent_tabs',
+      keyColumns: ['workspace_id', 'session_id'],
+      columns: [
+        { name: 'workspace_id', jsonName: 'workspaceId' },
+        { name: 'session_id', jsonName: 'sessionId' },
+        { name: 'position' },
+        { name: 'updated_at', jsonName: 'updatedAt' },
+      ],
+    },
   ])
   return appRealtime
 }
