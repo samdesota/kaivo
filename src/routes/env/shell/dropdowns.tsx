@@ -25,10 +25,11 @@ interface PortRow {
 interface ShellsDropdownProps {
   onOpen: (content: PaneContent) => void
   align?: 'left' | 'right'
+  side?: 'top' | 'bottom'
   workspaceId?: string
 }
 
-export function ShellsDropdown({ onOpen, align = 'left', workspaceId }: ShellsDropdownProps) {
+export function ShellsDropdown({ onOpen, align = 'left', side = 'bottom', workspaceId }: ShellsDropdownProps) {
   const shellListInput = workspaceId ? { workspaceId } : undefined
   const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
   const queryClient = useQueryClient()
@@ -47,7 +48,7 @@ export function ShellsDropdown({ onOpen, align = 'left', workspaceId }: ShellsDr
   }
 
   return (
-    <Popover label="Shells" count={list.length} align={align}>
+    <Popover label="Shells" count={list.length} align={align} side={side}>
       {(close) => (
         <div className="p-1">
           {list.length === 0 ? (

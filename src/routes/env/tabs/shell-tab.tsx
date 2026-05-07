@@ -47,8 +47,8 @@ export function ShellTabContent({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs">
+    <div className="flex h-full min-h-0 flex-col bg-neutral-975">
+      <div className="flex flex-none basis-8 items-center gap-2 border-b border-neutral-800 bg-neutral-975 px-3 text-xs">
         <span className="font-mono text-neutral-300">shell {shellId.slice(-8)}</span>
         {info?.ownerKind === 'agent' && (
           <span className="rounded border border-brand-500/40 bg-brand-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-brand-500">
@@ -73,7 +73,7 @@ export function ShellTabContent({
             ⋯
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded border border-neutral-800 bg-neutral-950 shadow-lg">
+            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded border border-neutral-800 bg-neutral-975 shadow-lg">
               <button
                 onClick={() => void onTerminate()}
                 disabled={!info || dispose.isPending}
@@ -86,7 +86,7 @@ export function ShellTabContent({
         </div>
       </div>
       {err && <div className="border-b border-red-900 bg-red-950 px-3 py-1 text-[10px] text-red-300">{err}</div>}
-      <div className="min-h-0 flex-1 bg-black">
+      <div className="min-h-0 flex-1 bg-neutral-975">
         {missing ? (
           <div className="flex h-full items-center justify-center text-sm text-neutral-500">
             Shell terminated.

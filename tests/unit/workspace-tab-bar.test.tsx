@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   createMemoryHistory,
   createRootRoute,
@@ -48,7 +49,11 @@ function renderBar() {
     routeTree: rootRoute.addChildren([workspaceRoute]),
     history: createMemoryHistory({ initialEntries: ['/w/workspace-old'] }),
   })
-  return render(<RouterProvider router={router} />)
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
 }
 
 beforeEach(() => {

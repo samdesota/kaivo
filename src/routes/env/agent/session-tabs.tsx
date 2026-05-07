@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
+import { BorderedTabStrip, type BorderedTabItem } from '../../../components/bordered-tab-strip'
 import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
@@ -98,43 +100,22 @@ export function SessionTabs({
     }
   }
 
+  const tabItems: BorderedTabItem[] = active.map((s) => ({
+    id: s.id,
+    label: s.title ?? s.id.slice(-6),
+    title: new Date(s.lastActivityAt).toLocaleString(),
+    closeTitle: 'Close session',
+  }))
+
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap">
-        {active.map((s) => {
-          const selected = s.id === sessionId
-          const label = s.title ?? s.id.slice(-6)
-          return (
-            <div
-              key={s.id}
-              className={
-                'group flex shrink-0 items-center gap-0.5 rounded transition-colors ' +
-                (selected ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200')
-              }
-            >
-              <button
-                onClick={() => onSelect(s.id)}
-                className="py-1 pl-2 pr-1 text-xs"
-                title={new Date(s.lastActivityAt).toLocaleString()}
-              >
-                <span className="max-w-[180px] truncate align-middle">{label}</span>
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void onClose(s.id)
-                }}
-                className="mr-1 rounded px-1 text-[11px] leading-none text-neutral-500 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 hover:opacity-100"
-                aria-label="Close session"
-                title="Close session"
-              >
-                ×
-              </button>
-            </div>
-          )
-        })}
-      </div>
-      <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />
+    <div className="flex min-w-0 flex-1 items-stretch">
+      <BorderedTabStrip
+        items={tabItems}
+        activeId={sessionId}
+        onSelect={onSelect}
+        onClose={(id) => void onClose(id)}
+      />
+      {!workspaceId && <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />}
       {archived.length > 0 && (
         <ClosedDropdown archived={archived} onReopen={onReopen} />
       )}
@@ -181,11 +162,11 @@ export function NewSessionPopover({
             else setOpen(true)
           }}
           disabled={start.isPending}
-          className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-brand-400 hover:bg-neutral-900 hover:text-brand-300"
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-neutral-800 bg-neutral-950/90 text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300 disabled:opacity-50"
           title="New agent chat"
           aria-label="New agent chat"
         >
-          {label}
+          {start.isPending ? <span className="h-3 w-3 animate-spin rounded-full border border-neutral-500 border-t-transparent" /> : <Plus className="h-3 w-3" aria-hidden="true" />}
         </button>
         <NewAgentChatModal
           open={open}
@@ -222,11 +203,11 @@ export function NewSessionPopover({
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={start.isPending}
-        className="shrink-0 rounded px-2 py-1 text-xs text-brand-400 hover:bg-neutral-900 hover:text-brand-300"
+        className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded border border-neutral-800 bg-neutral-950/90 px-1 text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300 disabled:opacity-50"
         title="New agent session"
         aria-label="New session"
       >
-        {start.isPending ? 'Creating…' : label}
+        {start.isPending ? <span className="h-3 w-3 animate-spin rounded-full border border-neutral-500 border-t-transparent" /> : label === '+' ? <Plus className="h-3 w-3" aria-hidden="true" /> : label}
       </button>
     )
 

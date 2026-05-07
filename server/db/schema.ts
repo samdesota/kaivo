@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { check, integer, primaryKey, real, sqliteTable, text, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import type { WorkspaceTab } from '../../shared/workspace-pane'
 
 export type { WorkspaceTab }
@@ -10,6 +10,8 @@ export type RepoSource = 'github' | 'url'
 export type AgentSessionStatus = 'active' | 'archived' | 'unavailable'
 export type ShellOwnerKind = 'human' | 'agent'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
+export type WorkspaceNameSource = 'explicit' | 'folder_path' | 'worktree' | 'derived'
+export type WorkspaceSourceKind = 'folder' | 'worktree' | 'repo_config'
 
 export type WorkspaceUiState = {
   activeAgentSessionId: string | null
@@ -81,9 +83,25 @@ export const secrets = sqliteTable('secrets', {
   createdAt: timestamp('created_at').notNull().default(nowMs),
 })
 
+export const workspaceFolders = sqliteTable('workspace_folders', {
+  id: text('id').primaryKey(),
+  parentId: text('parent_id').references((): AnySQLiteColumn => workspaceFolders.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  position: integer('position').notNull(),
+  collapsed: integer('collapsed', { mode: 'boolean' }).notNull().default(false),
+  createdAt: timestamp('created_at').notNull().default(nowMs),
+  updatedAt: timestamp('updated_at').notNull().default(nowMs),
+  archivedAt: timestamp('archived_at'),
+})
+
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
+  folderId: text('folder_id').references(() => workspaceFolders.id, { onDelete: 'set null' }),
+  position: integer('position').notNull().default(0),
+  nameSource: text('name_source').$type<WorkspaceNameSource>().notNull().default('explicit'),
+  sourceKind: text('source_kind').$type<WorkspaceSourceKind>(),
+  sourcePath: text('source_path'),
   createdAt: timestamp('created_at').notNull().default(nowMs),
   updatedAt: timestamp('updated_at').notNull().default(nowMs),
   lastOpenedAt: timestamp('last_opened_at'),

@@ -12,6 +12,8 @@ export function SplitPane({
   maxRatio = 0.85,
   leftCollapsed = false,
   collapsedLeftWidth = 28,
+  preferredLeftWidth,
+  minRightWidth = 320,
   left,
   right,
   onRatioChange,
@@ -22,6 +24,8 @@ export function SplitPane({
   maxRatio?: number
   leftCollapsed?: boolean
   collapsedLeftWidth?: number
+  preferredLeftWidth?: number
+  minRightWidth?: number
   left: React.ReactNode
   right: React.ReactNode
   onRatioChange?: (ratio: number) => void
@@ -33,6 +37,7 @@ export function SplitPane({
     if (!Number.isFinite(parsed) || parsed < minRatio || parsed > maxRatio) return initialRatio
     return parsed
   })
+  const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dragging = useRef(false)
 
@@ -44,6 +49,25 @@ export function SplitPane({
     }
     onRatioChange?.(ratio)
   }, [storageKey, ratio, onRatioChange])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => {
+      setContainerWidth(entry?.contentRect.width ?? 0)
+    })
+    observer.observe(el)
+    setContainerWidth(el.getBoundingClientRect().width)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!preferredLeftWidth || !containerWidth || leftCollapsed || dragging.current) return
+    const maxLeft = Math.max(0, containerWidth - minRightWidth)
+    const leftWidth = Math.min(preferredLeftWidth, maxLeft)
+    const next = Math.max(minRatio, Math.min(maxRatio, leftWidth / containerWidth))
+    setRatio(next)
+  }, [containerWidth, leftCollapsed, maxRatio, minRatio, minRightWidth, preferredLeftWidth])
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -79,27 +103,28 @@ export function SplitPane({
   return (
     <div ref={containerRef} className="flex min-h-0 min-w-0 flex-1">
       <div
-        className="flex min-h-0 min-w-0 flex-col"
+        className={
+          'relative flex min-h-0 min-w-0 flex-col ' +
+          (!leftCollapsed ? 'border-r border-neutral-800' : '')
+        }
         style={
           leftCollapsed
             ? { flex: `0 0 ${collapsedLeftWidth}px` }
-            : { flex: `0 0 calc(${ratio * 100}% - 2px)` }
+            : { flex: `0 0 ${ratio * 100}%` }
         }
       >
         {left}
+        {!leftCollapsed && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onMouseDown={onMouseDown}
+            onDoubleClick={() => setRatio(initialRatio)}
+            className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-brand-500/40"
+            title="Drag to resize · double-click to reset"
+          />
+        )}
       </div>
-      {!leftCollapsed && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          onMouseDown={onMouseDown}
-          onDoubleClick={() => setRatio(initialRatio)}
-          className="group relative w-1 shrink-0 cursor-col-resize bg-neutral-800 hover:bg-brand-500/60"
-          title="Drag to resize · double-click to reset"
-        >
-          <div className="pointer-events-none absolute inset-y-0 -left-1 -right-1" />
-        </div>
-      )}
       <div
         className="flex min-h-0 min-w-0 flex-col"
         style={{ flex: `1 1 0` }}

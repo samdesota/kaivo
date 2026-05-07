@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
+import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
 import { handleAgentUiOpenPaneEvent } from '../../../lib/agent-ui-open-pane'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
@@ -33,6 +34,7 @@ interface AgentStatus {
 interface SessionSummary {
   id: string
   status: string
+  title?: string | null
   workspaceId?: string | null
 }
 
@@ -45,7 +47,9 @@ export function AgentSessionView({
   activeSessionId,
   onSessionSelect,
   headerTrailing,
+  footerTrailing,
   onOpenNewChat,
+  headerLeading,
 }: {
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   onOpenPaneRefreshHint?: () => void
@@ -59,13 +63,18 @@ export function AgentSessionView({
   workspaceId?: string
   activeSessionId?: string | null
   onSessionSelect?: (sessionId: string | null) => void
-  headerTrailing?: ReactNode
+  headerTrailing?: ReactNode | ((newChat: { openNewChat: () => Promise<void>; setSessionId: (id: string) => void; workspaceId?: string } | null) => ReactNode)
+  footerTrailing?: ReactNode
   onOpenNewChat?: () => Promise<string | null>
+  headerLeading?: ReactNode
 }) {
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
   const sessionListInput = workspaceId ? { workspaceId } : undefined
   const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, { refetchInterval: 5_000 })
   const queryClient = useQueryClient()
+  const maybeAutoNameWorkspace = trpc.workspace.maybeAutoNameFromPrompt.useMutation({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
+  })
   const [internalSessionId, setInternalSessionId] = useState<string | null>(null)
   const sessionId = activeSessionId !== undefined ? activeSessionId : internalSessionId
   const setSessionId = useCallback((id: string | null) => {
@@ -78,8 +87,17 @@ export function AgentSessionView({
   }, [sessionId])
   const start = envTrpc.agent.startAgent.useMutation()
   const [startError, setStartError] = useState<string | null>(null)
+  const openNewChat = onOpenNewChat
+    ? async () => {
+        const id = await onOpenNewChat()
+        if (!id) return
+        await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', sessionListInput) })
+        setSessionId(id)
+      }
+    : undefined
 
   const sessionsData = sessions.data as SessionSummary[] | undefined
+  const activeSession = sessionsData?.find((session) => session.id === sessionId) ?? null
   const retainedChatSessionIds = useMemo(
     () => (sessionsData ?? []).filter((s) => s.status !== 'archived').map((s) => s.id),
     [sessionsData],
@@ -140,33 +158,36 @@ export function AgentSessionView({
     )
   }
 
+  const trailing = typeof headerTrailing === 'function'
+    ? headerTrailing(openNewChat ? { openNewChat, setSessionId, workspaceId } : null)
+    : headerTrailing
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-1.5">
+      <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
+        {headerLeading && <div className="flex items-center pl-3 pr-2">{headerLeading}</div>}
         <SessionTabs
           workspaceId={workspaceId}
           sessionId={sessionId}
           onSelect={(id) => setSessionId(id)}
-          onOpenNewChat={
-            onOpenNewChat
-              ? async () => {
-                  const id = await onOpenNewChat()
-                  if (!id) return
-                  await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', sessionListInput) })
-                  setSessionId(id)
-                }
-              : undefined
-          }
         />
-        {headerTrailing}
+        {trailing && <div className="flex items-center px-2">{trailing}</div>}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {sessionId ? (
           <SessionPane
             key={sessionId}
             sessionId={sessionId}
+            workspaceId={workspaceId}
+            onWorkspaceAutoName={workspaceId ? (message) => maybeAutoNameWorkspace.mutateAsync({
+              id: workspaceId,
+              prompt: message,
+              isFirstChat: retainedChatSessionIds.length === 1,
+              chatHadExplicitTitle: Boolean(activeSession?.title),
+            }) : undefined}
             onOpenPane={onOpenPane}
             onOpenPaneRefreshHint={onOpenPaneRefreshHint}
+            footerTrailing={footerTrailing}
           />
         ) : (
           <EmptySessionState workspaceId={workspaceId} onCreated={(id) => setSessionId(id)} />
@@ -188,7 +209,7 @@ function ContextUsageBar({ used, limit }: { used: number; limit: number }) {
     pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-brand-500'
   return (
     <div
-      className="flex items-center gap-1.5 mr-auto"
+      className="flex items-center gap-1.5"
       title={`${formatTokenCount(used)} / ${formatTokenCount(limit)} tokens`}
     >
       <div className="h-1.5 w-16 rounded-full bg-neutral-800 overflow-hidden">
@@ -208,10 +229,28 @@ function ContextUsageBar({ used, limit }: { used: number; limit: number }) {
  * Bounces opencode in the env (env-side `agent.restart`). Useful after
  * provider keys change in /settings — opencode reloads them on boot.
  */
-function RestartAgentButton() {
+function AgentConnectivityMenu() {
   const restart = envTrpc.agent.restart.useMutation()
   const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
   async function onClick() {
     if (!confirm('Restart agent? Active runs will be interrupted.')) return
@@ -223,34 +262,107 @@ function RestartAgentButton() {
         queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList') }),
         queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.listModels') }),
       ])
+      setOpen(false)
     } catch (e) {
       setErr(extractTrpcMessage(e))
     }
   }
 
+  async function refreshStatus() {
+    setErr(null)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.agentStatus') }),
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList') }),
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.listModels') }),
+    ])
+    setOpen(false)
+  }
+
   return (
-    <button
-      onClick={() => void onClick()}
-      disabled={restart.isPending}
-      title={err ?? 'Restart the agent (e.g. after changing provider keys)'}
-      className={
-        'rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-900 disabled:opacity-50 ' +
-        (err ? 'border-red-700 text-red-300' : '')
-      }
-    >
-      {restart.isPending ? 'Restarting…' : 'Restart agent'}
-    </button>
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={err ?? 'OpenCode connected'}
+        aria-label="OpenCode connection status"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={
+          'flex h-7 items-center gap-1.5 rounded border px-2 text-[11px] shadow-sm ' +
+          (err
+            ? 'border-red-800 bg-red-950/30 text-red-300 hover:bg-red-950/50'
+            : open
+              ? 'border-emerald-800/80 bg-emerald-950/30 text-emerald-200'
+              : 'border-neutral-800 bg-neutral-900/60 text-neutral-300 hover:bg-neutral-900 hover:text-neutral-100')
+        }
+      >
+        <span
+          className={
+            'h-2 w-2 rounded-full ' +
+            (err ? 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.8)]' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]')
+          }
+          aria-hidden="true"
+        />
+        <span className="hidden sm:inline">OpenCode</span>
+        <span aria-hidden className="text-neutral-500">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 bottom-full z-30 mb-1 w-64 rounded border border-neutral-800 bg-neutral-950 shadow-lg" role="menu">
+          <div className="border-b border-neutral-800 px-3 py-2">
+            <div className="flex items-center gap-2 text-xs text-neutral-100">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+              <span>OpenCode connected</span>
+            </div>
+            <p className="mt-1 text-[11px] text-neutral-500">Agent service is reachable in this environment.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onClick()}
+            disabled={restart.isPending}
+            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs text-neutral-200 hover:bg-neutral-900 disabled:opacity-60"
+            role="menuitem"
+          >
+            <span>{restart.isPending ? 'Restarting…' : 'Restart agent'}</span>
+            <span className="text-[10px] text-neutral-500">Interrupts runs</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void refreshStatus()}
+            className="flex w-full items-center justify-between gap-3 border-t border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:bg-neutral-900"
+            role="menuitem"
+          >
+            <span>Refresh status</span>
+            <span className="text-[10px] text-neutral-500">Models + sessions</span>
+          </button>
+          <Link
+            to="/settings"
+            onClick={() => setOpen(false)}
+            className="block border-t border-neutral-800 px-3 py-2 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
+            role="menuitem"
+          >
+            Provider settings
+          </Link>
+          {err && <div className="border-t border-red-900 bg-red-950/50 px-3 py-1.5 text-[11px] text-red-300">{err}</div>}
+        </div>
+      )}
+    </div>
   )
 }
 
 function SessionPane({
   sessionId,
+  workspaceId,
+  onWorkspaceAutoName,
   onOpenPane,
   onOpenPaneRefreshHint,
+  footerTrailing,
 }: {
   sessionId: string
+  workspaceId?: string
+  onWorkspaceAutoName?: (message: string) => Promise<unknown>
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   onOpenPaneRefreshHint?: () => void
+  footerTrailing?: ReactNode
 }) {
   const chat = useChatSession(sessionId)
   const chatStore = useChatStateStore()
@@ -330,14 +442,6 @@ function SessionPane({
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center justify-end gap-2 border-b border-neutral-800/60 bg-neutral-950 px-3 py-1">
-          {statusData?.contextUsage && (
-            <ContextUsageBar used={statusData.contextUsage.used} limit={statusData.contextUsage.limit} />
-          )}
-          <RestartAgentButton />
-          <ModelPicker sessionId={sessionId} />
-          <ReasoningEffortPicker sessionId={sessionId} />
-        </div>
         {reconnecting && (
           <div className="border-b border-amber-500/40 bg-amber-500/5 px-3 py-1 text-[11px] text-amber-200">
             Reconnecting…
@@ -387,7 +491,7 @@ function SessionPane({
           </div>
         </OpenStateProvider>
         {activeQuestions.length > 0 && (
-          <div className="shrink-0 space-y-2 border-t border-neutral-800 bg-neutral-950 p-3">
+          <div className="shrink-0 space-y-2 border-t border-neutral-800 bg-neutral-975 p-3">
             {activeQuestions.map((q) => (
               <QuestionBanner key={q.id} req={q} sessionId={sessionId} />
             ))}
@@ -415,7 +519,22 @@ function SessionPane({
             chatDebug('session-pane:onSent', { sessionId })
             chatStore.markSent(sessionId)
           }}
+          onWorkspaceAutoName={async (message) => {
+            if (!workspaceId) return
+            await onWorkspaceAutoName?.(message)
+          }}
         />
+        <div className="mb-2 flex shrink-0 items-center gap-2 bg-neutral-975 px-2 py-1">
+          <ModelPicker sessionId={sessionId} />
+          <ReasoningEffortPicker sessionId={sessionId} />
+          <div className="ml-auto flex items-center gap-1.5">
+            {statusData?.contextUsage && (
+              <ContextUsageBar used={statusData.contextUsage.used} limit={statusData.contextUsage.limit} />
+            )}
+            {footerTrailing}
+            <AgentConnectivityMenu />
+          </div>
+        </div>
       </div>
       <TodosPanel todos={state.todos} />
     </div>

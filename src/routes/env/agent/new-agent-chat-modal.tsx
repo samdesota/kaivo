@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { FolderPickerModal } from './folder-picker-modal'
 import {
+  defaultWorkspaceName,
   newAgentChatStartInput,
+  resolveWorkspaceName,
   validateNewAgentChatSelection,
+  type NewAgentChatWorkspaceMode,
   type NewAgentChatSelection,
 } from './new-agent-chat-state'
 
@@ -26,27 +30,48 @@ type NewChatTab = 'folder' | 'worktree' | 'clone'
 export function NewAgentChatModal({
   open,
   workspaceId,
+  workspaceName = 'Current workspace',
+  initialWorkspaceMode = 'existing',
+  folderId,
   onClose,
   onCreated,
 }: {
   open: boolean
-  workspaceId: string
+  workspaceId?: string
+  workspaceName?: string
+  initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  folderId?: string | null
   onClose: () => void
-  onCreated: (sessionId: string) => void
+  onCreated: (sessionId: string, workspaceId?: string) => void
 }) {
   if (!open) return null
 
-  return <NewAgentChatOverlay workspaceId={workspaceId} onClose={onClose} onCreated={onCreated} />
+  return (
+    <NewAgentChatOverlay
+      workspaceId={workspaceId}
+      workspaceName={workspaceName}
+      initialWorkspaceMode={initialWorkspaceMode}
+      folderId={folderId}
+      onClose={onClose}
+      onCreated={onCreated}
+    />
+  )
 }
 
 export function NewAgentChatOverlay({
   workspaceId,
+  workspaceName = 'Current workspace',
+  initialWorkspaceMode = 'existing',
+  folderId,
   onClose,
   onCreated,
 }: {
-  workspaceId: string
+  workspaceId?: string
+  workspaceName?: string
+  initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  folderId?: string | null
   onClose: () => void
-  onCreated: (sessionId: string) => void
+  onCreated: (sessionId: string, workspaceId?: string) => void
 }) {
   const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined)
   const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined)
@@ -54,15 +79,18 @@ export function NewAgentChatOverlay({
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const deleteWorktree = envTrpc.repo.deleteWorktree.useMutation()
   const start = envTrpc.agent.sessionStart.useMutation()
+  const createWorkspace = trpc.workspace.create.useMutation()
   const queryClient = useQueryClient()
   const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<NewChatTab>('folder')
   const [folderFilter, setFolderFilter] = useState('')
+  const [workspaceMode, setWorkspaceMode] = useState<NewAgentChatWorkspaceMode>(initialWorkspaceMode)
+  const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
   const folderSearchRef = useRef<HTMLInputElement | null>(null)
 
-  const busy = start.isPending || cloneConfig.isPending || deleteWorktree.isPending
+  const busy = start.isPending || cloneConfig.isPending || deleteWorktree.isPending || createWorkspace.isPending
   const validation = validateNewAgentChatSelection(selection)
 
   async function createChat() {
@@ -85,13 +113,27 @@ export function NewAgentChatOverlay({
         })
         workingDir = cloned.workingDir
       }
-      const session = (await start.mutateAsync(newAgentChatStartInput(workspaceId, workingDir))) as { id: string }
+      let targetWorkspaceId = workspaceId
+      if (workspaceMode === 'new' || !targetWorkspaceId) {
+        const resolved = resolveWorkspaceName(selection, workspaceNameDraft)
+        const workspace = await createWorkspace.mutateAsync({
+          name: resolved.name,
+          folderId: folderId ?? null,
+          nameSource: resolved.source,
+          sourceKind: selection.type === 'folder' ? 'folder' : selection.type === 'worktree' ? 'worktree' : 'repo_config',
+          sourcePath: workingDir,
+        })
+        targetWorkspaceId = workspace.id
+      }
+      const session = (await start.mutateAsync(newAgentChatStartInput(targetWorkspaceId, workingDir))) as { id: string }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId }) }),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId: targetWorkspaceId }) }),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
+        queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
         queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listRecentFolders') }),
         queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') }),
       ])
-      onCreated(session.id)
+      onCreated(session.id, targetWorkspaceId)
       onClose()
     } catch (err) {
       setError(extractTrpcMessage(err))
@@ -110,6 +152,8 @@ export function NewAgentChatOverlay({
   const clonePreview = selectedConfig && selection?.type === 'repoConfig'
     ? `repos/${slugify(selectedConfig.name)}/${slugify(selection.worktreeName || 'work-tree')}`
     : null
+  const generatedWorkspaceName = defaultWorkspaceName(selection).name
+  const workspaceNameValue = resolveWorkspaceName(selection, workspaceNameDraft).name
 
   async function removeWorktree(worktree: RepoWorktree) {
     if (!window.confirm(`Delete ${worktree.name}/${worktree.worktreeName}?\n\n${worktree.workingDir}`)) return
@@ -131,19 +175,29 @@ export function NewAgentChatOverlay({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="flex max-h-[84vh] w-full max-w-2xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
-        <div className="border-b border-neutral-800 px-4 py-3">
-          <h2 className="text-sm font-semibold text-neutral-100">New agent chat</h2>
-          <p className="mt-1 text-xs text-neutral-500">Choose where the agent should work.</p>
+      <div className="flex max-h-[84vh] min-h-0 w-full max-w-2xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-neutral-800 px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold text-neutral-100">New agent chat</h2>
+            <p className="mt-1 text-xs text-neutral-500">Choose where the agent should work.</p>
+          </div>
+          <WorkspaceModeControl
+            mode={workspaceMode}
+            onModeChange={setWorkspaceMode}
+            existingWorkspaceName={workspaceName}
+            workspaceNameValue={workspaceNameDraft.edited ? workspaceNameDraft.value : generatedWorkspaceName}
+            resolvedWorkspaceName={workspaceNameValue}
+            onWorkspaceNameChange={(value) => setWorkspaceNameDraft({ value, edited: true })}
+          />
         </div>
-        <div className="flex border-b border-neutral-800 px-3 pt-3">
+        <div className="flex shrink-0 border-b border-neutral-800 px-3 pt-3">
           <TabButton active={activeTab === 'folder'} onClick={() => setActiveTab('folder')}>Folders</TabButton>
           <TabButton active={activeTab === 'worktree'} onClick={() => setActiveTab('worktree')}>Work trees</TabButton>
           <TabButton active={activeTab === 'clone'} onClick={() => setActiveTab('clone')}>Clone config</TabButton>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden p-4">
           {activeTab === 'folder' && (
-            <section className="flex h-full min-h-[340px] flex-col gap-3">
+            <section className="flex h-full min-h-0 flex-col gap-3">
               <div className="flex gap-2">
                 <input
                   ref={folderSearchRef}
@@ -179,7 +233,7 @@ export function NewAgentChatOverlay({
             </section>
           )}
           {activeTab === 'worktree' && (
-            <section className="flex h-full min-h-[340px] flex-col gap-2">
+            <section className="flex h-full min-h-0 flex-col gap-2">
               {worktrees.isLoading && <div className="text-xs text-neutral-500">Loading work trees…</div>}
               <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
                 {existingWorktrees.map((worktree) => (
@@ -188,7 +242,7 @@ export function NewAgentChatOverlay({
                     className={compactChoiceClass(selection?.type === 'worktree' && selection.repoId === worktree.id, 'row')}
                   >
                     <button
-                      onClick={() => setSelection({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir })}
+                      onClick={() => setSelection({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName })}
                       className="min-w-0 flex-1 text-left"
                     >
                       <span className="block truncate text-neutral-100">{worktree.name} / {worktree.worktreeName}</span>
@@ -211,7 +265,7 @@ export function NewAgentChatOverlay({
             </section>
           )}
           {activeTab === 'clone' && (
-            <section className="flex h-full min-h-[340px] flex-col gap-3">
+            <section className="flex h-full min-h-0 flex-col gap-3">
               {repoConfigs.isLoading && <div className="text-xs text-neutral-500">Loading repo configs…</div>}
               <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
                 {configs.map((config) => (
@@ -256,8 +310,8 @@ export function NewAgentChatOverlay({
             </section>
           )}
         </div>
-        {error && <div className="mx-4 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>}
-        <div className="flex justify-end gap-2 border-t border-neutral-800 px-4 py-3">
+        {error && <div className="mx-4 shrink-0 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>}
+        <div className="flex shrink-0 justify-end gap-2 border-t border-neutral-800 px-4 py-3">
           <button onClick={onClose} className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900">Cancel</button>
           <button
             onClick={() => void createChat()}
@@ -295,6 +349,50 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     >
       {children}
     </button>
+  )
+}
+
+export function WorkspaceModeControl({
+  mode,
+  onModeChange,
+  existingWorkspaceName,
+  workspaceNameValue,
+  resolvedWorkspaceName,
+  onWorkspaceNameChange,
+}: {
+  mode: NewAgentChatWorkspaceMode
+  onModeChange: (mode: NewAgentChatWorkspaceMode) => void
+  existingWorkspaceName: string
+  workspaceNameValue: string
+  resolvedWorkspaceName?: string
+  onWorkspaceNameChange: (value: string) => void
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 text-xs text-neutral-500">
+      <span>Workspace</span>
+      <select
+        aria-label="Workspace mode"
+        value={mode}
+        onChange={(event) => onModeChange(event.target.value as NewAgentChatWorkspaceMode)}
+        className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-brand-500"
+      >
+        <option value="new">New</option>
+        <option value="existing">Existing</option>
+      </select>
+      {mode === 'new' ? (
+        <input
+          aria-label="Workspace name"
+          value={workspaceNameValue}
+          onChange={(event) => onWorkspaceNameChange(event.target.value)}
+          title={resolvedWorkspaceName ?? workspaceNameValue}
+          className="w-36 rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-brand-500"
+        />
+      ) : (
+        <span className="max-w-44 truncate rounded border border-neutral-900 bg-neutral-900/40 px-2 py-1 text-neutral-300" title={existingWorkspaceName}>
+          {existingWorkspaceName}
+        </span>
+      )}
+    </div>
   )
 }
 

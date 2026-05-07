@@ -26,7 +26,7 @@ export function XTermAttached({ shellId }: { shellId: string }) {
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
       fontSize: 13,
       theme: {
-        background: '#000000',
+        background: '#111318',
         foreground: '#e6e6e6',
         cursor: '#ffffff',
       },
@@ -144,5 +144,5 @@ export function XTermAttached({ shellId }: { shellId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shellId, env.id, envToken])
 
-  return <div ref={containerRef} className="relative h-full w-full overflow-hidden" />
+  return <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-neutral-975" />
 }

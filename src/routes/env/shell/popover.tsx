@@ -5,9 +5,10 @@ interface PopoverProps {
   count?: number
   children: (close: () => void) => ReactNode
   align?: 'left' | 'right'
+  side?: 'top' | 'bottom'
 }
 
-export function Popover({ label, count, children, align = 'left' }: PopoverProps) {
+export function Popover({ label, count, children, align = 'left', side = 'bottom' }: PopoverProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -47,13 +48,14 @@ export function Popover({ label, count, children, align = 'left' }: PopoverProps
           <span className="rounded bg-neutral-800 px-1 text-[10px] text-neutral-300">{count}</span>
         )}
         <span aria-hidden className="text-neutral-500">
-          ▾
+          {side === 'top' ? '▴' : '▾'}
         </span>
       </button>
       {open && (
         <div
           className={
-            'absolute top-full z-30 mt-1 w-80 rounded border border-neutral-800 bg-neutral-950 shadow-lg ' +
+            'absolute z-30 w-80 rounded border border-neutral-800 bg-neutral-950 shadow-lg ' +
+            (side === 'top' ? 'bottom-full mb-1 ' : 'top-full mt-1 ') +
             (align === 'right' ? 'right-0' : 'left-0')
           }
           role="menu"

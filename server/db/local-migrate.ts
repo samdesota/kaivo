@@ -34,9 +34,25 @@ CREATE TABLE IF NOT EXISTS secrets (
 CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  folder_id TEXT REFERENCES workspace_folders(id) ON DELETE SET NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  name_source TEXT NOT NULL DEFAULT 'explicit',
+  source_kind TEXT,
+  source_path TEXT,
   created_at INTEGER NOT NULL DEFAULT ${nowMs},
   updated_at INTEGER NOT NULL DEFAULT ${nowMs},
   last_opened_at INTEGER,
+  archived_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS workspace_folders (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT REFERENCES workspace_folders(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  collapsed INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT ${nowMs},
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs},
   archived_at INTEGER
 );
 
@@ -258,6 +274,11 @@ function tableExists(sqlite: Database.Database, table: string): boolean {
   return Boolean(sqlite.prepare('SELECT name FROM sqlite_master WHERE type = ? AND name = ?').get('table', table))
 }
 
+function columnExists(sqlite: Database.Database, table: string, column: string): boolean {
+  const rows = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  return rows.some((row) => row.name === column)
+}
+
 function normalizeLegacyUiState(raw: unknown) {
   const state = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const workspaceTabs = Array.isArray(state.workspaceTabs) ? state.workspaceTabs : []
@@ -388,6 +409,45 @@ function migrateWorkspaceAgentTabs(sqlite: Database.Database) {
   `)
 }
 
+function migrateWorkspaceFolders(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_folders (
+      id TEXT PRIMARY KEY,
+      parent_id TEXT REFERENCES workspace_folders(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      collapsed INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT ${nowMs},
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+      archived_at INTEGER
+    );
+  `)
+
+  const workspaceColumns = [
+    ['folder_id', 'TEXT REFERENCES workspace_folders(id) ON DELETE SET NULL'],
+    ['position', 'INTEGER NOT NULL DEFAULT 0'],
+    ['name_source', "TEXT NOT NULL DEFAULT 'explicit'"],
+    ['source_kind', 'TEXT'],
+    ['source_path', 'TEXT'],
+  ] as const
+
+  for (const [name, definition] of workspaceColumns) {
+    if (!columnExists(sqlite, 'workspaces', name)) sqlite.exec(`ALTER TABLE workspaces ADD COLUMN ${name} ${definition}`)
+  }
+
+  const rows = sqlite.prepare(`
+    SELECT id FROM workspaces
+    WHERE archived_at IS NULL
+    ORDER BY COALESCE(last_opened_at, -1) DESC, created_at DESC, id ASC
+  `).all() as Array<{ id: string }>
+  const update = sqlite.prepare(`
+    UPDATE workspaces
+    SET folder_id = NULL, position = ?, name_source = 'explicit'
+    WHERE id = ?
+  `)
+  rows.forEach((row, position) => update.run(position, row.id))
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
@@ -432,6 +492,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(workspaceAgentTabsMigrationName)
     }
 
+    const workspaceFoldersMigrationName = '0004_workspace_folders'
+    const workspaceFoldersMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceFoldersMigrationName)
+    if (!workspaceFoldersMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceFolders(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceFoldersMigrationName)
+      })()
+      applied.push(workspaceFoldersMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -443,6 +515,7 @@ export const localAppTables = [
   'web_sessions',
   'secrets',
   'workspaces',
+  'workspace_folders',
   'workspace_ui_states',
   'workspace_view_states',
   'workspace_tabs',

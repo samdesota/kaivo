@@ -43,6 +43,64 @@ function toTrpcError(err: unknown): TRPCError {
 export const workspaceRouter = router({
   list: protectedProcedure.query(async () => workspaceService.list()),
 
+  listTree: protectedProcedure.query(async () => workspaceService.listTree()),
+
+  createFolder: protectedProcedure
+    .input(z.object({ name: z.string().max(200), parentId: z.string().min(1).nullable().optional() }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.createFolder(input)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  renameFolder: protectedProcedure
+    .input(z.object({ id: z.string().min(1), name: z.string().max(200) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.renameFolder(input.id, input.name)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  archiveFolder: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        await workspaceService.archiveFolder(input.id)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  setFolderCollapsed: protectedProcedure
+    .input(z.object({ id: z.string().min(1), collapsed: z.boolean() }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.setFolderCollapsed(input.id, input.collapsed)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  moveSidebarNode: protectedProcedure
+    .input(z.object({
+      nodeType: z.enum(['folder', 'workspace']),
+      nodeId: z.string().min(1),
+      parentFolderId: z.string().min(1).nullable().optional(),
+      beforeNodeId: z.string().min(1).nullable().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.moveSidebarNode(input)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   get: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
     .query(async ({ input }) => {
@@ -54,7 +112,13 @@ export const workspaceRouter = router({
     }),
 
   create: protectedProcedure
-    .input(z.object({ name: z.string().max(200).optional() }).optional())
+    .input(z.object({
+      name: z.string().max(200).optional(),
+      folderId: z.string().min(1).nullable().optional(),
+      nameSource: z.enum(['explicit', 'folder_path', 'worktree', 'derived']).optional(),
+      sourceKind: z.enum(['folder', 'worktree', 'repo_config']).nullable().optional(),
+      sourcePath: z.string().max(4_096).nullable().optional(),
+    }).optional())
     .mutation(async ({ input }) => workspaceService.create(input)),
 
   rename: protectedProcedure
@@ -62,6 +126,21 @@ export const workspaceRouter = router({
     .mutation(async ({ input }) => {
       try {
         return await workspaceService.rename(input.id, input.name)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  maybeAutoNameFromPrompt: protectedProcedure
+    .input(z.object({
+      id: z.string().min(1),
+      prompt: z.string().min(1).max(100_000),
+      isFirstChat: z.boolean(),
+      chatHadExplicitTitle: z.boolean(),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.maybeAutoNameFromPrompt(input)
       } catch (err) {
         throw toTrpcError(err)
       }

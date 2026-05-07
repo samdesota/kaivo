@@ -17,6 +17,7 @@ export function Composer({
   onSendStart,
   onSendFailed,
   onSent,
+  onWorkspaceAutoName,
 }: {
   sessionId: string
   pendingApprovalReason?: string | null
@@ -24,6 +25,7 @@ export function Composer({
   onSendStart?: (message: string) => string | undefined
   onSendFailed?: (optimisticId: string | undefined) => void
   onSent?: () => void
+  onWorkspaceAutoName?: (message: string) => void | Promise<void>
 }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -147,6 +149,7 @@ export function Composer({
         optimisticId = onSendStart?.(msg)
         chatDebug('composer:onSendStart:after', { sessionId, optimisticId })
         await send.mutateAsync({ sessionId, message: msg })
+        await onWorkspaceAutoName?.(msg)
         chatDebug('composer:mutation:resolved', { sessionId, optimisticId })
         onSent?.()
         return
@@ -178,7 +181,7 @@ export function Composer({
     effectiveRunning
 
   return (
-    <div className="relative border-t border-neutral-800 bg-neutral-950 p-2">
+    <div className="relative border-t border-neutral-800 p-2">
       {effectiveRunning && (
         <div className="mb-2 flex items-center gap-2 rounded border border-brand-500/40 bg-brand-500/5 px-2 py-1 text-[11px] text-brand-300">
           <span className="relative flex h-2 w-2">
@@ -256,7 +259,7 @@ export function Composer({
                 : 'Message the agent. Enter to send, Shift+Enter for newline. Type / for commands.'
           }
           rows={1}
-          className="min-h-[32px] flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none disabled:opacity-60"
+          className="min-h-[32px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none disabled:opacity-60"
         />
         {effectiveRunning ? (
           <button
@@ -271,9 +274,11 @@ export function Composer({
           <button
             onClick={() => void onSend()}
             disabled={disabled || !text.trim()}
-            className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            title="Send message (Enter)"
+            aria-label="Send message"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-sm text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-30"
           >
-            {send.isPending || rename.isPending || runCommand.isPending ? '…' : 'Send'}
+            {send.isPending || rename.isPending || runCommand.isPending ? '…' : '↵'}
           </button>
         )}
       </div>

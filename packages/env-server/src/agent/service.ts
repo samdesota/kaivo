@@ -373,6 +373,43 @@ class AgentService {
     }))
   }
 
+  async workspaceChatSummary(input: { workspaceIds: string[] }): Promise<Array<{
+    workspaceId: string
+    chatCount: number
+    runningCount: number
+    pendingAttentionCount: number
+    latestSessionId: string | null
+    latestSessionTitle: string | null
+    latestActivityAt: Date | null
+  }>> {
+    const out = []
+    for (const workspaceId of input.workspaceIds) {
+      const sessions = (await this.sessionList({ workspaceId })).filter((session) => session.status !== 'archived')
+      let runningCount = 0
+      let pendingAttentionCount = 0
+      for (const session of sessions) {
+        try {
+          const status = await this.sessionStatus({ sessionId: session.id })
+          if (status.running) runningCount++
+          if (status.pendingApprovals.length > 0 || status.pendingQuestions.length > 0) pendingAttentionCount++
+        } catch {
+          // Ignore unavailable session status in sidebar summaries.
+        }
+      }
+      const latest = sessions[0] ?? null
+      out.push({
+        workspaceId,
+        chatCount: sessions.length,
+        runningCount,
+        pendingAttentionCount,
+        latestSessionId: latest?.id ?? null,
+        latestSessionTitle: latest?.title ?? null,
+        latestActivityAt: latest?.lastActivityAt ?? null,
+      })
+    }
+    return out
+  }
+
   async sessionStart(input: {
     workspaceId?: string
     prompt?: string

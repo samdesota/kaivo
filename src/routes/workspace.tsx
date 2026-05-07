@@ -1,17 +1,44 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, ChevronLeft, ChevronRight, FolderPlus, Plus, X } from 'lucide-react'
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragMoveEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import {
+  defaultAnimateLayoutChanges,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  type SortingStrategy,
+  useSortable,
+  verticalListSortingStrategy,
+  type AnimateLayoutChanges,
+} from '@dnd-kit/sortable'
+import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
 import { openNewAgentChatOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
+import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { CommandPalette } from './env/shell/command-palette'
 import { ShellsDropdown } from './env/shell/dropdowns'
 import { NewSessionPopover } from './env/agent/session-tabs'
+import { NewAgentChatModal } from './env/agent/new-agent-chat-modal'
 import { useChatSession, useRetainChatSessions } from './env/agent/chat-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -33,9 +60,21 @@ import {
   type WorkspaceUiState,
 } from './workspace/tab-state'
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
-import { orderWorkspaceTabs } from './workspace/workspace-tab-bar'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
+import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
+import {
+  projectSidebarDropFromRows,
+  flattenSidebarTree,
+  moveSidebarNodeInTree,
+  parseSidebarDndId,
+  setSidebarFolderCollapsedInTree,
+  sidebarDndId,
+  type DropPlacement,
+  type FlatSidebarNode,
+  type SidebarTreeNode,
+  type SidebarDropProjection,
+} from './workspace/sidebar-dnd-state'
 import { trpcQueryKey } from '../lib/trpc-plain'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
@@ -43,7 +82,21 @@ type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 type WorkspaceSummary = {
   id: string
   name: string
+  folderId?: string | null
+  position?: number
 }
+
+type WorkspaceFolderSummary = {
+  id: string
+  parentId?: string | null
+  name: string
+  position: number
+  collapsed: boolean
+}
+
+type WorkspaceSidebarNode =
+  | { type: 'folder'; folder: WorkspaceFolderSummary; children: WorkspaceSidebarNode[] }
+  | { type: 'workspace'; workspace: WorkspaceSummary }
 
 type SessionSummary = {
   id: string
@@ -54,9 +107,11 @@ type SessionSummary = {
   lastActivityAt: Date | string
 }
 
-const PENDING_WORKSPACE_RENAME_KEY = 'cloud-code.pendingWorkspaceRenameId'
-const WORKSPACE_SIDEBAR_ORDER_KEY = 'cloud-code.workspaceTabOrder'
-const WORKSPACE_SIDEBAR_WIDTH = '16rem'
+const WORKSPACE_SIDEBAR_WIDTH_KEY = 'cloud-code.workspaceSidebarWidth'
+const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
+const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
+const WORKSPACE_CHAT_EXPANDED_KEY = 'cloud-code.workspaceChatExpanded'
+const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
 
 export function WorkspacePage() {
   const { workspaceId } = useParams({ from: '/w/$workspaceId' })
@@ -186,7 +241,7 @@ export function WorkspacePage() {
         getEnvClient,
       }}
     >
-      <WorkspaceShell dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
+      <WorkspaceShell key={workspace.data.id} dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
     </WorkspaceContextProvider>
   )
 }
@@ -244,7 +299,7 @@ function WorkspaceShell({
   }, [agentCollapsed, setAgentCollapsed])
 
   return (
-    <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100">
+    <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
       {!sidebarHidden && (
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
@@ -252,20 +307,17 @@ function WorkspaceShell({
         />
       )}
       <ShellChrome
-        className="h-screen max-h-screen overflow-hidden"
-        style={{ width: sidebarHidden ? '100vw' : `calc(100vw - ${WORKSPACE_SIDEBAR_WIDTH})` }}
+        className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975"
+        style={{ width: sidebarHidden ? '100vw' : undefined }}
+        showHeader={false}
         title={ctx.workspace.name}
         subtitle={ctx.localEnvTarget ? `local · ${ctx.localEnvTarget.env.label}` : 'local env unavailable'}
         splitStorageKey={`workspace.${ctx.workspace.id}.splitRatio`}
         splitInitialRatio={ctx.uiState.splitRatio ?? 0.7}
+        preferredLeftWidth={ctx.uiState.workspaceTabs.length === 0 && !agentCollapsed ? 800 : undefined}
         leftCollapsed={agentCollapsed}
         onSplitRatioChange={onSplitRatioChange}
-        actions={
-          <WorkspaceHeaderActions
-            onCommandPalette={() => setPaletteOpen(true)}
-            onOpenPane={openPane}
-          />
-        }
+        actions={null}
         left={
           <WorkspaceAgentPane
             collapsed={agentCollapsed}
@@ -277,7 +329,9 @@ function WorkspaceShell({
         right={
           ctx.uiState.workspaceTabs.length > 0 ? (
             <WorkspaceTabPane dispatchWorkspaceState={dispatchWorkspaceState} />
-          ) : undefined
+          ) : (
+            <WorkspaceEmptyPaneCta onOpenPalette={() => setPaletteOpen(true)} />
+          )
         }
       />
       <WorkspaceEnvTargetProvider>
@@ -295,7 +349,24 @@ function WorkspaceShell({
   )
 }
 
-function WorkspaceSidebar({
+function WorkspaceEmptyPaneCta({ onOpenPalette }: { onOpenPalette: () => void }) {
+  return (
+    <section className="flex h-full min-h-0 w-full items-center justify-center bg-neutral-975 p-8" aria-label="Workspace empty pane">
+      <button
+        type="button"
+        onClick={onOpenPalette}
+        className="group flex items-center gap-3 text-xs text-neutral-600 transition-colors hover:text-neutral-300"
+      >
+        <span>Open a shell, file, preview, or browser pane</span>
+        <span className="rounded border border-neutral-800 bg-neutral-900/60 px-1.5 py-0.5 text-[12px] uppercase tracking-wide text-neutral-400 group-hover:bg-neutral-900 group-hover:text-neutral-200">
+          ⌘K
+        </span>
+      </button>
+    </section>
+  )
+}
+
+export function WorkspaceSidebar({
   dispatchWorkspaceState,
   onHide,
 }: {
@@ -305,25 +376,52 @@ function WorkspaceSidebar({
   const ctx = useWorkspaceContext()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const tree = trpc.workspace.listTree.useQuery(undefined, { refetchInterval: 15_000 })
   const list = trpc.workspace.list.useQuery(undefined, { refetchInterval: 15_000 })
-  const create = trpc.workspace.create.useMutation()
+  const createFolder = trpc.workspace.createFolder.useMutation({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
+  })
   const rename = trpc.workspace.rename.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') })
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
+    },
   })
   const archive = trpc.workspace.archive.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') })
+      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
+    },
+  })
+  const setFolderCollapsed = trpc.workspace.setFolderCollapsed.useMutation({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
+  })
+  const moveSidebarNode = trpc.workspace.moveSidebarNode.useMutation({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
+    onError: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
   })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
-  const [optimisticWorkspace, setOptimisticWorkspace] = useState<WorkspaceSummary | null>(null)
-  const [workspaceOrder, setWorkspaceOrder] = useState<string[]>(() => {
+  const [newChatContext, setNewChatContext] = useState<null | { mode: 'new'; folderId?: string | null } | { mode: 'existing'; workspace: WorkspaceSummary }>(null)
+  const [folderCreate, setFolderCreate] = useState<{ parentId: string | null; name: string } | null>(null)
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const [dragPlacement, setDragPlacement] = useState<DropPlacement>('after')
+  const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
+  const [localTree, setLocalTree] = useState<WorkspaceSidebarNode[] | null>(null)
+  const [sidebarWidth, setSidebarWidth] = useState(() => readWorkspaceSidebarWidth())
+  const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<string[]>(() => {
     try {
-      const raw = window.localStorage.getItem(WORKSPACE_SIDEBAR_ORDER_KEY)
+      const raw = window.localStorage.getItem(WORKSPACE_CHAT_EXPANDED_KEY)
       return raw ? (JSON.parse(raw) as string[]) : []
     } catch {
       return []
     }
   })
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const dragPointerOffsetRef = useRef<{ x: number; y: number } | null>(null)
+  const lastProjectionRef = useRef<SidebarDropProjection | null>(null)
+  const lastProjectionKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (edit.editingId) {
@@ -333,32 +431,16 @@ function WorkspaceSidebar({
   }, [edit.editingId])
 
   useEffect(() => {
-    const pending = window.sessionStorage.getItem(PENDING_WORKSPACE_RENAME_KEY)
-    if (pending !== ctx.workspace.id) return
-    window.sessionStorage.removeItem(PENDING_WORKSPACE_RENAME_KEY)
-    dispatchEdit({ type: 'begin', workspaceId: ctx.workspace.id, name: ctx.workspace.name })
-  }, [ctx.workspace.id, ctx.workspace.name])
-
-  async function createWorkspace() {
-    const workspace = await create.mutateAsync({})
-    setOptimisticWorkspace({ id: workspace.id, name: workspace.name })
-    window.sessionStorage.setItem(PENDING_WORKSPACE_RENAME_KEY, workspace.id)
-    dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
-    await navigate({
-      to: '/w/$workspaceId',
-      params: { workspaceId: workspace.id },
-      search: { chat: undefined, tab: undefined },
-    })
-  }
+    if (!folderCreate) return
+    const id = requestAnimationFrame(() => folderInputRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [folderCreate])
 
   async function saveRename() {
     if (!edit.editingId) return
     const nextName = nextRenameValue(edit)
     if (nextName) {
       await rename.mutateAsync({ id: edit.editingId, name: nextName })
-      setOptimisticWorkspace((workspace) =>
-        workspace?.id === edit.editingId ? { ...workspace, name: nextName } : workspace,
-      )
     }
     dispatchEdit({ type: 'saved' })
   }
@@ -374,146 +456,682 @@ function WorkspaceSidebar({
           params: { workspaceId: next.id },
           search: { chat: undefined, tab: undefined },
         })
-      } else {
-        await createWorkspace()
       }
     }
   }
 
-  const workspaces = useMemo(() => {
-    const rows = [...((list.data ?? []) as WorkspaceSummary[])]
-    if (optimisticWorkspace && !rows.some((workspace) => workspace.id === optimisticWorkspace.id)) {
-      rows.push(optimisticWorkspace)
-    }
-    const ordered = orderWorkspaceTabs(rows, ctx.workspace, workspaceOrder)
-    const nextOrder = ordered.map((workspace) => workspace.id)
-    if (nextOrder.join('\0') !== workspaceOrder.join('\0')) {
-      setWorkspaceOrder(nextOrder)
+  const workspaces = (list.data ?? []) as WorkspaceSummary[]
+  const nodes = (tree.data ?? []) as WorkspaceSidebarNode[]
+  const displayNodes = localTree ?? nodes
+  const dndNodes = displayNodes as unknown as SidebarTreeNode[]
+  const flatRows = flattenSidebarTree(dndNodes)
+  const sortableIds = flatRows.map((row) => sidebarDndId(row.kind, row.id))
+  const sortingStrategy = dropProjection?.placement === 'inside' ? noSortingDisplacementStrategy : verticalListSortingStrategy
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  function setWorkspaceExpanded(workspaceId: string, expanded: boolean) {
+    if (expanded) markWorkspaceChatsRead(workspaceId)
+    setExpandedWorkspaceIds((current) => {
+      const next = expanded
+        ? Array.from(new Set([...current, workspaceId]))
+        : current.filter((id) => id !== workspaceId)
       try {
-        window.localStorage.setItem(WORKSPACE_SIDEBAR_ORDER_KEY, JSON.stringify(nextOrder))
+        window.localStorage.setItem(WORKSPACE_CHAT_EXPANDED_KEY, JSON.stringify(next))
       } catch {
         // ignore disabled/quota storage
       }
+      return next
+    })
+  }
+
+  async function submitFolderCreate() {
+    if (!folderCreate) return
+    const name = folderCreate.name.trim()
+    if (!name) return
+    await createFolder.mutateAsync({ name, parentId: folderCreate.parentId })
+    setFolderCreate(null)
+  }
+
+  async function selectCreatedChat(sessionId: string, workspaceId?: string) {
+    if (!workspaceId) return
+    if (workspaceId === ctx.workspace.id) {
+      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
     }
-    return ordered
-  }, [ctx.workspace, list.data, optimisticWorkspace, workspaceOrder])
+    await navigate({
+      to: '/w/$workspaceId',
+      params: { workspaceId },
+      search: { chat: sessionId, tab: undefined },
+    })
+  }
+
+  function updatePointerDropProjection(activeId: string, pointer: { x: number; y: number }) {
+    const projected = projectDropFromPointer(activeId, pointer, dndNodes, dragPointerOffsetRef.current)
+    setDropProjection(projected)
+    lastProjectionRef.current = projected
+    setDragPlacement(projected?.placement ?? 'after')
+    const key = projectionKey(projected)
+    if (!projected) lastProjectionKeyRef.current = null
+    if (projected && key !== lastProjectionKeyRef.current) {
+      lastProjectionKeyRef.current = key
+      setLocalTree((current) => moveSidebarNodeInTree(
+        (current ?? displayNodes) as unknown as SidebarTreeNode[],
+        projected,
+      ) as unknown as WorkspaceSidebarNode[])
+    }
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    const id = String(event.active.id)
+    const parsed = parseSidebarDndId(id)
+    const startingTree = parsed?.kind === 'folder'
+      ? setSidebarFolderCollapsedInTree(displayNodes as unknown as SidebarTreeNode[], parsed.id, true) as unknown as WorkspaceSidebarNode[]
+      : displayNodes
+    setActiveDragId(id)
+    setDropProjection(null)
+    lastProjectionRef.current = null
+    lastProjectionKeyRef.current = null
+    dragPointerOffsetRef.current = dragPointerOffsetFromEvent(id, event.activatorEvent)
+    setLocalTree(startingTree)
+    if (parsed?.kind === 'folder') {
+      setFolderCollapsed.mutate({ id: parsed.id, collapsed: true })
+    }
+  }
+
+  function handleDragMove(event: DragMoveEvent) {
+    const pointer = pointerFromDragEvent(event.activatorEvent, event.delta.x, event.delta.y)
+    lastPointerRef.current = pointer
+    updatePointerDropProjection(String(event.active.id), pointer)
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    if (!event.over) {
+      setDropProjection(null)
+      lastProjectionRef.current = null
+      lastProjectionKeyRef.current = null
+    }
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const pointer = lastPointerRef.current ?? pointerFromDragEvent(event.activatorEvent, event.delta.x, event.delta.y)
+    const projection = projectDropFromPointer(String(event.active.id), pointer, dndNodes, dragPointerOffsetRef.current) ?? lastProjectionRef.current ?? dropProjection
+    if (!projection) {
+      setActiveDragId(null)
+      setDropProjection(null)
+      lastPointerRef.current = null
+      dragPointerOffsetRef.current = null
+      lastProjectionRef.current = null
+      lastProjectionKeyRef.current = null
+      setLocalTree(null)
+      return
+    }
+    const optimisticTree = moveSidebarNodeInTree(dndNodes, projection) as unknown as WorkspaceSidebarNode[]
+    setLocalTree(optimisticTree)
+    queryClient.setQueryData(trpcQueryKey('workspace.listTree'), optimisticTree)
+    setActiveDragId(null)
+    setDropProjection(null)
+    lastPointerRef.current = null
+    dragPointerOffsetRef.current = null
+    lastProjectionRef.current = null
+    lastProjectionKeyRef.current = null
+    try {
+      const serverTree = await moveSidebarNode.mutateAsync({
+        nodeType: projection.activeKind,
+        nodeId: projection.activeId,
+        parentFolderId: projection.parentFolderId,
+        beforeNodeId: projection.beforeNodeId,
+      })
+      queryClient.setQueryData(trpcQueryKey('workspace.listTree'), serverTree)
+    } catch (err) {
+      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
+    } finally {
+      setLocalTree(null)
+    }
+  }
+
+  function handleDragCancel() {
+    setActiveDragId(null)
+    setDropProjection(null)
+    lastPointerRef.current = null
+    dragPointerOffsetRef.current = null
+    lastProjectionRef.current = null
+    lastProjectionKeyRef.current = null
+    setLocalTree(null)
+  }
+
+  function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = sidebarWidth
+    let latestWidth = startWidth
+    function onMove(moveEvent: PointerEvent) {
+      const next = clampSidebarWidth(startWidth + moveEvent.clientX - startX)
+      latestWidth = next
+      setSidebarWidth(next)
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      writeWorkspaceSidebarWidth(latestWidth)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp, { once: true })
+  }
 
   return (
+    <>
     <aside
-      className="flex h-screen max-h-screen shrink-0 flex-col overflow-hidden border-r border-neutral-800 bg-neutral-950/95"
-      style={{ width: WORKSPACE_SIDEBAR_WIDTH }}
+      className="relative flex h-screen max-h-screen shrink-0 flex-col overflow-hidden border-r border-neutral-800 bg-neutral-950"
+      style={{ width: sidebarWidth }}
       aria-label="Workspaces"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
+      <div
+        onPointerDown={startSidebarResize}
+        className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-brand-500/40"
+        aria-hidden="true"
+      />
+      <div className="flex flex-none basis-8 items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">Cloud Code</div>
-          <div className="truncate text-xs text-neutral-300">Workspaces</div>
+          <div className="truncate text-xs font-medium text-neutral-300">cloud code</div>
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => void createWorkspace()}
-            disabled={create.isPending}
-            className="rounded px-2 py-1 text-sm leading-none text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
-            aria-label="Create new workspace"
-            title="New workspace"
+            onClick={() => setNewChatContext({ mode: 'new', folderId: null })}
+            className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
+            aria-label="Create new workspace from chat"
+            title="New workspace from chat"
           >
-            +
+            <Plus className="h-4 w-4" aria-hidden="true" />
           </button>
           <button
-            onClick={onHide}
-            className="rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
-            title="Hide sidebar (⌘B)"
+            onClick={() => setFolderCreate({ parentId: null, name: '' })}
+            disabled={createFolder.isPending}
+            className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
+            aria-label="Create workspace folder"
+            title="New folder"
           >
-            ⌘B
+            <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-        {workspaces.map((workspace) => {
-          const active = workspace.id === ctx.workspace.id && !ctx.uiState.activeAgentSessionId
-          const editing = edit.editingId === workspace.id
-          return (
-            <div key={workspace.id} className="mb-2">
-              <div className="group flex items-center gap-1">
-                {editing ? (
-                  <input
-                    ref={inputRef}
-                    value={edit.draft}
-                    onChange={(e) => dispatchEdit({ type: 'change', draft: e.target.value })}
-                    onBlur={() => void saveRename()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void saveRename()
-                      if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
-                    }}
-                    className="min-w-0 flex-1 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
-                    aria-label="Workspace name"
-                  />
-                ) : (
-                  <Link
-                    to="/w/$workspaceId"
-                    params={{ workspaceId: workspace.id }}
-                    search={{ chat: undefined, tab: undefined }}
-                    onDoubleClick={(e) => {
-                      e.preventDefault()
-                      dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
-                    }}
-                    className={
-                      'min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-xs font-medium transition-colors ' +
-                      (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200')
-                    }
-                    title={workspace.name}
-                  >
-                    {workspace.name}
-                  </Link>
-                )}
-                {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && (
-                  <WorkspaceAgentEnvProvider>
-                    <WorkspaceSidebarNewChatButton
-                      workspaceId={workspace.id}
-                      onCreated={async (sessionId) => {
-                        if (workspace.id === ctx.workspace.id) {
-                          dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
-                        }
-                        await navigate({
-                          to: '/w/$workspaceId',
-                          params: { workspaceId: workspace.id },
-                          search: { chat: sessionId, tab: undefined },
-                        })
-                      }}
-                    />
-                  </WorkspaceAgentEnvProvider>
-                )}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
+          onDragOver={handleDragOver}
+          onDragEnd={(event) => void handleDragEnd(event)}
+          onDragCancel={handleDragCancel}
+        >
+          <SortableContext items={sortableIds} strategy={sortingStrategy}>
+            {flatRows.map((row) => renderSidebarRow(row))}
+          </SortableContext>
+          {displayNodes.length === 0 && <div className="px-2 py-1.5 text-[11px] text-neutral-600">No workspaces</div>}
+          <DragOverlay dropAnimation={null}>
+            {activeDragId ? <SidebarDragPreview activeId={activeDragId} nodes={displayNodes} /> : null}
+          </DragOverlay>
+        </DndContext>
+      </div>
+      {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && newChatContext && (
+        <WorkspaceAgentEnvProvider>
+          <NewAgentChatModal
+            open
+            workspaceId={newChatContext.mode === 'existing' ? newChatContext.workspace.id : ctx.workspace.id}
+            workspaceName={newChatContext.mode === 'existing' ? newChatContext.workspace.name : ctx.workspace.name}
+            initialWorkspaceMode={newChatContext.mode}
+            folderId={newChatContext.mode === 'new' ? newChatContext.folderId : undefined}
+            onClose={() => setNewChatContext(null)}
+            onCreated={(sessionId, workspaceId) => void selectCreatedChat(sessionId, workspaceId)}
+          />
+        </WorkspaceAgentEnvProvider>
+      )}
+    </aside>
+    {folderCreate && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submitFolderCreate()
+          }}
+          className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl"
+        >
+          <div className="border-b border-neutral-800 px-4 py-3">
+            <h2 className="text-sm font-semibold text-neutral-100">New workspace folder</h2>
+            <p className="mt-1 text-xs text-neutral-500">Create a folder for organizing project workspaces.</p>
+          </div>
+          <div className="p-4">
+            <label className="block space-y-1 text-xs text-neutral-400">
+              <span>Folder name</span>
+              <input
+                ref={folderInputRef}
+                value={folderCreate.name}
+                onChange={(event) => setFolderCreate({ ...folderCreate, name: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setFolderCreate(null)
+                }}
+                className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-brand-500"
+              />
+            </label>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-neutral-800 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setFolderCreate(null)}
+              className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createFolder.isPending || !folderCreate.name.trim()}
+              className="rounded bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            >
+              {createFolder.isPending ? 'Creating...' : 'Create folder'}
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
+    </>
+  )
+
+  function renderSidebarRow(row: FlatSidebarNode): ReactNode {
+    if (row.kind === 'folder') {
+      const folder = findSidebarFolder(displayNodes, row.id)
+      if (!folder) return null
+      const dndId = sidebarDndId('folder', folder.id)
+      return (
+        <SortableSidebarRow key={dndId} id={dndId} depth={row.depth} active={activeDragId === dndId}>
+          <div className="mb-1">
+              <div className={
+                'group flex items-center gap-0.5 rounded px-1 py-px text-xs text-neutral-400 transition-all duration-150 hover:bg-neutral-900 hover:text-neutral-200 ' +
+                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-brand-500/10 text-neutral-100 ring-1 ring-brand-400/60 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
+              }>
                 <button
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    void closeWorkspace(workspace.id, workspaces)
-                  }}
-                  className="rounded px-1 text-[11px] leading-none text-neutral-600 opacity-0 hover:bg-neutral-800 hover:text-neutral-200 group-hover:opacity-100"
-                  aria-label={`Close workspace ${workspace.name}`}
-                  title="Close workspace"
+                  onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}
+                  className={
+                    'flex h-5 w-4 shrink-0 items-center justify-center rounded text-neutral-600 hover:text-neutral-300 ' +
+                    (folder.collapsed ? 'opacity-0 group-hover:opacity-100' : 'opacity-100')
+                  }
+                  aria-label={`${folder.collapsed ? 'Expand' : 'Collapse'} folder ${folder.name}`}
                 >
-                  ×
+                  {folder.collapsed ? <ChevronRight className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+            </button>
+                <span className="min-w-0 flex-1 truncate px-0.5 font-medium" title={folder.name}>{folder.name}</span>
+                <button
+                  onClick={() => setNewChatContext({ mode: 'new', folderId: folder.id })}
+                  className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                  aria-label={`Create workspace in ${folder.name}`}
+                  title="New workspace from chat"
+                >
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+                <button
+                  onClick={() => setFolderCreate({ parentId: folder.id, name: '' })}
+                  disabled={createFolder.isPending}
+                  className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
+                  aria-label={`Create folder in ${folder.name}`}
+                  title="New folder"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </div>
-              {ctx.localEnvTarget?.available && ctx.localEnvTarget.token ? (
-                <WorkspaceAgentEnvProvider>
-                  <WorkspaceSidebarSessions
-                    workspaceId={workspace.id}
-                    activeWorkspaceId={ctx.workspace.id}
-                    activeSessionId={ctx.uiState.activeAgentSessionId}
-                    dispatchWorkspaceState={dispatchWorkspaceState}
-                  />
-                </WorkspaceAgentEnvProvider>
-              ) : active ? (
-                <div className="px-2 py-1.5 text-[11px] text-neutral-600">Agent unavailable</div>
-              ) : null}
-            </div>
-          )
-        })}
+          </div>
+        </SortableSidebarRow>
+      )
+    }
+    const workspace = findSidebarWorkspace(displayNodes, row.id)
+    if (!workspace) return null
+    const dndId = sidebarDndId('workspace', workspace.id)
+    const active = workspace.id === ctx.workspace.id && !ctx.uiState.activeAgentSessionId
+    const editing = edit.editingId === workspace.id
+    const expanded = expandedWorkspaceIds.includes(workspace.id)
+    return (
+      <SortableSidebarRow key={dndId} id={dndId} depth={row.depth} active={activeDragId === dndId}>
+      <div className="mb-1">
+        <div className={
+          'group flex items-center gap-0.5 rounded px-1 transition-colors hover:bg-neutral-900 hover:text-neutral-200 ' +
+          (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
+        }>
+          <button
+            className={
+              'flex h-5 w-4 shrink-0 items-center justify-center rounded text-neutral-700 hover:text-neutral-400 ' +
+              (expanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')
+            }
+            title={expanded ? 'Collapse chats' : 'Expand chats'}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} chats for ${workspace.name}`}
+            onClick={() => setWorkspaceExpanded(workspace.id, !expanded)}
+          >
+            {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
+          </button>
+          {editing ? (
+            <input
+              ref={inputRef}
+              value={edit.draft}
+              onChange={(e) => dispatchEdit({ type: 'change', draft: e.target.value })}
+              onBlur={() => void saveRename()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void saveRename()
+                if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
+              }}
+              className="min-w-0 flex-1 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
+              aria-label="Workspace name"
+            />
+          ) : (
+            <Link
+              to="/w/$workspaceId"
+              params={{ workspaceId: workspace.id }}
+              search={{ chat: undefined, tab: undefined }}
+              onDoubleClick={(e) => {
+                e.preventDefault()
+                dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
+              }}
+              className={
+                'min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium'
+              }
+              title={workspace.name}
+            >
+              {workspace.name}
+            </Link>
+          )}
+          {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && (
+            <WorkspaceAgentEnvProvider>
+              <WorkspaceSidebarChatCount workspaceId={workspace.id} />
+            </WorkspaceAgentEnvProvider>
+          )}
+          <button
+            onClick={() => setNewChatContext({ mode: 'existing', workspace })}
+            className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+            aria-label={`Create chat in ${workspace.name}`}
+            title="New chat in workspace"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              void closeWorkspace(workspace.id, workspaces)
+            }}
+            className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+            aria-label={`Close workspace ${workspace.name}`}
+            title="Close workspace"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+        {expanded && ctx.localEnvTarget?.available && ctx.localEnvTarget.token ? (
+          <WorkspaceAgentEnvProvider>
+            <WorkspaceSidebarSessions
+              workspaceId={workspace.id}
+              activeWorkspaceId={ctx.workspace.id}
+              activeSessionId={ctx.uiState.activeAgentSessionId}
+              dispatchWorkspaceState={dispatchWorkspaceState}
+            />
+          </WorkspaceAgentEnvProvider>
+        ) : expanded && active ? (
+          <div className="px-6 py-1.5 text-[11px] text-neutral-600">Agent unavailable</div>
+        ) : null}
       </div>
-    </aside>
+      </SortableSidebarRow>
+    )
+  }
+}
+
+function WorkspaceSidebarChatCount({ workspaceId }: { workspaceId: string }) {
+  const summary = envTrpc.agent.workspaceChatSummary.useQuery({ workspaceIds: [workspaceId] }, { refetchInterval: 5_000 })
+  const row = (summary.data ?? [])[0]
+  if (!row) return null
+  const latestActivityAt = row.latestActivityAt ? new Date(row.latestActivityAt).getTime() : 0
+  const readAt = readWorkspaceChatsAt(workspaceId)
+  const newResponseCount = row.runningCount === 0 && readAt > 0 && latestActivityAt > readAt ? 1 : 0
+  const glyph = workspaceRollupGlyph(workspaceRollupState({
+    chatCount: row.chatCount,
+    runningCount: row.runningCount,
+    pendingAttentionCount: row.pendingAttentionCount,
+    newResponseCount,
+  }))
+  if (row.chatCount <= 1 && !glyph) return null
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      {row.chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{row.chatCount}</span>}
+      {glyph === '.' && <span className="h-1.5 w-1.5 rounded-full bg-brand-400" aria-label="New chat response" />}
+      {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-brand-400 border-t-transparent" aria-label="Chat running" />}
+      {glyph === '!' && <span className="w-3 text-center text-[10px] font-semibold text-amber-300" aria-label="Chat needs attention">!</span>}
+    </span>
   )
+}
+
+const sidebarAnimateLayoutChanges: AnimateLayoutChanges = (args) =>
+  defaultAnimateLayoutChanges({ ...args, wasDragging: true })
+
+const noSortingDisplacementStrategy: SortingStrategy = () => null
+
+function SortableSidebarRow({
+  id,
+  active,
+  depth,
+  children,
+}: {
+  id: string
+  active: boolean
+  depth: number
+  children: ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    animateLayoutChanges: sidebarAnimateLayoutChanges,
+    transition: {
+      duration: 240,
+      easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+    },
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      data-sidebar-dnd-id={id}
+      className={
+        'will-change-transform ' +
+        (active || isDragging ? 'opacity-30' : '')
+      }
+      style={{
+        paddingLeft: depth * 10,
+        cursor: active ? 'grabbing' : 'grab',
+        transform: DndCss.Transform.toString(transform),
+        transition,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SidebarDragPreview({ activeId, nodes }: { activeId: string; nodes: WorkspaceSidebarNode[] }) {
+  const parsed = parseSidebarDndId(activeId)
+  const label = parsed ? findSidebarNodeLabel(nodes, parsed.kind, parsed.id) : null
+  if (!label) return null
+  return (
+    <div className="rounded-md border border-white/10 bg-neutral-800/95 px-2 py-1 text-[11px] font-medium leading-tight text-neutral-100 shadow-xl ring-1 ring-black/30 backdrop-blur">
+      {label}
+    </div>
+  )
+}
+
+function findSidebarNodeLabel(nodes: WorkspaceSidebarNode[], kind: 'folder' | 'workspace', id: string): string | null {
+  for (const node of nodes) {
+    if (node.type === 'folder') {
+      if (kind === 'folder' && node.folder.id === id) return node.folder.name
+      const child = findSidebarNodeLabel(node.children, kind, id)
+      if (child) return child
+    } else if (kind === 'workspace' && node.workspace.id === id) {
+      return node.workspace.name
+    }
+  }
+  return null
+}
+
+function findSidebarFolder(nodes: WorkspaceSidebarNode[], id: string): WorkspaceFolderSummary | null {
+  for (const node of nodes) {
+    if (node.type !== 'folder') continue
+    if (node.folder.id === id) return node.folder
+    const child = findSidebarFolder(node.children, id)
+    if (child) return child
+  }
+  return null
+}
+
+function findSidebarWorkspace(nodes: WorkspaceSidebarNode[], id: string): WorkspaceSummary | null {
+  for (const node of nodes) {
+    if (node.type === 'workspace') {
+      if (node.workspace.id === id) return node.workspace
+      continue
+    }
+    const child = findSidebarWorkspace(node.children, id)
+    if (child) return child
+  }
+  return null
+}
+
+function pointerFromDragEvent(activatorEvent: Event, deltaX: number, deltaY: number): { x: number; y: number } {
+  const startX = 'clientX' in activatorEvent && typeof activatorEvent.clientX === 'number' ? activatorEvent.clientX : 0
+  const startY = 'clientY' in activatorEvent && typeof activatorEvent.clientY === 'number' ? activatorEvent.clientY : 0
+  return { x: startX + deltaX, y: startY + deltaY }
+}
+
+function dragPointerOffsetFromEvent(activeDndId: string, activatorEvent: Event): { x: number; y: number } | null {
+  if (typeof document === 'undefined') return null
+  if (!('clientX' in activatorEvent) || typeof activatorEvent.clientX !== 'number') return null
+  if (!('clientY' in activatorEvent) || typeof activatorEvent.clientY !== 'number') return null
+  const escapedId = globalThis.CSS?.escape ? globalThis.CSS.escape(activeDndId) : activeDndId.replace(/"/g, '\\"')
+  const element = document.querySelector<HTMLElement>(`[data-sidebar-dnd-id="${escapedId}"]`)
+  if (!element) return null
+  const rect = element.getBoundingClientRect()
+  return { x: activatorEvent.clientX - rect.left, y: activatorEvent.clientY - rect.top }
+}
+
+function projectDropFromPointer(
+  activeDndId: string,
+  pointer: { x: number; y: number },
+  nodes: Parameters<typeof projectSidebarDropFromRows>[0]['nodes'],
+  dragPointerOffset: { x: number; y: number } | null,
+): SidebarDropProjection | null {
+  const active = parseSidebarDndId(activeDndId)
+  if (!active || typeof document === 'undefined') return null
+  const rows = flattenSidebarTree(nodes)
+  const rowRects = rows
+    .filter((row) => !(row.id === active.id && row.kind === active.kind))
+    .map((row) => {
+      const dndId = sidebarDndId(row.kind, row.id)
+      const escapedId = globalThis.CSS?.escape ? globalThis.CSS.escape(dndId) : dndId.replace(/"/g, '\\"')
+      const element = document.querySelector<HTMLElement>(`[data-sidebar-dnd-id="${escapedId}"]`)
+      return element ? { row, dndId, rect: element.getBoundingClientRect() } : null
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .sort((a, b) => a.rect.top - b.rect.top)
+
+  if (rowRects.length === 0) {
+    return projectSidebarDropFromRows({ rows, nodes, activeDndId, overDndId: null, placement: 'after' })
+  }
+
+  let target = rowRects.find(({ rect }) => pointer.y >= rect.top && pointer.y <= rect.bottom) ?? null
+  if (!target) {
+    target = rowRects.reduce((best, current) => {
+      const bestDistance = Math.abs(pointer.y - (best.rect.top + best.rect.height / 2))
+      const currentDistance = Math.abs(pointer.y - (current.rect.top + current.rect.height / 2))
+      return currentDistance < bestDistance ? current : best
+    }, rowRects[0]!)
+  }
+
+  const relative = (pointer.y - target.rect.top) / Math.max(target.rect.height, 1)
+  const visualLeft = target.rect.left + target.row.depth * 10
+  const draggedLeft = dragPointerOffset ? pointer.x - dragPointerOffset.x : pointer.x
+  const horizontalOutdentIntent = draggedLeft < visualLeft
+  const horizontalFolderIntent = target.row.kind === 'folder' && draggedLeft > visualLeft + 24
+  const placement: DropPlacement = target.row.kind === 'folder' && !horizontalOutdentIntent && (horizontalFolderIntent || (relative >= 0.28 && relative <= 0.72))
+    ? 'inside'
+    : relative < 0.5 ? 'before' : 'after'
+  if (placement !== 'inside' && target.row.kind === 'workspace' && target.row.parentFolderId && pointer.x < visualLeft - 4) {
+    const outdentDepth = Math.max(0, Math.floor((draggedLeft - target.rect.left) / 10))
+    const ancestorId = target.row.ancestorFolderIds[Math.min(outdentDepth, target.row.ancestorFolderIds.length - 1)]
+    if (ancestorId) {
+      return projectSidebarDropFromRows({
+        rows,
+        nodes,
+        activeDndId,
+        overDndId: sidebarDndId('folder', ancestorId),
+        placement,
+      })
+    }
+    return projectSidebarDropFromRows({
+      rows,
+      nodes,
+      activeDndId,
+      overDndId: sidebarDndId('folder', target.row.parentFolderId),
+      placement,
+    })
+  }
+  return projectSidebarDropFromRows({ rows, nodes, activeDndId, overDndId: target.dndId, placement })
+}
+
+function projectionKey(projection: SidebarDropProjection | null): string | null {
+  if (!projection) return null
+  return [
+    projection.activeKind,
+    projection.activeId,
+    projection.parentFolderId ?? '',
+    projection.beforeNodeId ?? '',
+    projection.placement,
+    projection.overId ?? '',
+  ].join('|')
+}
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(WORKSPACE_SIDEBAR_MAX_WIDTH, Math.max(WORKSPACE_SIDEBAR_MIN_WIDTH, Math.round(width)))
+}
+
+function readWorkspaceSidebarWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_SIDEBAR_WIDTH_KEY)
+    const parsed = raw ? Number(raw) : 256
+    return Number.isFinite(parsed) ? clampSidebarWidth(parsed) : 256
+  } catch {
+    return 256
+  }
+}
+
+function writeWorkspaceSidebarWidth(width: number) {
+  try {
+    window.localStorage.setItem(WORKSPACE_SIDEBAR_WIDTH_KEY, String(clampSidebarWidth(width)))
+  } catch {
+    // ignore disabled/quota storage
+  }
+}
+
+function readWorkspaceChatsAt(workspaceId: string): number {
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_CHAT_READ_KEY)
+    const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {}
+    return typeof parsed[workspaceId] === 'number' ? parsed[workspaceId] : 0
+  } catch {
+    return 0
+  }
+}
+
+function markWorkspaceChatsRead(workspaceId: string) {
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_CHAT_READ_KEY)
+    const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {}
+    parsed[workspaceId] = Date.now()
+    window.localStorage.setItem(WORKSPACE_CHAT_READ_KEY, JSON.stringify(parsed))
+  } catch {
+    // ignore disabled/quota storage
+  }
 }
 
 function WorkspaceSidebarNewChatButton({
@@ -643,43 +1261,6 @@ function WorkspaceSidebarSessionRow({
   )
 }
 
-function WorkspaceHeaderActions({
-  onCommandPalette,
-  onOpenPane,
-}: {
-  onCommandPalette: () => void
-  onOpenPane: (content: PaneContent, options?: { title?: string; activate?: boolean }) => void
-}) {
-  const ctx = useWorkspaceContext()
-  return (
-    <>
-      <button
-        onClick={onCommandPalette}
-        className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
-      >
-        ⌘K
-      </button>
-      <WorkspaceEnvTargetProvider>
-        <ShellsDropdown align="right" workspaceId={ctx.workspace.id} onOpen={(content) => onOpenPane(content)} />
-      </WorkspaceEnvTargetProvider>
-      <EnvStatusLink />
-      <Link to="/settings" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
-        Settings
-      </Link>
-    </>
-  )
-}
-
-function EnvStatusLink() {
-  const ctx = useWorkspaceContext()
-  const label = ctx.localEnvTarget?.available ? ctx.localEnvTarget.env.label : 'Env unavailable'
-  return (
-    <Link to="/dashboard" className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200">
-      {label}
-    </Link>
-  )
-}
-
 function WorkspaceAgentPane({
   collapsed,
   onToggleCollapsed,
@@ -705,11 +1286,22 @@ function WorkspaceAgentPane({
   const collapseButton = (
     <button
       onClick={onToggleCollapsed}
-      className="shrink-0 rounded border border-neutral-800 bg-neutral-950/90 px-1.5 py-0.5 text-[10px] uppercase text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300"
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-neutral-800 bg-neutral-950/90 text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300"
       title="Collapse agent chat (⌘G)"
     >
-      ←
+      <ChevronLeft className="h-3 w-3" aria-hidden="true" />
     </button>
+  )
+  const agentHeaderTrailing = (newChat: { openNewChat: () => Promise<void>; setSessionId: (id: string) => void; workspaceId?: string } | null) => (
+    <div className="flex shrink-0 items-center gap-1">
+      {newChat?.workspaceId && <NewSessionPopover workspaceId={newChat.workspaceId} onCreated={newChat.setSessionId} onOpenNewChat={newChat.openNewChat} />}
+      {collapseButton}
+    </div>
+  )
+  const agentFooterTrailing = (
+    <WorkspaceEnvTargetProvider>
+      <ShellsDropdown align="right" side="top" workspaceId={ctx.workspace.id} onOpen={(content) => openPane(content)} />
+    </WorkspaceEnvTargetProvider>
   )
 
   if (!ctx.localEnvTarget?.available) {
@@ -739,7 +1331,8 @@ function WorkspaceAgentPane({
           onSessionListChange={onSessionListChange}
           onOpenPane={openPane}
           onOpenPaneRefreshHint={refreshWorkspacePanes}
-          headerTrailing={collapseButton}
+          headerTrailing={agentHeaderTrailing}
+          footerTrailing={agentFooterTrailing}
           onOpenNewChat={() =>
             openNewAgentChatOverlay({
               workspaceId: ctx.workspace.id,
@@ -755,7 +1348,7 @@ function WorkspaceAgentPane({
 
 function AgentPaneFrame({ children }: { children: ReactNode }) {
   return (
-    <section className="relative flex h-full min-h-0 w-full flex-col" aria-label="Agent Chats">
+    <section className="relative flex h-full min-h-0 w-full flex-col bg-neutral-975" aria-label="Agent Chats">
       {children}
     </section>
   )
@@ -766,7 +1359,7 @@ function AgentCollapsedRail({ onExpand }: { onExpand: () => void }) {
     <button
       onClick={onExpand}
       title="Expand agent chat (⌘G)"
-      className="flex h-full w-7 shrink-0 flex-col items-center justify-start gap-2 border-r border-neutral-800 bg-neutral-950 py-3 text-[10px] uppercase tracking-wider text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+      className="flex h-full w-7 shrink-0 flex-col items-center justify-start gap-2 border-r border-neutral-800 bg-neutral-975 py-3 text-[10px] uppercase tracking-wider text-neutral-500 hover:bg-neutral-950 hover:text-neutral-300"
     >
       <span style={{ writingMode: 'vertical-rl' }}>Agent chat</span>
     </button>
@@ -880,44 +1473,23 @@ function WorkspaceTabPane({
   const unavailableReason = activeTab
     ? unavailableReasonForWorkspaceTab(activeTab, ctx.envTargets)
     : null
+  const tabItems: BorderedTabItem[] = ctx.uiState.workspaceTabs.map((tab) => ({
+    id: tab.id,
+    label: tab.title,
+    title: workspaceTabLabel(tab),
+  }))
   return (
-    <section className="flex h-full min-h-0 w-full flex-col bg-neutral-950" aria-label="Workspace Tabs">
-      <div
-        role="tablist"
-        className="flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b border-neutral-800 bg-neutral-950 px-2 py-1"
-      >
-        {ctx.uiState.workspaceTabs.map((tab) => (
-          <div
-            key={tab.id}
-            role="tab"
-            aria-selected={tab.id === ctx.uiState.activeWorkspaceTabId}
-            className={
-              'group flex shrink-0 items-center gap-0.5 rounded transition-colors ' +
-              (tab.id === ctx.uiState.activeWorkspaceTabId
-                ? 'bg-neutral-800 text-neutral-100'
-                : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200')
-            }
-          >
-            <button
-              onClick={() => dispatchWorkspaceState({ type: 'activateTab', tabId: tab.id })}
-              className="max-w-[200px] truncate py-1 pl-2 pr-1 text-xs"
-              title={workspaceTabLabel(tab)}
-            >
-              {tab.title}
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                closeWorkspaceTab(tab, dispatchWorkspaceState)
-              }}
-              className="mr-1 rounded px-1 text-[11px] leading-none text-neutral-500 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 hover:opacity-100"
-              aria-label="Close tab"
-              title="Close tab"
-            >
-              ×
-            </button>
-          </div>
-        ))}
+    <section className="flex h-full min-h-0 w-full flex-col bg-neutral-975" aria-label="Workspace Tabs">
+      <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
+        <BorderedTabStrip
+          items={tabItems}
+          activeId={ctx.uiState.activeWorkspaceTabId}
+          onSelect={(tabId) => dispatchWorkspaceState({ type: 'activateTab', tabId })}
+          onClose={(tabId) => {
+            const tab = ctx.uiState.workspaceTabs.find((candidate) => candidate.id === tabId)
+            if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
+          }}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-hidden text-neutral-500">
         {unavailableReason ? (
@@ -928,6 +1500,7 @@ function WorkspaceTabPane({
           </div>
         ) : activeTab ? (
           <WorkspaceTabContent
+            key={`${ctx.workspace.id}:${activeTab.id}`}
             tab={activeTab}
             onClose={() => closeWorkspaceTab(activeTab, dispatchWorkspaceState)}
             onBrowserTabId={(browserTabId) =>

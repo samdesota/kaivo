@@ -81,6 +81,10 @@ export const agentRouter = router({
     .input(z.object({ workspaceId: z.string().min(1).optional() }).optional())
     .query(({ input }) => agentService.sessionList(input ?? {})),
 
+  workspaceChatSummary: authedProcedure
+    .input(z.object({ workspaceIds: z.array(z.string().min(1)).max(200) }))
+    .query(({ input }) => agentService.workspaceChatSummary(input)),
+
   sessionStart: authedProcedure
     .input(
       z.object({

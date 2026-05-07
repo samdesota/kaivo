@@ -15,22 +15,13 @@ type WorkspaceSummary = {
 }
 
 const PENDING_WORKSPACE_RENAME_KEY = 'cloud-code.pendingWorkspaceRenameId'
-const WORKSPACE_TAB_ORDER_KEY = 'cloud-code.workspaceTabOrder'
-
 export function orderWorkspaceTabs(
   workspaces: WorkspaceSummary[],
   activeWorkspace?: WorkspaceSummary,
-  persistedOrder: string[] = [],
 ): WorkspaceSummary[] {
   const byId = new Map(workspaces.map((workspace) => [workspace.id, workspace]))
   if (activeWorkspace && !byId.has(activeWorkspace.id)) byId.set(activeWorkspace.id, activeWorkspace)
   const out: WorkspaceSummary[] = []
-  for (const id of persistedOrder) {
-    const workspace = byId.get(id)
-    if (!workspace) continue
-    out.push(workspace)
-    byId.delete(id)
-  }
   for (const workspace of workspaces) {
     if (!byId.has(workspace.id)) continue
     out.push(workspace)
@@ -63,14 +54,6 @@ export function WorkspaceTabBar({
   })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
   const [optimisticWorkspace, setOptimisticWorkspace] = useState<WorkspaceSummary | null>(null)
-  const [tabOrder, setTabOrder] = useState<string[]>(() => {
-    try {
-      const raw = window.localStorage.getItem(WORKSPACE_TAB_ORDER_KEY)
-      return raw ? (JSON.parse(raw) as string[]) : []
-    } catch {
-      return []
-    }
-  })
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -136,19 +119,9 @@ export function WorkspaceTabBar({
     const ordered = orderWorkspaceTabs(
       rows,
       { id: activeWorkspaceId, name: activeWorkspaceName },
-      tabOrder,
     )
-    const nextOrder = ordered.map((workspace) => workspace.id)
-    if (nextOrder.join('\0') !== tabOrder.join('\0')) {
-      setTabOrder(nextOrder)
-      try {
-        window.localStorage.setItem(WORKSPACE_TAB_ORDER_KEY, JSON.stringify(nextOrder))
-      } catch {
-        // ignore disabled/quota storage
-      }
-    }
     return ordered
-  }, [activeWorkspaceId, activeWorkspaceName, list.data, optimisticWorkspace, tabOrder])
+  }, [activeWorkspaceId, activeWorkspaceName, list.data, optimisticWorkspace])
 
   return (
     <div className="no-scrollbar flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-t border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-400">

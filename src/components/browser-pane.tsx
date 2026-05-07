@@ -154,7 +154,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   if (!browserApi.isAvailable()) {
     const fallbackUrl = url ? normalizeBrowserUrl(url) : ''
     return (
-      <div className="flex h-full min-h-0 items-center justify-center bg-neutral-950 p-6 text-center text-sm text-neutral-400">
+      <div className="flex h-full min-h-0 items-center justify-center bg-neutral-975 p-6 text-center text-sm text-neutral-400">
         <div className="max-w-md">
           <div className="mb-2 text-neutral-200">Browser pane unavailable</div>
           <div>Native browser tabs require the desktop app. This URL can still be opened from browser mode.</div>
@@ -165,7 +165,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
                 href={fallbackUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                className="inline-flex rounded border border-neutral-700 bg-neutral-975 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
               >
                 Open externally
               </a>
@@ -205,10 +205,10 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-neutral-950">
+    <div className="flex h-full min-h-0 flex-col bg-neutral-975">
       <form
         onSubmit={submitAddress}
-        className="flex shrink-0 items-center gap-1 border-b border-neutral-800 bg-neutral-950/95 px-2 py-1.5"
+        className="flex flex-none basis-8 items-center gap-1 border-b border-neutral-800 bg-neutral-975 px-2"
         aria-label="Browser controls"
       >
         <BrowserControlButton
@@ -237,7 +237,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
           disabled={!activeBrowserTabId}
           onClick={() => void openDevTools()}
         >
-          DevTools
+          &lt;/&gt;
         </BrowserControlButton>
         <label className="sr-only" htmlFor={`browser-url-${paneId}`}>
           URL
@@ -265,7 +265,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
           </button>
         </div>
       ) : null}
-      <div ref={slotRef} className="min-h-0 flex-1 bg-neutral-950" aria-label="Browser pane slot" />
+      <div ref={slotRef} className="min-h-0 flex-1 bg-neutral-975" aria-label="Browser pane slot" />
     </div>
   )
 }

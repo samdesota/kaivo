@@ -12,9 +12,11 @@ export function ShellChrome({
   leftCollapsed = false,
   splitStorageKey,
   splitInitialRatio = 0.7,
+  preferredLeftWidth,
   onSplitRatioChange,
   className = 'h-screen',
   style,
+  showHeader = true,
 }: {
   title: string
   subtitle?: string
@@ -25,30 +27,35 @@ export function ShellChrome({
   leftCollapsed?: boolean
   splitStorageKey: string
   splitInitialRatio?: number
+  preferredLeftWidth?: number
   onSplitRatioChange?: (ratio: number) => void
   className?: string
   style?: CSSProperties
+  showHeader?: boolean
 }) {
   return (
     <div className={`flex flex-col bg-neutral-950 text-neutral-100 ${className}`} style={style}>
-      <header className="window-drag flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
-        <div className="flex min-w-0 items-center gap-3">
-          {backTo && (
-            <Link to={backTo} className="text-brand-500 hover:underline" title="Back to dashboard">
-              ←
-            </Link>
-          )}
-          <h1 className="truncate text-sm font-semibold">{title}</h1>
-          {subtitle && <span className="truncate text-xs text-neutral-500">{subtitle}</span>}
-        </div>
-        <div className="flex items-center gap-2">{actions}</div>
-      </header>
+      {showHeader && (
+        <header className="window-drag flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
+          <div className="flex min-w-0 items-center gap-3">
+            {backTo && (
+              <Link to={backTo} className="text-brand-500 hover:underline" title="Back to dashboard">
+                ←
+              </Link>
+            )}
+            <h1 className="truncate text-sm font-semibold">{title}</h1>
+            {subtitle && <span className="truncate text-xs text-neutral-500">{subtitle}</span>}
+          </div>
+          <div className="flex items-center gap-2">{actions}</div>
+        </header>
+      )}
 
       {right ? (
         <SplitPane
           storageKey={splitStorageKey}
           initialRatio={splitInitialRatio}
           leftCollapsed={leftCollapsed}
+          preferredLeftWidth={preferredLeftWidth}
           onRatioChange={onSplitRatioChange}
           left={left}
           right={right}

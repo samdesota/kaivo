@@ -13,7 +13,7 @@ export function PreviewTabContent({ port }: { port: number }) {
 
   if (env.kind !== 'local') {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-neutral-500">
+      <div className="flex h-full items-center justify-center bg-neutral-975 p-6 text-center text-sm text-neutral-500">
         Preview proxy for container envs is not wired up yet. Use{' '}
         <code className="mx-1 rounded bg-neutral-800 px-1 py-0.5 font-mono text-xs">
           ssh -L
@@ -31,8 +31,8 @@ export function PreviewTabContent({ port }: { port: number }) {
   const src = `${origin.protocol}//${origin.hostname}:${port}/`
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs">
+    <div className="flex h-full min-h-0 flex-col bg-neutral-975">
+      <div className="flex flex-none basis-8 items-center gap-2 border-b border-neutral-800 bg-neutral-975 px-3 text-xs">
         <span className="font-mono text-neutral-300">preview :{port}</span>
         <button
           onClick={() => setKey((k) => k + 1)}

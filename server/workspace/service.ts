@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { ulid } from 'ulid'
 import { workspaceTabFromPaneContent, workspaceTabKey, type PaneContent } from '../../shared/workspace-pane'
 import { db, type Db } from '../db/client.js'
 import {
   workspaceAgentTabs,
+  workspaceFolders,
   workspaceTabs,
   workspaceUiStates,
   workspaceViewStates,
@@ -16,6 +17,13 @@ import {
 } from '../db/schema.js'
 
 export type Workspace = typeof workspaces.$inferSelect
+export type WorkspaceFolder = typeof workspaceFolders.$inferSelect
+
+export type WorkspaceSidebarNode =
+  | { type: 'folder'; folder: WorkspaceFolder; children: WorkspaceSidebarNode[] }
+  | { type: 'workspace'; workspace: Workspace }
+
+export type WorkspaceSidebarNodeKind = 'folder' | 'workspace'
 
 export class WorkspaceError extends Error {
   constructor(
@@ -125,13 +133,47 @@ export function normalizeWorkspaceName(name: string | undefined): string {
   return trimmed || 'Untitled workspace'
 }
 
-function sortWorkspaces(rows: Workspace[]): Workspace[] {
+export function promptTitle(input: string): string {
+  const flat = input.replace(/\s+/g, ' ').trim()
+  if (flat.length <= 60) return flat
+  return flat.slice(0, 57).replace(/[\s.,;:!?-]+$/, '') + '…'
+}
+
+function siblingParentId(parentId?: string | null): string | null {
+  return parentId ?? null
+}
+
+function sameParent(rowParentId: string | null | undefined, parentId: string | null): boolean {
+  return (rowParentId ?? null) === parentId
+}
+
+function sortByPosition<T extends { position: number; createdAt: Date; id: string }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
-    const aOpened = a.lastOpenedAt?.getTime() ?? -1
-    const bOpened = b.lastOpenedAt?.getTime() ?? -1
-    if (aOpened !== bOpened) return bOpened - aOpened
-    return b.createdAt.getTime() - a.createdAt.getTime()
+    if (a.position !== b.position) return a.position - b.position
+    const created = a.createdAt.getTime() - b.createdAt.getTime()
+    if (created !== 0) return created
+    return a.id.localeCompare(b.id)
   })
+}
+
+function parseMoveBeforeNodeId(beforeNodeId?: string | null): { kind: WorkspaceSidebarNodeKind; id: string } | null {
+  if (!beforeNodeId) return null
+  const [kind, ...rest] = beforeNodeId.split(':')
+  if ((kind !== 'folder' && kind !== 'workspace') || rest.length === 0) return null
+  return { kind, id: rest.join(':') }
+}
+
+function folderDescendantIds(folders: WorkspaceFolder[], folderId: string): Set<string> {
+  const out = new Set<string>()
+  function visit(parentId: string) {
+    for (const folder of folders) {
+      if ((folder.parentId ?? null) !== parentId || out.has(folder.id)) continue
+      out.add(folder.id)
+      visit(folder.id)
+    }
+  }
+  visit(folderId)
+  return out
 }
 
 export function createWorkspaceService(database: Db = db) {
@@ -146,6 +188,166 @@ export function createWorkspaceService(database: Db = db) {
       throw new WorkspaceError('not_found', 'workspace not found')
     }
     return row
+  }
+
+  async function getFolder(id: string): Promise<WorkspaceFolder> {
+    const rows = await database
+      .select()
+      .from(workspaceFolders)
+      .where(eq(workspaceFolders.id, id))
+      .limit(1)
+    const row = rows[0]
+    if (!row || row.archivedAt) {
+      throw new WorkspaceError('not_found', 'workspace folder not found')
+    }
+    return row
+  }
+
+  async function listActiveFolders(): Promise<WorkspaceFolder[]> {
+    return await database
+      .select()
+      .from(workspaceFolders)
+      .where(isNull(workspaceFolders.archivedAt))
+      .orderBy(asc(workspaceFolders.position), asc(workspaceFolders.createdAt), asc(workspaceFolders.id))
+  }
+
+  async function listActiveWorkspaces(): Promise<Workspace[]> {
+    return await database
+      .select()
+      .from(workspaces)
+      .where(isNull(workspaces.archivedAt))
+      .orderBy(asc(workspaces.position), asc(workspaces.createdAt), asc(workspaces.id))
+  }
+
+  async function nextSiblingPosition(parentId?: string | null): Promise<number> {
+    const normalizedParentId = siblingParentId(parentId)
+    const [folders, workspaceRows] = await Promise.all([listActiveFolders(), listActiveWorkspaces()])
+    const positions = [
+      ...folders.filter((folder) => sameParent(folder.parentId, normalizedParentId)).map((folder) => folder.position),
+      ...workspaceRows.filter((workspace) => sameParent(workspace.folderId, normalizedParentId)).map((workspace) => workspace.position),
+    ]
+    return positions.length === 0 ? 0 : Math.max(...positions) + 1
+  }
+
+  async function assertFolderParent(parentId?: string | null): Promise<string | null> {
+    const normalizedParentId = siblingParentId(parentId)
+    if (normalizedParentId) await getFolder(normalizedParentId)
+    return normalizedParentId
+  }
+
+  async function listTree(): Promise<WorkspaceSidebarNode[]> {
+    const [folders, workspaceRows] = await Promise.all([listActiveFolders(), listActiveWorkspaces()])
+    const folderNodes = new Map<string, Extract<WorkspaceSidebarNode, { type: 'folder' }>>()
+    for (const folder of folders) {
+      folderNodes.set(folder.id, { type: 'folder', folder, children: [] })
+    }
+    const roots: WorkspaceSidebarNode[] = []
+    for (const folder of sortByPosition(folders)) {
+      const node = folderNodes.get(folder.id)
+      if (!node) continue
+      const parentNode = folder.parentId ? folderNodes.get(folder.parentId) : null
+      if (parentNode) parentNode.children.push(node)
+      else roots.push(node)
+    }
+    for (const workspace of sortByPosition(workspaceRows)) {
+      const node: WorkspaceSidebarNode = { type: 'workspace', workspace }
+      const parentNode = workspace.folderId ? folderNodes.get(workspace.folderId) : null
+      if (parentNode) parentNode.children.push(node)
+      else roots.push(node)
+    }
+    const sortNodes = (nodes: WorkspaceSidebarNode[]) => {
+      nodes.sort((a, b) => {
+        const aRow = a.type === 'folder' ? a.folder : a.workspace
+        const bRow = b.type === 'folder' ? b.folder : b.workspace
+        if (aRow.position !== bRow.position) return aRow.position - bRow.position
+        const created = aRow.createdAt.getTime() - bRow.createdAt.getTime()
+        if (created !== 0) return created
+        return aRow.id.localeCompare(bRow.id)
+      })
+      for (const node of nodes) {
+        if (node.type === 'folder') sortNodes(node.children)
+      }
+    }
+    sortNodes(roots)
+    return roots
+  }
+
+  async function moveSidebarNode(input: {
+    nodeType: WorkspaceSidebarNodeKind
+    nodeId: string
+    parentFolderId?: string | null
+    beforeNodeId?: string | null
+  }): Promise<WorkspaceSidebarNode[]> {
+    const parentFolderId = await assertFolderParent(input.parentFolderId)
+    if (input.nodeType === 'folder') {
+      const moving = await getFolder(input.nodeId)
+      if (parentFolderId === moving.id) throw new WorkspaceError('invalid_name', 'cannot move folder into itself')
+      if (parentFolderId) {
+        const descendants = folderDescendantIds(await listActiveFolders(), moving.id)
+        if (descendants.has(parentFolderId)) throw new WorkspaceError('invalid_name', 'cannot move folder into its descendant')
+      }
+    } else {
+      await get(input.nodeId)
+    }
+
+    const before = parseMoveBeforeNodeId(input.beforeNodeId)
+    if (before) {
+      if (before.kind === 'folder') {
+        const row = await getFolder(before.id)
+        if ((row.parentId ?? null) !== parentFolderId) throw new WorkspaceError('invalid_name', 'before folder is not in target parent')
+      } else {
+        const row = await get(before.id)
+        if ((row.folderId ?? null) !== parentFolderId) throw new WorkspaceError('invalid_name', 'before workspace is not in target parent')
+      }
+    }
+
+    const [folders, workspaceRows] = await Promise.all([listActiveFolders(), listActiveWorkspaces()])
+    type Sibling = { kind: WorkspaceSidebarNodeKind; id: string; createdAt: Date; position: number }
+    const siblings: Sibling[] = [
+      ...folders
+        .filter((folder) => sameParent(folder.parentId, parentFolderId))
+        .map((folder) => ({ kind: 'folder' as const, id: folder.id, createdAt: folder.createdAt, position: folder.position })),
+      ...workspaceRows
+        .filter((workspace) => sameParent(workspace.folderId, parentFolderId))
+        .map((workspace) => ({ kind: 'workspace' as const, id: workspace.id, createdAt: workspace.createdAt, position: workspace.position })),
+    ].filter((row) => !(row.kind === input.nodeType && row.id === input.nodeId))
+    siblings.sort((a, b) => {
+      if (a.position !== b.position) return a.position - b.position
+      const created = a.createdAt.getTime() - b.createdAt.getTime()
+      if (created !== 0) return created
+      return `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`)
+    })
+    const movingSibling: Sibling = {
+      kind: input.nodeType,
+      id: input.nodeId,
+      createdAt: new Date(),
+      position: -1,
+    }
+    const beforeIndex = before ? siblings.findIndex((row) => row.kind === before.kind && row.id === before.id) : -1
+    if (before && beforeIndex < 0) throw new WorkspaceError('invalid_name', 'before node not found')
+    siblings.splice(before ? beforeIndex : siblings.length, 0, movingSibling)
+
+    const now = new Date()
+    if (input.nodeType === 'folder') {
+      await database
+        .update(workspaceFolders)
+        .set({ parentId: parentFolderId, updatedAt: now })
+        .where(eq(workspaceFolders.id, input.nodeId))
+    } else {
+      await database
+        .update(workspaces)
+        .set({ folderId: parentFolderId, updatedAt: now })
+        .where(eq(workspaces.id, input.nodeId))
+    }
+    for (let position = 0; position < siblings.length; position++) {
+      const row = siblings[position]!
+      if (row.kind === 'folder') {
+        await database.update(workspaceFolders).set({ position, updatedAt: now }).where(eq(workspaceFolders.id, row.id))
+      } else {
+        await database.update(workspaces).set({ position, updatedAt: now }).where(eq(workspaces.id, row.id))
+      }
+    }
+    return await listTree()
   }
 
   async function getUiState(workspaceId: string): Promise<WorkspaceUiState> {
@@ -323,22 +525,89 @@ export function createWorkspaceService(database: Db = db) {
 
   return {
     async list(): Promise<Workspace[]> {
+      const rows = await listActiveWorkspaces()
+      return sortByPosition(rows)
+    },
+
+    listTree,
+
+    moveSidebarNode,
+
+    getFolder,
+
+    async createFolder(input: { name: string; parentId?: string | null }): Promise<WorkspaceFolder> {
+      const name = input.name.trim()
+      if (!name) throw new WorkspaceError('invalid_name', 'workspace folder name is required')
+      const parentId = await assertFolderParent(input.parentId)
+      const id = ulid()
+      const now = new Date()
+      const row: WorkspaceFolder = {
+        id,
+        parentId,
+        name,
+        position: await nextSiblingPosition(parentId),
+        collapsed: false,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+      }
+      await database.insert(workspaceFolders).values(row)
+      return row
+    },
+
+    async renameFolder(id: string, name: string): Promise<WorkspaceFolder> {
+      const nextName = name.trim()
+      if (!nextName) throw new WorkspaceError('invalid_name', 'workspace folder name is required')
+      await getFolder(id)
+      const now = new Date()
       const rows = await database
-        .select()
-        .from(workspaces)
-        .where(isNull(workspaces.archivedAt))
-        .orderBy(desc(workspaces.lastOpenedAt), desc(workspaces.createdAt))
-      return sortWorkspaces(rows)
+        .update(workspaceFolders)
+        .set({ name: nextName, updatedAt: now })
+        .where(eq(workspaceFolders.id, id))
+        .returning()
+      return rows[0] ?? (await getFolder(id))
+    },
+
+    async archiveFolder(id: string): Promise<void> {
+      await getFolder(id)
+      const now = new Date()
+      await database
+        .update(workspaceFolders)
+        .set({ archivedAt: now, updatedAt: now })
+        .where(eq(workspaceFolders.id, id))
+    },
+
+    async setFolderCollapsed(id: string, collapsed: boolean): Promise<WorkspaceFolder> {
+      await getFolder(id)
+      const now = new Date()
+      const rows = await database
+        .update(workspaceFolders)
+        .set({ collapsed, updatedAt: now })
+        .where(eq(workspaceFolders.id, id))
+        .returning()
+      return rows[0] ?? (await getFolder(id))
     },
 
     get,
 
-    async create(input?: { name?: string }): Promise<Workspace> {
+    async create(input?: {
+      name?: string
+      folderId?: string | null
+      nameSource?: Workspace['nameSource']
+      sourceKind?: Workspace['sourceKind']
+      sourcePath?: string | null
+    }): Promise<Workspace> {
       const id = ulid()
       const now = new Date()
-      const row = {
+      const folderId = await assertFolderParent(input?.folderId)
+      const row: Workspace = {
         id,
         name: normalizeWorkspaceName(input?.name),
+        folderId,
+        position: await nextSiblingPosition(folderId),
+        nameSource: input?.nameSource ?? 'explicit',
+        sourceKind: input?.sourceKind ?? null,
+        sourcePath: input?.sourcePath ?? null,
         createdAt: now,
         updatedAt: now,
         lastOpenedAt: now,
@@ -363,10 +632,35 @@ export function createWorkspaceService(database: Db = db) {
       const now = new Date()
       const rows = await database
         .update(workspaces)
-        .set({ name: nextName, updatedAt: now })
+        .set({ name: nextName, nameSource: 'explicit', updatedAt: now })
         .where(eq(workspaces.id, id))
         .returning()
       return rows[0] ?? (await get(id))
+    },
+
+    async maybeAutoNameFromPrompt(input: {
+      id: string
+      prompt: string
+      isFirstChat: boolean
+      chatHadExplicitTitle: boolean
+    }): Promise<Workspace> {
+      const current = await get(input.id)
+      if (
+        current.nameSource !== 'folder_path' ||
+        !input.isFirstChat ||
+        input.chatHadExplicitTitle
+      ) {
+        return current
+      }
+      const title = promptTitle(input.prompt)
+      if (!title) return current
+      const now = new Date()
+      const rows = await database
+        .update(workspaces)
+        .set({ name: title, nameSource: 'derived', updatedAt: now })
+        .where(eq(workspaces.id, input.id))
+        .returning()
+      return rows[0] ?? (await get(input.id))
     },
 
     async archive(id: string): Promise<void> {

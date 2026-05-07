@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 type WorkspaceRow = {
   id: string
   name: string
+  folderId: string | null
+  position: number
+  nameSource: 'explicit' | 'folder_path' | 'worktree' | 'derived'
+  sourceKind: 'folder' | 'worktree' | 'repo_config' | null
+  sourcePath: string | null
   createdAt: Date
   updatedAt: Date
   lastOpenedAt: Date | null
@@ -56,7 +61,19 @@ type WorkspaceAgentTabRow = {
   updatedAt: Date
 }
 
+type WorkspaceFolderRow = {
+  id: string
+  parentId: string | null
+  name: string
+  position: number
+  collapsed: boolean
+  createdAt: Date
+  updatedAt: Date
+  archivedAt: Date | null
+}
+
 const workspaceRows: WorkspaceRow[] = []
+const folderRows: WorkspaceFolderRow[] = []
 const uiStateRows: UiStateRow[] = []
 const viewStateRows: WorkspaceViewStateRow[] = []
 const tabRows: WorkspaceTabRow[] = []
@@ -64,6 +81,7 @@ const agentTabRows: WorkspaceAgentTabRow[] = []
 
 function resetState() {
   workspaceRows.length = 0
+  folderRows.length = 0
   uiStateRows.length = 0
   viewStateRows.length = 0
   tabRows.length = 0
@@ -93,9 +111,25 @@ vi.mock('../db/schema.js', () => ({
     _table: 'workspaces',
     id: { _col: 'id' },
     name: { _col: 'name' },
+    folderId: { _col: 'folderId' },
+    position: { _col: 'position' },
+    nameSource: { _col: 'nameSource' },
+    sourceKind: { _col: 'sourceKind' },
+    sourcePath: { _col: 'sourcePath' },
     createdAt: { _col: 'createdAt' },
     updatedAt: { _col: 'updatedAt' },
     lastOpenedAt: { _col: 'lastOpenedAt' },
+    archivedAt: { _col: 'archivedAt' },
+  },
+  workspaceFolders: {
+    _table: 'workspace_folders',
+    id: { _col: 'id' },
+    parentId: { _col: 'parentId' },
+    name: { _col: 'name' },
+    position: { _col: 'position' },
+    collapsed: { _col: 'collapsed' },
+    createdAt: { _col: 'createdAt' },
+    updatedAt: { _col: 'updatedAt' },
     archivedAt: { _col: 'archivedAt' },
   },
   workspaceUiStates: {
@@ -135,6 +169,7 @@ vi.mock('../envauth/service.js', () => ({
 
 function rowsFor(table: { _table: string }) {
   if (table._table === 'workspaces') return workspaceRows
+  if (table._table === 'workspace_folders') return folderRows
   if (table._table === 'workspace_ui_states') return uiStateRows
   if (table._table === 'workspace_view_states') return viewStateRows
   if (table._table === 'workspace_agent_tabs') return agentTabRows
@@ -148,6 +183,8 @@ vi.mock('../db/client.js', () => ({
         const values = Array.isArray(value) ? value : [value]
         if (table._table === 'workspaces') {
           workspaceRows.push(...(values as WorkspaceRow[]))
+        } else if (table._table === 'workspace_folders') {
+          folderRows.push(...(values as WorkspaceFolderRow[]))
         } else if (table._table === 'workspace_ui_states') {
           for (const row of values as UiStateRow[]) {
             const idx = uiStateRows.findIndex((r) => r.workspaceId === row.workspaceId)
@@ -194,6 +231,16 @@ vi.mock('../db/client.js', () => ({
         }
         const ordered = (pred?: (r: Record<string, unknown>) => boolean) => {
           const rows = apply(pred)
+          if (table._table === 'workspaces' || table._table === 'workspace_folders') {
+            return [...rows].sort((a, b) => {
+              const pos = Number(a.position ?? 0) - Number(b.position ?? 0)
+              if (pos !== 0) return pos
+              const aCreated = a.createdAt instanceof Date ? a.createdAt.getTime() : 0
+              const bCreated = b.createdAt instanceof Date ? b.createdAt.getTime() : 0
+              if (aCreated !== bCreated) return aCreated - bCreated
+              return String(a.id ?? '').localeCompare(String(b.id ?? ''))
+            })
+          }
           if (table._table !== 'workspace_tabs' && table._table !== 'workspace_agent_tabs') return rows
           return [...rows].sort((a, b) => {
             const pos = Number(a.position ?? 0) - Number(b.position ?? 0)
@@ -259,7 +306,7 @@ beforeEach(() => {
 })
 
 describe('workspace service', () => {
-  it('creates, renames, archives, and orders workspaces by recent activity', async () => {
+  it('creates, renames, archives, and keeps stable workspace order', async () => {
     const { workspaceService } = await import('./service.js')
 
     const first = await workspaceService.create({ name: 'First' })
@@ -269,13 +316,135 @@ describe('workspace service', () => {
 
     let rows = await workspaceService.list()
     expect(rows.map((r) => r.id)).toEqual([first.id, second.id])
+    expect(rows.map((r) => r.position)).toEqual([0, 1])
 
     const renamed = await workspaceService.rename(first.id, 'Renamed')
     expect(renamed.name).toBe('Renamed')
+    expect(renamed.nameSource).toBe('explicit')
 
     await workspaceService.archive(first.id)
     rows = await workspaceService.list()
     expect(rows.map((r) => r.id)).toEqual([second.id])
+  })
+
+  it('creates workspaces with default folder placement and explicit name source', async () => {
+    const { workspaceService } = await import('./service.js')
+
+    const workspace = await workspaceService.create({ name: 'Project' })
+
+    expect(workspace).toMatchObject({
+      name: 'Project',
+      folderId: null,
+      position: 0,
+      nameSource: 'explicit',
+      sourceKind: null,
+      sourcePath: null,
+    })
+    expect(workspaceRows[0]).toMatchObject({ folderId: null, position: 0, nameSource: 'explicit' })
+  })
+
+  it('returns folders and workspaces ordered by parent and position', async () => {
+    const { workspaceService } = await import('./service.js')
+
+    const folder = await workspaceService.createFolder({ name: 'Cloud Code' })
+    const nested = await workspaceService.createFolder({ name: 'Packages', parentId: folder.id })
+    const rootWorkspace = await workspaceService.create({ name: 'Scratch' })
+    const childWorkspace = await workspaceService.create({ name: 'cloud-code-tools', folderId: folder.id })
+    const nestedWorkspace = await workspaceService.create({ name: 'plugin', folderId: nested.id })
+
+    await expect(workspaceService.listTree()).resolves.toMatchObject([
+      {
+        type: 'folder',
+        folder: { id: folder.id, name: 'Cloud Code', position: 0 },
+        children: [
+          { type: 'folder', folder: { id: nested.id, name: 'Packages', position: 0 }, children: [{ type: 'workspace', workspace: { id: nestedWorkspace.id } }] },
+          { type: 'workspace', workspace: { id: childWorkspace.id, position: 1 } },
+        ],
+      },
+      { type: 'workspace', workspace: { id: rootWorkspace.id, position: 1 } },
+    ])
+  })
+
+  it('appends new workspaces under a folder without changing existing positions', async () => {
+    const { workspaceService } = await import('./service.js')
+
+    const folder = await workspaceService.createFolder({ name: 'Starch' })
+    const first = await workspaceService.create({ name: 'starch-web', folderId: folder.id })
+    const second = await workspaceService.create({ name: 'starch-api', folderId: folder.id })
+
+    await workspaceService.markOpened(second.id)
+    await workspaceService.rename(first.id, 'starch-ui')
+
+    expect(workspaceRows.find((row) => row.id === first.id)).toMatchObject({ position: 0, folderId: folder.id })
+    expect(workspaceRows.find((row) => row.id === second.id)).toMatchObject({ position: 1, folderId: folder.id })
+  })
+
+  it('moves workspaces between folders and normalizes target sibling order', async () => {
+    const { workspaceService } = await import('./service.js')
+    const source = await workspaceService.createFolder({ name: 'Source' })
+    const target = await workspaceService.createFolder({ name: 'Target' })
+    const first = await workspaceService.create({ name: 'first', folderId: target.id })
+    const moved = await workspaceService.create({ name: 'moved', folderId: source.id })
+    const second = await workspaceService.create({ name: 'second', folderId: target.id })
+
+    await workspaceService.moveSidebarNode({
+      nodeType: 'workspace',
+      nodeId: moved.id,
+      parentFolderId: target.id,
+      beforeNodeId: `workspace:${second.id}`,
+    })
+
+    expect(workspaceRows.find((row) => row.id === first.id)).toMatchObject({ folderId: target.id, position: 0 })
+    expect(workspaceRows.find((row) => row.id === moved.id)).toMatchObject({ folderId: target.id, position: 1 })
+    expect(workspaceRows.find((row) => row.id === second.id)).toMatchObject({ folderId: target.id, position: 2 })
+  })
+
+  it('moves folders and rejects moving a folder into its own descendant', async () => {
+    const { workspaceService } = await import('./service.js')
+    const root = await workspaceService.createFolder({ name: 'Root' })
+    const child = await workspaceService.createFolder({ name: 'Child', parentId: root.id })
+    const target = await workspaceService.createFolder({ name: 'Target' })
+
+    await expect(workspaceService.moveSidebarNode({
+      nodeType: 'folder',
+      nodeId: root.id,
+      parentFolderId: child.id,
+    })).rejects.toThrow(/descendant/i)
+
+    await workspaceService.moveSidebarNode({ nodeType: 'folder', nodeId: child.id, parentFolderId: target.id })
+    expect(folderRows.find((row) => row.id === child.id)).toMatchObject({ parentId: target.id, position: 0 })
+  })
+
+  it('auto-renames folder-path workspaces from the first untitled chat prompt', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'project', nameSource: 'folder_path', sourceKind: 'folder', sourcePath: '/tmp/project' })
+
+    const renamed = await workspaceService.maybeAutoNameFromPrompt({
+      id: workspace.id,
+      prompt: 'Add workspace folders to the sidebar and make ordering stable',
+      isFirstChat: true,
+      chatHadExplicitTitle: false,
+    })
+
+    expect(renamed).toMatchObject({ name: 'Add workspace folders to the sidebar and make ordering st…', nameSource: 'derived' })
+  })
+
+  it('does not auto-rename explicit, worktree, derived, or second-chat workspaces', async () => {
+    const { workspaceService } = await import('./service.js')
+    const explicit = await workspaceService.create({ name: 'Explicit', nameSource: 'explicit' })
+    const worktree = await workspaceService.create({ name: 'feature-branch', nameSource: 'worktree' })
+    const derived = await workspaceService.create({ name: 'Old derived', nameSource: 'derived' })
+    const secondChat = await workspaceService.create({ name: 'project', nameSource: 'folder_path' })
+
+    await workspaceService.maybeAutoNameFromPrompt({ id: explicit.id, prompt: 'Prompt title', isFirstChat: true, chatHadExplicitTitle: false })
+    await workspaceService.maybeAutoNameFromPrompt({ id: worktree.id, prompt: 'Prompt title', isFirstChat: true, chatHadExplicitTitle: false })
+    await workspaceService.maybeAutoNameFromPrompt({ id: derived.id, prompt: 'Prompt title', isFirstChat: true, chatHadExplicitTitle: false })
+    await workspaceService.maybeAutoNameFromPrompt({ id: secondChat.id, prompt: 'Prompt title', isFirstChat: false, chatHadExplicitTitle: false })
+
+    expect(workspaceRows.find((row) => row.id === explicit.id)).toMatchObject({ name: 'Explicit', nameSource: 'explicit' })
+    expect(workspaceRows.find((row) => row.id === worktree.id)).toMatchObject({ name: 'feature-branch', nameSource: 'worktree' })
+    expect(workspaceRows.find((row) => row.id === derived.id)).toMatchObject({ name: 'Old derived', nameSource: 'derived' })
+    expect(workspaceRows.find((row) => row.id === secondChat.id)).toMatchObject({ name: 'project', nameSource: 'folder_path' })
   })
 })
 

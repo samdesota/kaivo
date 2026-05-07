@@ -8,6 +8,13 @@ import { trpcQueryKey } from '../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../lib/utils'
 import { languageForPath } from '../../lib/cm-language'
 
+const workspaceEditorTheme = EditorView.theme({
+  '&': { backgroundColor: '#111318' },
+  '.cm-scroller': { backgroundColor: '#111318' },
+  '.cm-content': { backgroundColor: '#111318' },
+  '.cm-gutters': { backgroundColor: '#111318', borderRightColor: '#2c313a' },
+})
+
 export function FileViewer({ path, absolute }: { path: string; absolute?: boolean }) {
   const read = envTrpc.fs.read.useQuery({ path, absolute })
   const queryClient = useQueryClient()
@@ -21,8 +28,8 @@ export function FileViewer({ path, absolute }: { path: string; absolute?: boolea
     setWriteError(null)
   }, [path])
 
-  if (read.isLoading) return <div className="p-4 text-neutral-500">Loading…</div>
-  if (read.error) return <div className="p-4 text-red-400">{extractTrpcMessage(read.error)}</div>
+  if (read.isLoading) return <div className="h-full bg-neutral-975 p-4 text-neutral-500">Loading…</div>
+  if (read.error) return <div className="h-full bg-neutral-975 p-4 text-red-400">{extractTrpcMessage(read.error)}</div>
   if (!read.data) return null
 
   const data = read.data as {
@@ -34,14 +41,14 @@ export function FileViewer({ path, absolute }: { path: string; absolute?: boolea
 
   if (data.tooLarge) {
     return (
-      <div className="p-4 text-sm text-neutral-400">
+      <div className="h-full bg-neutral-975 p-4 text-sm text-neutral-400">
         File is too large to display ({formatBytes(data.size ?? 0)}). Limit is 5 MB.
       </div>
     )
   }
   if (data.binary) {
     return (
-      <div className="p-4 text-sm text-neutral-400">
+      <div className="h-full bg-neutral-975 p-4 text-sm text-neutral-400">
         Binary file ({formatBytes(data.size ?? 0)}). Preview not supported.
       </div>
     )
@@ -62,8 +69,8 @@ export function FileViewer({ path, absolute }: { path: string; absolute?: boolea
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs">
+    <div className="flex h-full flex-col bg-neutral-975">
+      <div className="flex flex-none basis-8 items-center justify-between border-b border-neutral-800 bg-neutral-975 px-3 text-xs">
         <span className="truncate text-neutral-400">{path}</span>
         <div className="flex items-center gap-2">
           {writeError && <span className="text-red-400">{writeError}</span>}
@@ -94,11 +101,11 @@ function CodeMirrorPane({
 }) {
   const lang = useMemo(() => languageForPath(path), [path])
   const extensions = useMemo(
-    () => [EditorView.lineWrapping, ...(lang ? [lang] : [])],
+    () => [EditorView.lineWrapping, workspaceEditorTheme, ...(lang ? [lang] : [])],
     [lang],
   )
   return (
-    <div className="min-h-0 flex-1 overflow-hidden bg-[#282c34]">
+    <div className="min-h-0 flex-1 overflow-hidden bg-neutral-975">
       <CodeMirror
         value={value}
         height="100%"

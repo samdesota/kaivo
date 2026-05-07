@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { envTrpc } from '../../../env-trpc'
+import { BorderedTabStrip, type BorderedTabItem } from '../../../components/bordered-tab-strip'
 import { browserApi } from '../../../lib/browser-api'
 import { FileTabContent } from '../tabs/file-tab'
 import { BrowserTabContent } from '../tabs/browser-tab'
@@ -55,48 +56,21 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
   }, [dispatch])
 
   const activeTab = state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0]
+  const tabItems: BorderedTabItem[] = state.tabs.map((t) => ({
+    id: t.id,
+    label: t.title || defaultTitle(t.content),
+    title: tabTitleDetail(t.content),
+  }))
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-neutral-950">
-      <div
-        role="tablist"
-        className="flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b border-neutral-800 bg-neutral-950 px-2 py-1"
-      >
-        {state.tabs.map((t) => {
-          const active = t.id === state.activeTabId
-          return (
-            <div
-              key={t.id}
-              role="tab"
-              aria-selected={active}
-              className={
-                'group flex shrink-0 items-center gap-0.5 rounded transition-colors ' +
-                (active
-                  ? 'bg-neutral-800 text-neutral-100'
-                  : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200')
-              }
-            >
-              <button
-                onClick={() => dispatch({ type: 'activate', tabId: t.id })}
-                className="max-w-[200px] truncate py-1 pl-2 pr-1 text-xs"
-                title={tabTitleDetail(t.content)}
-              >
-                {t.title || defaultTitle(t.content)}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  dispatch({ type: 'close', tabId: t.id })
-                }}
-                className="mr-1 rounded px-1 text-[11px] leading-none text-neutral-500 opacity-70 hover:bg-neutral-700 hover:text-neutral-100 hover:opacity-100"
-                aria-label="Close tab"
-                title="Close tab"
-              >
-                ×
-              </button>
-            </div>
-          )
-        })}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-neutral-975">
+      <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
+        <BorderedTabStrip
+          items={tabItems}
+          activeId={state.activeTabId}
+          onSelect={(tabId) => dispatch({ type: 'activate', tabId })}
+          onClose={(tabId) => dispatch({ type: 'close', tabId })}
+        />
       </div>
 
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
