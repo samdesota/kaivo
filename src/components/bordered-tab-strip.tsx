@@ -25,7 +25,7 @@ export function BorderedTabStrip({
     <div
       role="tablist"
       className={cn(
-        'flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden whitespace-nowrap',
+        'no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden whitespace-nowrap',
         className,
       )}
     >
