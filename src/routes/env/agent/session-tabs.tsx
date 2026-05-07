@@ -4,9 +4,10 @@ import { Plus } from 'lucide-react'
 import { BorderedTabStrip, type BorderedTabItem } from '../../../components/bordered-tab-strip'
 import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
+import { openFolderPickerOverlay } from '../../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { useWorkspaceAgentTabsStore } from '../../workspace/agent-tabs-store'
-import { FolderPickerModal } from './folder-picker-modal'
+import { useEnv } from '../env-context'
 import { NewAgentChatModal } from './new-agent-chat-modal'
 
 interface SessionSummary {
@@ -137,8 +138,8 @@ export function NewSessionPopover({
   onOpenNewChat?: () => void | Promise<void>
 }) {
   const [open, setOpen] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
+  const envContext = useEnv()
   const repos = envTrpc.repo.list.useQuery(undefined, { enabled: open })
   const start = envTrpc.agent.sessionStart.useMutation()
   const queryClient = useQueryClient()
@@ -188,6 +189,16 @@ export function NewSessionPopover({
     } catch (e) {
       setErr(extractTrpcMessage(e))
     }
+  }
+
+  async function chooseFolder() {
+    setOpen(false)
+    const path = await openFolderPickerOverlay({
+      env: envContext.env,
+      envToken: envContext.envToken,
+      busy: start.isPending,
+    })
+    if (path) await createIn(path)
   }
 
   const trigger =
@@ -242,8 +253,7 @@ export function NewSessionPopover({
           ))}
           <button
             onClick={() => {
-              setOpen(false)
-              setPickerOpen(true)
+              void chooseFolder()
             }}
             disabled={start.isPending}
             className="flex w-full items-center gap-2 border-t border-neutral-800 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-900 disabled:opacity-60"
@@ -263,15 +273,6 @@ export function NewSessionPopover({
           )}
         </div>
       )}
-      <FolderPickerModal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        busy={start.isPending}
-        onSelect={(absPath) => {
-          setPickerOpen(false)
-          void createIn(absPath)
-        }}
-      />
     </div>
   )
 }

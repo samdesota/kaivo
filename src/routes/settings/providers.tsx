@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { trpc } from '../../trpc'
 import { Button, Card, FormError, Input, Label } from '../../components/ui'
+import { openConfirmOverlay } from '../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../lib/utils'
 import { makeEnvClient, type EnvRef } from '../../lib/env-client'
 
@@ -187,7 +188,13 @@ function ProviderRow({
 
   async function onDelete() {
     setError(null)
-    if (!confirm(`Delete the ${meta.label} key? The agent will stop working until a new key is saved.`)) return
+    const confirmed = await openConfirmOverlay({
+      title: `Delete ${meta.label} key?`,
+      message: 'The agent will stop working until a new key is saved.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!confirmed) return
     try {
       await del.mutateAsync({ provider: meta.id })
       setApiKey('')

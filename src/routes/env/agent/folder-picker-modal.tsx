@@ -25,11 +25,13 @@ export function FolderPickerModal({
   onClose,
   onSelect,
   busy,
+  title = 'Choose working folder',
 }: {
   open: boolean
   onClose: () => void
   onSelect: (absPath: string) => void
   busy?: boolean
+  title?: string
 }) {
   // `undefined` means "let the server pick the default" (= CC_WORKING_DIR).
   const [path, setPath] = useState<string | undefined>(undefined)
@@ -108,7 +110,7 @@ export function FolderPickerModal({
   }, [highlightIdx])
 
   return (
-    <Modal open={open} onClose={onClose} title="Choose working folder" widthClass="max-w-lg">
+    <Modal open={open} onClose={onClose} title={title} widthClass="max-w-lg">
       <div className="space-y-3" onKeyDown={onKey}>
         <div className="flex items-center gap-2 text-xs">
           <button
