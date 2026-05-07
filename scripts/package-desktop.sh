@@ -10,6 +10,38 @@ desktop_dir="$repo_root/packages/cloud-code-desktop"
 bundle_dir="$desktop_dir/bundle"
 package_cache_dir="${CC_PACKAGE_CACHE_DIR:-$repo_root/node_modules/.cache/cloud-code-desktop-package}"
 install_app=false
+job_log_dir=""
+
+cleanup_job_logs() {
+  if [ -n "$job_log_dir" ]; then
+    rm -rf "$job_log_dir"
+  fi
+}
+trap cleanup_job_logs EXIT
+
+run_job() {
+  local pid_var="$1"
+  local name="$2"
+  shift
+  shift
+  local log_file="$job_log_dir/$name.log"
+  echo "==> starting $name"
+  ("$@") >"$log_file" 2>&1 &
+  printf -v "$pid_var" '%s' "$!"
+}
+
+wait_job() {
+  local name="$1"
+  local pid="$2"
+  local log_file="$job_log_dir/$name.log"
+  if wait "$pid"; then
+    echo "==> completed $name"
+  else
+    echo "==> failed $name" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+}
 
 runtime_cache_key() {
   local package_json="$1"
@@ -67,16 +99,13 @@ done
 echo "==> cleaning bundle dir"
 rm -rf "$bundle_dir"
 mkdir -p "$bundle_dir/app-server" "$bundle_dir/env-server" "$bundle_dir/opencode-plugin"
+job_log_dir=$(mktemp -d "${TMPDIR:-/tmp}/cloud-code-desktop-package.XXXXXX")
 
-echo "==> building client SPA"
-(cd "$repo_root" && npx vite build)
-
-echo "==> building app server"
-(cd "$repo_root" && npx tsup)
-
-echo "==> staging app server bundle"
-cp "$repo_root/dist/server/index.js" "$bundle_dir/app-server/index.js"
-cp -R "$repo_root/dist/client" "$bundle_dir/client"
+run_job client_pid "client-spa" bash -lc "cd '$repo_root' && npx vite build"
+run_job app_server_pid "app-server-build" bash -lc "cd '$repo_root' && npx tsup"
+run_job env_server_pid "env-server-build" bash -lc "cd '$repo_root/packages/env-server' && npm run build"
+run_job opencode_plugin_pid "opencode-plugin-build" bash -lc "cd '$repo_root/packages/opencode-plugin' && npm run build"
+run_job desktop_pid "desktop-build" bash -lc "cd '$desktop_dir' && npm run build"
 
 # runtime package.json with only server-side deps
 node --input-type=module -e "
@@ -106,15 +135,7 @@ node --input-type=module -e "
   fs.writeFileSync('${bundle_dir}/app-server/package.json', JSON.stringify(out, null, 2) + '\n')
 "
 
-install_runtime_deps "$bundle_dir/app-server" "app-server" "$repo_root/package-lock.json"
-
-echo "==> building env-server"
-(cd "$repo_root/packages/env-server" && npm run build)
-
-echo "==> staging env-server bundle"
-cp "$repo_root/packages/env-server/dist/main.js" "$bundle_dir/env-server/main.js"
-cp "$repo_root/packages/env-server/dist/terminal-daemon.js" "$bundle_dir/env-server/terminal-daemon.js"
-rsync -a "$repo_root/packages/env-server/migrations/" "$bundle_dir/env-server/migrations/"
+run_job app_deps_pid "app-server-deps" install_runtime_deps "$bundle_dir/app-server" "app-server" "$repo_root/package-lock.json"
 
 node --input-type=module -e "
   import fs from 'node:fs'
@@ -129,19 +150,33 @@ node --input-type=module -e "
   fs.writeFileSync('${bundle_dir}/env-server/package.json', JSON.stringify(out, null, 2) + '\n')
 "
 
-install_runtime_deps "$bundle_dir/env-server" "env-server" "$repo_root/packages/env-server/package-lock.json"
+run_job env_deps_pid "env-server-deps" install_runtime_deps "$bundle_dir/env-server" "env-server" "$repo_root/packages/env-server/package-lock.json"
+
+wait_job "client-spa" "$client_pid"
+wait_job "app-server-build" "$app_server_pid"
+wait_job "app-server-deps" "$app_deps_pid"
+
+echo "==> staging app server bundle"
+cp "$repo_root/dist/server/index.js" "$bundle_dir/app-server/index.js"
+cp -R "$repo_root/dist/client" "$bundle_dir/client"
+
+wait_job "env-server-build" "$env_server_pid"
+wait_job "env-server-deps" "$env_deps_pid"
+
+echo "==> staging env-server bundle"
+cp "$repo_root/packages/env-server/dist/main.js" "$bundle_dir/env-server/main.js"
+cp "$repo_root/packages/env-server/dist/terminal-daemon.js" "$bundle_dir/env-server/terminal-daemon.js"
+rsync -a "$repo_root/packages/env-server/migrations/" "$bundle_dir/env-server/migrations/"
 
 # node-pty spawn-helper needs execute permission
 find "$bundle_dir/env-server/node_modules/node-pty/prebuilds" -name spawn-helper -type f -exec chmod 755 {} + 2>/dev/null || true
 
-echo "==> building opencode plugin"
-(cd "$repo_root/packages/opencode-plugin" && npm run build)
+wait_job "opencode-plugin-build" "$opencode_plugin_pid"
 
 echo "==> staging opencode plugin"
 cp "$repo_root/packages/opencode-plugin/dist/index.js" "$bundle_dir/opencode-plugin/index.js"
 
-echo "==> building desktop electron app"
-(cd "$desktop_dir" && npm run build)
+wait_job "desktop-build" "$desktop_pid"
 
 echo "==> packaging electron app"
 (cd "$desktop_dir" && npx electron-packager . "Cloud Code Desktop" \
