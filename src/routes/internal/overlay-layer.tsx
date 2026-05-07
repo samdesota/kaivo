@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { EnvRef } from '../../lib/env-client'
-import { envTrpc, makeEnvReactClient } from '../../env-trpc'
+import { envTrpc, makeManagedEnvReactClient } from '../../env-trpc'
 import { EnvContextProvider } from '../env/env-context'
 import { NewAgentChatOverlay } from '../env/agent/new-agent-chat-modal'
 
@@ -79,11 +79,19 @@ function OverlayRequestRenderer({
   respond: (response: OverlayResponse) => void
 }) {
   const queryClient = useMemo(() => new QueryClient(), [request.requestId])
-  const envClient = useMemo(() => makeEnvReactClient(request.env, request.envToken), [request.env, request.envToken])
+  const managedEnvClient = useMemo(
+    () => makeManagedEnvReactClient(request.env, request.envToken),
+    [request.env.id, request.env.url, request.envToken],
+  )
+  useEffect(() => {
+    return () => {
+      void managedEnvClient.close()
+    }
+  }, [managedEnvClient])
 
   return (
     <QueryClientProvider client={queryClient}>
-      <envTrpc.Provider client={envClient} queryClient={queryClient}>
+      <envTrpc.Provider client={managedEnvClient.client} queryClient={queryClient}>
         <EnvContextProvider value={{ env: request.env, envToken: request.envToken }}>
           <NewAgentChatOverlay
             workspaceId={request.workspaceId}

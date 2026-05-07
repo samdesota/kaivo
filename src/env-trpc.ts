@@ -22,6 +22,10 @@ function wsRetryDelayMs(attemptIndex: number): number {
 }
 
 export function makeEnvReactClient(env: EnvRef, envToken: string) {
+  return makeManagedEnvReactClient(env, envToken).client
+}
+
+export function makeManagedEnvReactClient(env: EnvRef, envToken: string) {
   const base = resolveEnvUrl(env)
   const ws = createWSClient({
     url: envWsUrl(env, '/trpc'),
@@ -33,7 +37,7 @@ export function makeEnvReactClient(env: EnvRef, envToken: string) {
       pongTimeoutMs: 3_000,
     },
   })
-  return createTRPCUntypedClient<EnvAppRouter>({
+  const client = createTRPCUntypedClient<EnvAppRouter>({
     links: [
       splitLink({
         condition: (op) => op.type === 'subscription',
@@ -51,4 +55,5 @@ export function makeEnvReactClient(env: EnvRef, envToken: string) {
       }),
     ],
   })
+  return { client, close: () => ws.close() }
 }
