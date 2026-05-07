@@ -214,7 +214,7 @@ describe('ChatStateStore', () => {
     expect(store.getSnapshot('s1').state.parts.get('p1')?.text).toBe('replayed')
   })
 
-  it('keeps retained chats alive across view subscribers and stops when released', async () => {
+  it('keeps chat readers alive after view subscribers release them', async () => {
     const api = new MockChatApi()
     const store = new ChatStateStore(api)
     const releaseA = store.retainSession('s1')
@@ -226,8 +226,18 @@ describe('ChatStateStore', () => {
     expect(api.subscriptions[0]?.unsubscribed).toBe(false)
 
     releaseB()
+    expect(api.subscriptions[0]?.unsubscribed).toBe(false)
+
+    api.subscriptions[0]?.handlers.onData({
+      seq: 1,
+      type: 'message.part.updated',
+      payload: { part: { id: 'p1', type: 'text', messageID: 'm1', text: 'still reading', sessionID: 'oc1' } },
+    })
+
+    expect(store.getSnapshot('s1').state.parts.get('p1')?.text).toBe('still reading')
+
+    store.dispose()
     expect(api.subscriptions[0]?.unsubscribed).toBe(true)
-    expect(store.getSnapshot('s1').loading).toBe(false)
   })
 
   it('reconciles status into pending approvals, questions, and todos', async () => {
