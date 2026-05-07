@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createCollection, useLiveQuery, type Collection } from '@tanstack/react-db'
-import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { queryCollectionOptions, type QueryCollectionUtils } from '@tanstack/query-db-collection'
 import { appTrpcMutation, appTrpcQuery } from '../../lib/trpc-plain'
+import { trpc } from '../../trpc'
 import { workspaceTabKey, type WorkspaceTab } from '../../../shared/workspace-pane'
 
 export type WorkspaceTabRecord = {
@@ -19,6 +20,46 @@ export type WorkspaceTabRecord = {
   url: string | null
   browserTabId: string | null
   updatedAt: Date
+}
+
+type WorkspaceTabsCollection = Collection<WorkspaceTabRecord, string> & {
+  utils: QueryCollectionUtils<WorkspaceTabRecord, string>
+}
+
+type WorkspaceTabsSnapshot = {
+  table: 'workspace_tabs'
+  rows: Array<Omit<WorkspaceTabRecord, 'updatedAt'> & { updatedAt: Date | number | string }>
+  seq: number
+}
+
+type WorkspaceTabsChangeEvent = {
+  seq: number
+  table: 'workspace_tabs'
+  op: 'insert' | 'update' | 'delete'
+  key: string
+  row: (Omit<WorkspaceTabRecord, 'updatedAt'> & { updatedAt: Date | number | string }) | null
+}
+
+function workspaceTabRecordKey(record: Pick<WorkspaceTabRecord, 'workspaceId' | 'id'>): string {
+  return JSON.stringify({ workspace_id: record.workspaceId, id: record.id })
+}
+
+function normalizeWorkspaceTabRecord(record: Omit<WorkspaceTabRecord, 'updatedAt'> & { updatedAt: Date | number | string }): WorkspaceTabRecord {
+  return {
+    ...record,
+    updatedAt: record.updatedAt instanceof Date ? record.updatedAt : new Date(record.updatedAt),
+  }
+}
+
+function workspaceTabIdFromKey(key: unknown): string {
+  if (typeof key !== 'string') return String(key)
+  try {
+    const parsed = JSON.parse(key) as { id?: unknown }
+    if (typeof parsed.id === 'string') return parsed.id
+  } catch {
+    // Fall through for legacy/plain keys.
+  }
+  return key
 }
 
 export function recordToWorkspaceTab(record: WorkspaceTabRecord): WorkspaceTab | null {
@@ -65,13 +106,18 @@ export function compareWorkspaceTabRecords(a: WorkspaceTabRecord, b: WorkspaceTa
 
 export function useWorkspaceTabsStore(workspaceId: string) {
   const queryClient = useQueryClient()
+  const syncedSeqRef = useRef(0)
   const collection = useMemo(() => {
     const options = queryCollectionOptions({
       id: `workspace-tabs:${workspaceId}`,
-      queryKey: ['workspace-tabs', workspaceId],
+      queryKey: ['sync', 'workspace_tabs'],
       queryClient,
-      getKey: (tab: WorkspaceTabRecord) => tab.id,
-      queryFn: async () => await appTrpcQuery<WorkspaceTabRecord[]>('workspace.listTabs', { workspaceId }),
+      getKey: workspaceTabRecordKey,
+      queryFn: async () => {
+        const snapshot = await appTrpcQuery<WorkspaceTabsSnapshot>('sync.snapshot', { table: 'workspace_tabs' })
+        syncedSeqRef.current = Math.max(syncedSeqRef.current, snapshot.seq)
+        return snapshot.rows.map(normalizeWorkspaceTabRecord)
+      },
       onInsert: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
         for (const mutation of transaction.mutations) {
           const record = mutation.modified as WorkspaceTabRecord
@@ -90,15 +136,35 @@ export function useWorkspaceTabsStore(workspaceId: string) {
       },
       onDelete: async ({ transaction }: { transaction: { mutations: Array<{ key: unknown }> } }) => {
         for (const mutation of transaction.mutations) {
-          await appTrpcMutation('workspace.deleteTab', { workspaceId, tabId: String(mutation.key) })
+          await appTrpcMutation('workspace.deleteTab', { workspaceId, tabId: workspaceTabIdFromKey(mutation.key) })
         }
       },
     })
-    return createCollection(options as never) as unknown as Collection<WorkspaceTabRecord, string>
+    return createCollection(options as never) as unknown as WorkspaceTabsCollection
   }, [queryClient, workspaceId])
 
+  trpc.sync.changes.useSubscription(
+    { afterSeq: syncedSeqRef.current, tables: ['workspace_tabs'] },
+    {
+      onData(events) {
+        const batch = events as WorkspaceTabsChangeEvent[]
+        collection.utils.writeBatch(() => {
+          for (const event of batch) {
+            if (event.seq <= syncedSeqRef.current) continue
+            if (event.op === 'delete') {
+              collection.utils.writeDelete(event.key)
+            } else if (event.row) {
+              collection.utils.writeUpsert(normalizeWorkspaceTabRecord(event.row))
+            }
+            syncedSeqRef.current = event.seq
+          }
+        })
+      },
+    },
+  )
+
   const live = useLiveQuery(() => collection, [collection])
-  const records = (live.data ?? []).slice().sort(compareWorkspaceTabRecords)
+  const records = (live.data ?? []).filter((record) => record.workspaceId === workspaceId).slice().sort(compareWorkspaceTabRecords)
   const tabs = records.map(recordToWorkspaceTab).filter((tab): tab is WorkspaceTab => Boolean(tab))
 
   return {
@@ -108,22 +174,27 @@ export function useWorkspaceTabsStore(workspaceId: string) {
     openTab(tab: WorkspaceTab, activate = true): WorkspaceTab {
       const existing = tabs.find((current) => workspaceTabKey(current) === workspaceTabKey(tab))
       if (existing) return existing
-      const position = Array.from(collection.values()).reduce((max, record) => Math.max(max, record.position), -1) + 1
+      const position = Array.from(collection.values())
+        .filter((record) => record.workspaceId === workspaceId)
+        .reduce((max, record) => Math.max(max, record.position), -1) + 1
       collection.insert(workspaceTabToRecord(workspaceId, tab, position))
       return tab
     },
     closeTab(tabId: string) {
-      if (collection.has(tabId)) collection.delete(tabId)
+      const record = records.find((tab) => tab.id === tabId)
+      if (record) collection.delete(workspaceTabRecordKey(record))
     },
     setBrowserTabId(tabId: string, browserTabId: string) {
-      if (!collection.has(tabId)) return
-      collection.update(tabId, (draft) => {
+      const record = records.find((tab) => tab.id === tabId)
+      if (!record) return
+      collection.update(workspaceTabRecordKey(record), (draft) => {
         draft.browserTabId = browserTabId
       })
     },
     setTabTitle(tabId: string, title: string) {
-      if (!collection.has(tabId)) return
-      collection.update(tabId, (draft) => {
+      const record = records.find((tab) => tab.id === tabId)
+      if (!record) return
+      collection.update(workspaceTabRecordKey(record), (draft) => {
         draft.title = title
       })
     },
