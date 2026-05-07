@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronLeft, ChevronRight, FolderPlus, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, FolderPlus, Plus, Settings, X } from 'lucide-react'
 import {
   closestCenter,
   DndContext,
@@ -632,19 +632,19 @@ export function WorkspaceSidebar({
         <div className="min-w-0">
           <div className="truncate text-xs font-medium text-neutral-300">cloud code</div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center">
           <button
             onClick={() => setNewChatContext({ mode: 'new', folderId: null })}
-            className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
+            className="rounded px-0.5 py-0.5 text-neutral-600 hover:bg-neutral-900 hover:text-neutral-200 disabled:opacity-50"
             aria-label="Create new workspace from chat"
             title="New workspace from chat"
           >
-            <Plus className="h-4 w-4" aria-hidden="true" />
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
             onClick={() => void openFolderCreate(null)}
             disabled={createFolder.isPending}
-            className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
+            className="rounded px-0.5 py-0.5 text-neutral-600 hover:bg-neutral-900 hover:text-neutral-200 disabled:opacity-50"
             aria-label="Create workspace folder"
             title="New folder"
           >
@@ -671,6 +671,15 @@ export function WorkspaceSidebar({
           </DragOverlay>
         </DndContext>
       </div>
+      <div className="flex-none border-t border-neutral-900 px-2 py-2">
+        <Link
+          to="/settings"
+          className="flex items-center gap-2 rounded px-[3px] py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-900 hover:text-neutral-200"
+        >
+          <Settings className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate font-medium">Settings</span>
+        </Link>
+      </div>
       {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && newChatContext && (
         <WorkspaceAgentEnvProvider>
           <NewAgentChatModal
@@ -693,27 +702,41 @@ export function WorkspaceSidebar({
       const folder = findSidebarFolder(displayNodes, row.id)
       if (!folder) return null
       const dndId = sidebarDndId('folder', folder.id)
+      const folderHasVisibleChildren = !folder.collapsed && flatRows.some((candidate) => candidate.ancestorFolderIds.includes(folder.id))
       return (
-        <SortableSidebarRow key={dndId} id={dndId} depth={row.depth} active={activeDragId === dndId}>
-          <div className="mb-1">
+        <SortableSidebarRow
+          key={dndId}
+          id={dndId}
+          depth={row.depth}
+          active={activeDragId === dndId}
+          guideDepths={row.ancestorFolderIds.map((_, index) => index)}
+        >
+          <div className="relative mb-1">
+            {folderHasVisibleChildren && (
+              <span
+                className="pointer-events-none absolute bottom-[-5px] left-[3.5px] top-[20px] border-l border-neutral-800/80"
+                aria-hidden="true"
+              />
+            )}
+            <div className="group flex items-center gap-px py-px text-xs text-neutral-400 transition-all duration-150">
+              <button
+                onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}
+                className={
+                  '-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300 ' +
+                  (folder.collapsed ? 'opacity-0 group-hover:opacity-100' : 'opacity-100')
+                }
+                aria-label={`${folder.collapsed ? 'Expand' : 'Collapse'} folder ${folder.name}`}
+              >
+                {folder.collapsed ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+              </button>
               <div className={
-                'group flex items-center gap-0.5 rounded px-1 py-px text-xs text-neutral-400 transition-all duration-150 hover:bg-neutral-900 hover:text-neutral-200 ' +
+                'flex min-w-0 flex-1 items-center rounded px-[3px] group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
                 (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-brand-500/10 text-neutral-100 ring-1 ring-brand-400/60 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
               }>
-                <button
-                  onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}
-                  className={
-                    'flex h-5 w-4 shrink-0 items-center justify-center rounded text-neutral-600 hover:text-neutral-300 ' +
-                    (folder.collapsed ? 'opacity-0 group-hover:opacity-100' : 'opacity-100')
-                  }
-                  aria-label={`${folder.collapsed ? 'Expand' : 'Collapse'} folder ${folder.name}`}
-                >
-                  {folder.collapsed ? <ChevronRight className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
-            </button>
                 <span className="min-w-0 flex-1 truncate px-0.5 font-medium" title={folder.name}>{folder.name}</span>
                 <button
                   onClick={() => setNewChatContext({ mode: 'new', folderId: folder.id })}
-                  className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                  className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
                   aria-label={`Create workspace in ${folder.name}`}
                   title="New workspace from chat"
                 >
@@ -722,13 +745,14 @@ export function WorkspaceSidebar({
                 <button
                   onClick={() => void openFolderCreate(folder.id)}
                   disabled={createFolder.isPending}
-                  className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
+                  className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
                   aria-label={`Create folder in ${folder.name}`}
                   title="New folder"
                 >
                   <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </div>
+            </div>
           </div>
         </SortableSidebarRow>
       )
@@ -736,27 +760,40 @@ export function WorkspaceSidebar({
     const workspace = findSidebarWorkspace(displayNodes, row.id)
     if (!workspace) return null
     const dndId = sidebarDndId('workspace', workspace.id)
-    const active = workspace.id === ctx.workspace.id && !ctx.uiState.activeAgentSessionId
     const editing = edit.editingId === workspace.id
     const expanded = expandedWorkspaceIds.includes(workspace.id)
+    const active = workspace.id === ctx.workspace.id && (!ctx.uiState.activeAgentSessionId || !expanded)
     return (
-      <SortableSidebarRow key={dndId} id={dndId} depth={row.depth} active={activeDragId === dndId}>
-      <div className="mb-1">
-        <div className={
-          'group flex items-center gap-0.5 rounded px-1 transition-colors hover:bg-neutral-900 hover:text-neutral-200 ' +
-          (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
-        }>
+      <SortableSidebarRow
+        key={dndId}
+        id={dndId}
+        depth={row.depth}
+        active={activeDragId === dndId}
+        guideDepths={row.ancestorFolderIds.map((_, index) => index)}
+      >
+        <div className="relative mb-1">
+          {expanded && (
+            <span
+              className="pointer-events-none absolute bottom-0 left-[3.5px] top-[22px] border-l border-neutral-800/80"
+              aria-hidden="true"
+            />
+          )}
+          <div className="group flex items-center gap-px text-neutral-400">
           <button
             className={
-              'flex h-5 w-4 shrink-0 items-center justify-center rounded text-neutral-700 hover:text-neutral-400 ' +
+              '-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300 ' +
               (expanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')
             }
             title={expanded ? 'Collapse chats' : 'Expand chats'}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} chats for ${workspace.name}`}
             onClick={() => setWorkspaceExpanded(workspace.id, !expanded)}
           >
-            {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
+            {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
           </button>
+          <div className={
+            'flex min-w-0 flex-1 items-center rounded px-[3px] transition-colors group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
+            (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
+          }>
           {editing ? (
             <input
               ref={inputRef}
@@ -794,7 +831,7 @@ export function WorkspaceSidebar({
           )}
           <button
             onClick={() => setNewChatContext({ mode: 'existing', workspace })}
-            className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+            className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
             aria-label={`Create chat in ${workspace.name}`}
             title="New chat in workspace"
           >
@@ -806,12 +843,13 @@ export function WorkspaceSidebar({
               e.stopPropagation()
               void closeWorkspace(workspace.id, workspaces)
             }}
-            className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+            className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
             aria-label={`Close workspace ${workspace.name}`}
             title="Close workspace"
           >
             <X className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
+          </div>
         </div>
         {expanded && ctx.localEnvTarget?.available && ctx.localEnvTarget.token ? (
           <WorkspaceAgentEnvProvider>
@@ -864,11 +902,13 @@ function SortableSidebarRow({
   id,
   active,
   depth,
+  guideDepths = [],
   children,
 }: {
   id: string
   active: boolean
   depth: number
+  guideDepths?: number[]
   children: ReactNode
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -886,16 +926,24 @@ function SortableSidebarRow({
       {...listeners}
       data-sidebar-dnd-id={id}
       className={
-        'will-change-transform ' +
+        'relative will-change-transform ' +
         (active || isDragging ? 'opacity-30' : '')
       }
       style={{
-        paddingLeft: depth * 10,
+        paddingLeft: depth * 8,
         cursor: active ? 'grabbing' : 'grab',
         transform: DndCss.Transform.toString(transform),
         transition,
       }}
     >
+      {guideDepths.map((guideDepth) => (
+        <span
+          key={guideDepth}
+          className="pointer-events-none absolute inset-y-[-2px] border-l border-neutral-800/80"
+          style={{ left: guideDepth * 8 + 3.5 }}
+          aria-hidden="true"
+        />
+      ))}
       {children}
     </div>
   )
