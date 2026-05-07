@@ -6,6 +6,7 @@ import { openConfirmOverlay } from '../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../lib/trpc-plain'
 import { extractTrpcMessage } from '../lib/utils'
 import { RepoCombobox } from './repo-combobox'
+import { Modal } from '../components/ui'
 
 type Source = 'url' | 'github'
 
@@ -108,7 +109,7 @@ export function NewRepoConfigForm({
       ) : !ghStatus.data?.connected ? (
         <p className="text-xs text-neutral-500">
           GitHub App not connected.{' '}
-          <Link to="/settings" className="text-brand-500 hover:underline">
+          <Link to="/settings" className="text-neutral-300 hover:underline">
             Set up
           </Link>
         </p>
@@ -150,7 +151,7 @@ export function NewRepoConfigForm({
             create.isPending ||
             (draft.source === 'url' ? !draft.url.trim() : !draft.repoFullName)
           }
-          className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {create.isPending ? 'Creating…' : 'Create config'}
         </button>
@@ -173,7 +174,7 @@ export function NewRepoConfigForm({
  * Manage a single repo config: rename, set default ref, manage associated
  * files (path + encrypted contents). Used by Settings and the clone modal.
  */
-export function RepoConfigEditor({ configId }: { configId: string }) {
+export function RepoConfigEditor({ configId, onDeleted }: { configId: string; onDeleted?: () => void }) {
   const queryClient = useQueryClient()
   const cfg = trpc.repoConfig.get.useQuery({ id: configId })
   const files = trpc.repoConfig.listFiles.useQuery({ configId })
@@ -216,6 +217,7 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
     try {
       await remove.mutateAsync({ id: configId })
       await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.list') })
+      onDeleted?.()
     } catch (e) {
       setErr(extractTrpcMessage(e))
     }
@@ -274,14 +276,14 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
           <button
             onClick={() => void onSave()}
             disabled={update.isPending}
-            className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+            className="rounded bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-700 disabled:opacity-60"
           >
             {update.isPending ? 'Saving…' : 'Save'}
           </button>
           <button
             onClick={() => void onDelete()}
             disabled={remove.isPending}
-            className="rounded border border-red-900/60 px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/40 disabled:opacity-60"
+            className="rounded border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200 disabled:opacity-60"
           >
             Delete config
           </button>
@@ -345,7 +347,7 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
                 </button>
                 <button
                   onClick={() => void onRemoveFile(f.id, f.path)}
-                  className="rounded border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400 hover:border-red-900 hover:text-red-400"
+                  className="rounded border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
                 >
                   ×
                 </button>
@@ -422,7 +424,7 @@ function FileEditor({
         <button
           onClick={() => void onSave()}
           disabled={put.isPending || !path.trim()}
-          className="rounded bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+          className="rounded bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-700 disabled:opacity-60"
         >
           {put.isPending ? 'Saving…' : 'Save'}
         </button>
@@ -442,45 +444,25 @@ function FileEditor({
 export function RepoConfigsManager() {
   const list = trpc.repoConfig.list.useQuery()
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
-
-  useEffect(() => {
-    if (!activeId && list.data && list.data.length > 0) {
-      setActiveId(list.data[0]!.id)
-    }
-  }, [activeId, list.data])
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-[260px,1fr]">
+    <div>
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Configs</h3>
-          <button
-            onClick={() => {
-              setCreating(true)
-              setActiveId(null)
-            }}
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
-          >
-            + New
-          </button>
-        </div>
         {list.isLoading && <p className="text-xs text-neutral-500">Loading…</p>}
-        {list.data && list.data.length === 0 && !creating && (
-          <p className="text-xs text-neutral-500">No configs yet.</p>
+        {list.data && list.data.length === 0 && (
+          <p className="text-xs text-neutral-500">No repo configs yet.</p>
         )}
-        <ul className="space-y-1">
+        <ul className="space-y-2">
           {list.data?.map((c) => (
             <li key={c.id}>
               <button
                 onClick={() => {
                   setActiveId(c.id)
-                  setCreating(false)
                 }}
                 className={
                   'block w-full rounded border px-2 py-1.5 text-left text-xs ' +
                   (activeId === c.id
-                    ? 'border-brand-500/60 bg-neutral-900 text-neutral-100'
+                    ? 'border-neutral-600 bg-neutral-900 text-neutral-100'
                     : 'border-neutral-800 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-900')
                 }
               >
@@ -493,21 +475,39 @@ export function RepoConfigsManager() {
           ))}
         </ul>
       </div>
-      <div className="min-w-0 rounded border border-neutral-800 bg-neutral-950 p-3">
-        {creating ? (
-          <NewRepoConfigForm
-            onCreated={(id) => {
-              setActiveId(id)
-              setCreating(false)
-            }}
-            onCancel={() => setCreating(false)}
-          />
-        ) : activeId ? (
-          <RepoConfigEditor configId={activeId} />
-        ) : (
-          <p className="text-xs text-neutral-500">Pick a config or create a new one.</p>
-        )}
-      </div>
+      <Modal
+        open={Boolean(activeId)}
+        onClose={() => setActiveId(null)}
+        title="Repo config"
+        widthClass="max-w-2xl"
+      >
+        {activeId ? <RepoConfigEditor configId={activeId} onDeleted={() => setActiveId(null)} /> : null}
+      </Modal>
     </div>
+  )
+}
+
+export function RepoConfigCreateButton() {
+  const [creating, setCreating] = useState(false)
+  return (
+    <>
+      <button
+        onClick={() => setCreating(true)}
+        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
+      >
+        + New
+      </button>
+      <Modal
+        open={creating}
+        onClose={() => setCreating(false)}
+        title="New repo config"
+        widthClass="max-w-lg"
+      >
+        <NewRepoConfigForm
+          onCreated={() => setCreating(false)}
+          onCancel={() => setCreating(false)}
+        />
+      </Modal>
+    </>
   )
 }

@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { trpc } from '../../trpc'
-import { Button, Card, FormError, Input, Label } from '../../components/ui'
+import { Button, FormError, Input, Modal } from '../../components/ui'
 import { openConfirmOverlay } from '../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../lib/utils'
 import { makeEnvClient, type EnvRef } from '../../lib/env-client'
+import { SettingsPanel } from './panel'
 
 type ProviderId = 'anthropic' | 'openai'
 type EnvOAuthClient = {
@@ -17,12 +18,12 @@ const PROVIDERS: { id: ProviderId; label: string; note: string }[] = [
   {
     id: 'anthropic',
     label: 'Anthropic',
-    note: 'Claude (sonnet, opus, haiku). Base URL optional for self-hosted proxies (LiteLLM, etc.).',
+    note: 'Claude models. Optional base URL for proxies.',
   },
   {
     id: 'openai',
     label: 'OpenAI',
-    note: 'GPT family. Base URL optional for compatible providers.',
+    note: 'GPT-compatible models and proxies.',
   },
 ]
 
@@ -32,18 +33,15 @@ export function ProvidersSection() {
   const localEnv = envs.data?.find((env) => env.kind === 'local' && env.status === 'running' && env.envToken)
 
   return (
-    <Card className="max-w-none">
-      <h2 className="mb-1 text-lg font-medium">AI provider keys</h2>
-      <p className="mb-4 text-sm text-neutral-400">
-        Keys are stored encrypted on disk. The built-in agent (OpenCode) uses
-        these from the local cc-env runtime.
-      </p>
+    <>
       {list.isLoading ? (
-        <p className="text-neutral-500">Loading…</p>
+        <SettingsPanel id="providers" title="Providers">
+          <p className="text-xs text-neutral-500">Loading…</p>
+        </SettingsPanel>
       ) : (
-        <div className="space-y-6">
+        <>
           {PROVIDERS.map((p) => (
-            <ProviderRow
+            <ProviderSection
               key={p.id}
               meta={p}
               cfg={list.data?.find((c) => c.provider === p.id) ?? {
@@ -57,18 +55,18 @@ export function ProvidersSection() {
               }}
             />
           ))}
-          <OpenAIOAuthRow env={localEnv ? {
+          <OpenAIOAuthSection env={localEnv ? {
             id: localEnv.id,
             kind: localEnv.kind,
             url: localEnv.url,
           } : null} envToken={localEnv?.envToken ?? null} />
-        </div>
+        </>
       )}
-    </Card>
+    </>
   )
 }
 
-function OpenAIOAuthRow({ env, envToken }: { env: EnvRef | null; envToken: string | null }) {
+function OpenAIOAuthSection({ env, envToken }: { env: EnvRef | null; envToken: string | null }) {
   const [state, setState] = useState<'idle' | 'pending' | 'connected' | 'failed'>('idle')
   const [message, setMessage] = useState<string | null>(null)
 
@@ -106,49 +104,38 @@ function OpenAIOAuthRow({ env, envToken }: { env: EnvRef | null; envToken: strin
   }
 
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-950 p-4">
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <div>
-          <div className="text-sm font-medium text-neutral-100">OpenAI ChatGPT subscription</div>
-          <div className="text-xs text-neutral-500">
-            Log in with ChatGPT Plus/Pro OAuth and use subscription-backed Codex/GPT models in OpenCode.
-          </div>
-        </div>
-        <span
-          className={
-            'shrink-0 rounded px-2 py-0.5 text-xs ' +
-            (state === 'connected'
-              ? 'bg-emerald-900/40 text-emerald-300'
-              : state === 'pending'
-                ? 'bg-amber-900/40 text-amber-200'
-                : 'bg-neutral-800 text-neutral-400')
-          }
-        >
-          {state === 'connected' ? 'connected' : state === 'pending' ? 'pending' : 'not connected'}
+    <SettingsPanel
+      id="chatgpt-login"
+      title="ChatGPT Login"
+      description={(
+        <span className="inline-flex items-center gap-2">
+          <span>Subscription-backed OpenAI models via OpenCode OAuth.</span>
+          <StatusPill state={state} />
         </span>
-      </div>
-      <p className="mb-3 text-xs text-neutral-500">
-        This uses the OpenCode ChatGPT OAuth plugin and stores tokens in the local OpenCode config for this cc-env.
-      </p>
-      <div className="flex gap-2">
-        <Button onClick={() => void onConnect()} disabled={!env || !envToken || state === 'pending'}>
-          {state === 'pending' ? 'Waiting…' : 'Connect OpenAI'}
-        </Button>
-        <Button onClick={() => void refreshStatus()} disabled={!env || !envToken || state === 'pending'}>
-          Refresh status
-        </Button>
-      </div>
-      {!env && <p className="mt-2 text-xs text-amber-300">No running local cc-env is available.</p>}
-      {message && (
-        <p className={state === 'failed' ? 'mt-2 text-xs text-red-300' : 'mt-2 text-xs text-neutral-400'}>
-          {message}
-        </p>
       )}
-    </div>
+    >
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-1.5">
+          <Button onClick={() => void onConnect()} disabled={!env || !envToken || state === 'pending'} className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700">
+            {state === 'pending' ? 'Waiting…' : 'Connect'}
+          </Button>
+          <Button onClick={() => void refreshStatus()} disabled={!env || !envToken || state === 'pending'} className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700">
+            Refresh
+          </Button>
+        </div>
+        <p className="text-xs leading-5 text-neutral-600">Tokens are stored in the local OpenCode config for this cc-env.</p>
+        {!env && <p className="text-xs text-amber-300">No running local cc-env is available.</p>}
+        {message && (
+          <p className={state === 'failed' ? 'text-xs text-red-300' : 'text-xs text-neutral-400'}>
+            {message}
+          </p>
+        )}
+      </div>
+    </SettingsPanel>
   )
 }
 
-function ProviderRow({
+function ProviderSection({
   meta,
   cfg,
   onChanged,
@@ -159,10 +146,15 @@ function ProviderRow({
 }) {
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(cfg.baseUrl ?? '')
+  const [modalOpen, setModalOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const setKey = trpc.settings.setProviderKey.useMutation()
   const setBase = trpc.settings.setProviderBaseUrl.useMutation()
   const del = trpc.settings.deleteProvider.useMutation()
+
+  useEffect(() => {
+    setBaseUrl(cfg.baseUrl ?? '')
+  }, [cfg.baseUrl])
 
   async function onSave() {
     setError(null)
@@ -180,6 +172,7 @@ function ProviderRow({
         })
       }
       setApiKey('')
+      setModalOpen(false)
       onChanged()
     } catch (err) {
       setError(extractTrpcMessage(err))
@@ -206,67 +199,130 @@ function ProviderRow({
   }
 
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-950 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <div className="text-sm font-medium text-neutral-100">{meta.label}</div>
-          <div className="text-xs text-neutral-500">{meta.note}</div>
-        </div>
-        <span
-          className={
-            'rounded px-2 py-0.5 text-xs ' +
-            (cfg.hasApiKey
-              ? 'bg-emerald-900/40 text-emerald-300'
-              : 'bg-neutral-800 text-neutral-400')
-          }
-        >
-          {cfg.hasApiKey ? 'configured' : 'not configured'}
+    <SettingsPanel
+      id={`${meta.id}-api`}
+      title={`${meta.label} API`}
+      description={(
+        <span className="inline-flex items-center gap-2">
+          <span>{meta.note}</span>
+          <StatusPill state={cfg.hasApiKey ? 'connected' : 'idle'} connectedLabel="configured" idleLabel="missing" />
         </span>
-      </div>
+      )}
+    >
       <div className="space-y-3">
-        <div>
-          <Label htmlFor={`${meta.id}-key`}>API key</Label>
-          <Input
-            id={`${meta.id}-key`}
-            type="password"
-            autoComplete="off"
-            placeholder={cfg.hasApiKey ? '•••••••• (stored; enter new value to rotate)' : 'sk-…'}
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </div>
-        <div>
-          <Label htmlFor={`${meta.id}-base`}>Base URL (optional)</Label>
-          <Input
-            id={`${meta.id}-base`}
-            type="url"
-            placeholder="https://api.anthropic.com"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-          />
-          <p className="mt-1 text-xs text-neutral-500">
-            For local proxies, use <code className="font-mono">http://localhost:&lt;port&gt;</code>.
-          </p>
-        </div>
-        {error && <FormError>{error}</FormError>}
-        <div className="flex gap-2">
+        {cfg.hasApiKey ? (
+          <div className="grid max-w-3xl gap-2 text-xs sm:grid-cols-2">
+            <div>
+              <div className="text-[11px] font-medium text-neutral-500">API key</div>
+              <div className="mt-1 font-mono text-neutral-300">••••••••</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-medium text-neutral-500">Base URL</div>
+              <div className="mt-1 truncate font-mono text-neutral-300">{cfg.baseUrl || 'Default'}</div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-neutral-500">No credentials saved.</p>
+        )}
+        <div className="flex gap-1.5">
           <Button
-            onClick={() => void onSave()}
-            disabled={setKey.isPending || setBase.isPending || (!apiKey.trim() && baseUrl === (cfg.baseUrl ?? ''))}
+            onClick={() => {
+              setError(null)
+              setApiKey('')
+              setBaseUrl(cfg.baseUrl ?? '')
+              setModalOpen(true)
+            }}
+            className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
           >
-            {setKey.isPending || setBase.isPending ? 'Saving…' : 'Save'}
+            {cfg.hasApiKey ? 'Edit' : 'Add credentials'}
           </Button>
           {cfg.hasApiKey && (
             <Button
               onClick={() => void onDelete()}
               disabled={del.isPending}
-              className="bg-red-700 hover:bg-red-600"
+              className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
             >
-              {del.isPending ? 'Deleting…' : 'Delete'}
+              {del.isPending ? 'Disconnecting…' : 'Disconnect'}
             </Button>
           )}
         </div>
+        {error && <FormError>{error}</FormError>}
       </div>
-    </div>
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={`${cfg.hasApiKey ? 'Edit' : 'Add'} ${meta.label} credentials`}
+        widthClass="max-w-lg"
+      >
+        <div>
+          <label className="mb-3 block">
+            <span className="block text-[11px] font-medium text-neutral-400">API key</span>
+            <Input
+              id={`${meta.id}-key`}
+              type="password"
+              autoComplete="off"
+              placeholder={cfg.hasApiKey ? 'Stored. Enter a new value to rotate.' : 'sk-…'}
+              value={apiKey}
+              className="mt-1 h-7 px-2 py-1 text-xs"
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="block text-[11px] font-medium text-neutral-400">Base URL</span>
+            <Input
+              id={`${meta.id}-base`}
+              type="url"
+              placeholder="Default provider URL"
+              value={baseUrl}
+              className="mt-1 h-7 px-2 py-1 text-xs"
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+          </label>
+          {error && <div className="mt-3"><FormError>{error}</FormError></div>}
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              onClick={() => setModalOpen(false)}
+              className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void onSave()}
+              disabled={setKey.isPending || setBase.isPending || (!apiKey.trim() && !cfg.hasApiKey)}
+              className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
+            >
+              {setKey.isPending || setBase.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </SettingsPanel>
+  )
+}
+
+function StatusPill({
+  state,
+  connectedLabel = 'connected',
+  idleLabel = 'not connected',
+}: {
+  state: 'idle' | 'pending' | 'connected' | 'failed'
+  connectedLabel?: string
+  idleLabel?: string
+}) {
+  return (
+    <span
+      className={
+        'shrink-0 rounded px-1.5 py-0.5 text-[10px] ' +
+        (state === 'connected'
+          ? 'bg-emerald-900/40 text-emerald-300'
+          : state === 'pending'
+            ? 'bg-amber-900/40 text-amber-200'
+            : state === 'failed'
+              ? 'bg-red-950/60 text-red-300'
+              : 'bg-neutral-900 text-neutral-500')
+      }
+    >
+      {state === 'connected' ? connectedLabel : state === 'pending' ? 'pending' : state === 'failed' ? 'failed' : idleLabel}
+    </span>
   )
 }
