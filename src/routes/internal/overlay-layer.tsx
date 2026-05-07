@@ -95,8 +95,8 @@ export function OverlayLayerApp({
     if (initialRequest) return
     const channel = new BroadcastChannel(OVERLAY_CHANNEL)
     channel.postMessage({ requestId: 'overlay-layer', type: 'ready' } satisfies OverlayResponse)
-    channel.onmessage = (event: MessageEvent<OverlayRequest | { type: 'close' }>) => {
-      if (event.data.type !== 'close') setRequest(event.data)
+    channel.onmessage = (event: MessageEvent<OverlayRequest | OverlayResponse | { type: 'close' }>) => {
+      if (isOverlayRequest(event.data)) setRequest(event.data)
       if (event.data.type === 'close') setRequest(null)
     }
     return () => channel.close()
@@ -115,6 +115,14 @@ export function OverlayLayerApp({
   if (!request) return <div className="min-h-screen bg-transparent" />
 
   return <OverlayRequestRenderer request={request} respond={respond} />
+}
+
+function isOverlayRequest(message: OverlayRequest | OverlayResponse | { type: 'close' }): message is OverlayRequest {
+  return message.type === 'new-agent-chat'
+    || message.type === 'folder-picker'
+    || message.type === 'command-palette'
+    || message.type === 'confirm'
+    || message.type === 'text-input'
 }
 
 function OverlayRequestRenderer({
