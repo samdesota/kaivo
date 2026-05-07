@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { envTrpc } from '../../../env-trpc'
+import { openFolderPickerOverlay, openNewAgentChatOverlay } from '../../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../../lib/utils'
-import { FolderPickerModal } from './folder-picker-modal'
-import { NewAgentChatModal } from './new-agent-chat-modal'
+import { useEnv } from '../env-context'
 
 interface RepoRow {
   id: string
@@ -25,9 +25,18 @@ export function EmptySessionState({
   const repos = envTrpc.repo.list.useQuery(undefined, { refetchInterval: 5_000 })
   const start = envTrpc.agent.sessionStart.useMutation()
   const [err, setErr] = useState<string | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const envContext = useEnv()
 
   if (workspaceId) {
+    async function startNewChat() {
+      const sessionId = await openNewAgentChatOverlay({
+        workspaceId,
+        env: envContext.env,
+        envToken: envContext.envToken,
+      })
+      if (sessionId) onCreated(sessionId)
+    }
+
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
         <div>
@@ -35,17 +44,11 @@ export function EmptySessionState({
           <p className="mt-1 text-sm text-neutral-400">Start a new agent chat from a folder or repo config.</p>
         </div>
         <button
-          onClick={() => setPickerOpen(true)}
+          onClick={() => void startNewChat()}
           className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600"
         >
           Start a new agent chat
         </button>
-        <NewAgentChatModal
-          open={pickerOpen}
-          workspaceId={workspaceId}
-          onClose={() => setPickerOpen(false)}
-          onCreated={onCreated}
-        />
       </div>
     )
   }
@@ -61,6 +64,15 @@ export function EmptySessionState({
   }
 
   const repoRows = (repos.data as RepoRow[] | undefined) ?? []
+
+  async function chooseFolder() {
+    const path = await openFolderPickerOverlay({
+      env: envContext.env,
+      envToken: envContext.envToken,
+      busy: start.isPending,
+    })
+    if (path) await createIn(path)
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6">
@@ -101,7 +113,7 @@ export function EmptySessionState({
           ))}
           <div className="flex flex-col gap-1 pt-1">
             <button
-              onClick={() => setPickerOpen(true)}
+              onClick={() => void chooseFolder()}
               disabled={start.isPending}
               className="rounded border border-dashed border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-brand-500/60 hover:text-neutral-100 disabled:opacity-60"
             >
@@ -123,15 +135,6 @@ export function EmptySessionState({
           </div>
         )}
       </div>
-      <FolderPickerModal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        busy={start.isPending}
-        onSelect={(absPath) => {
-          setPickerOpen(false)
-          void createIn(absPath)
-        }}
-      />
     </div>
   )
 }

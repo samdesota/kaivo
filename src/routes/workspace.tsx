@@ -29,13 +29,12 @@ import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
-import { openNewAgentChatOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
+import { openCommandPaletteOverlay, openNewAgentChatOverlay, openTextInputOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
-import { CommandPalette } from './env/shell/command-palette'
 import { ShellsDropdown } from './env/shell/dropdowns'
 import { NewSessionPopover } from './env/agent/session-tabs'
 import { NewAgentChatModal } from './env/agent/new-agent-chat-modal'
@@ -252,7 +251,6 @@ function WorkspaceShell({
   dispatchWorkspaceState: WorkspaceUiDispatch
 }) {
   const ctx = useWorkspaceContext()
-  const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
   const agentCollapsed = ctx.uiState.agentCollapsed
@@ -276,6 +274,19 @@ function WorkspaceShell({
     const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
     if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
   }, [ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState])
+  const openCommandPalette = useCallback(async () => {
+    const target = ctx.localEnvTarget
+    if (!target?.available || !target.token) return
+    const result = await openCommandPaletteOverlay({
+      env: target.env,
+      envToken: target.token,
+      workspaceId: ctx.workspace.id,
+      activeSessionId: ctx.uiState.activeAgentSessionId,
+      hasActiveTab: ctx.uiState.workspaceTabs.length > 0,
+    })
+    if (result.type === 'open-pane') openPane(result.content)
+    if (result.type === 'close-tab') closeActiveTab()
+  }, [closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs.length, ctx.workspace.id, openPane])
 
   useEffect(() => {
     prewarmOverlayLayer()
@@ -285,7 +296,7 @@ function WorkspaceShell({
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setPaletteOpen((v) => !v)
+        void openCommandPalette()
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
@@ -296,7 +307,7 @@ function WorkspaceShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [agentCollapsed, setAgentCollapsed])
+  }, [agentCollapsed, openCommandPalette, setAgentCollapsed])
 
   return (
     <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
@@ -330,21 +341,10 @@ function WorkspaceShell({
           ctx.uiState.workspaceTabs.length > 0 ? (
             <WorkspaceTabPane dispatchWorkspaceState={dispatchWorkspaceState} />
           ) : (
-            <WorkspaceEmptyPaneCta onOpenPalette={() => setPaletteOpen(true)} />
+            <WorkspaceEmptyPaneCta onOpenPalette={() => void openCommandPalette()} />
           )
         }
       />
-      <WorkspaceEnvTargetProvider>
-        <CommandPalette
-          open={paletteOpen}
-          onClose={() => setPaletteOpen(false)}
-          onOpenContent={openPane}
-          onCloseTab={closeActiveTab}
-          hasActiveTab={ctx.uiState.workspaceTabs.length > 0}
-          activeSessionId={ctx.uiState.activeAgentSessionId}
-          workspaceId={ctx.workspace.id}
-        />
-      </WorkspaceEnvTargetProvider>
     </div>
   )
 }
@@ -402,7 +402,6 @@ export function WorkspaceSidebar({
   })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
   const [newChatContext, setNewChatContext] = useState<null | { mode: 'new'; folderId?: string | null } | { mode: 'existing'; workspace: WorkspaceSummary }>(null)
-  const [folderCreate, setFolderCreate] = useState<{ parentId: string | null; name: string } | null>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [dragPlacement, setDragPlacement] = useState<DropPlacement>('after')
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
@@ -417,7 +416,6 @@ export function WorkspaceSidebar({
     }
   })
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const folderInputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
   const dragPointerOffsetRef = useRef<{ x: number; y: number } | null>(null)
   const lastProjectionRef = useRef<SidebarDropProjection | null>(null)
@@ -429,12 +427,6 @@ export function WorkspaceSidebar({
       inputRef.current?.select()
     }
   }, [edit.editingId])
-
-  useEffect(() => {
-    if (!folderCreate) return
-    const id = requestAnimationFrame(() => folderInputRef.current?.focus())
-    return () => cancelAnimationFrame(id)
-  }, [folderCreate])
 
   async function saveRename() {
     if (!edit.editingId) return
@@ -488,12 +480,15 @@ export function WorkspaceSidebar({
     })
   }
 
-  async function submitFolderCreate() {
-    if (!folderCreate) return
-    const name = folderCreate.name.trim()
+  async function openFolderCreate(parentId: string | null) {
+    const name = await openTextInputOverlay({
+      title: 'New workspace folder',
+      message: 'Create a folder for organizing project workspaces.',
+      label: 'Folder name',
+      confirmLabel: 'Create folder',
+    })
     if (!name) return
-    await createFolder.mutateAsync({ name, parentId: folderCreate.parentId })
-    setFolderCreate(null)
+    await createFolder.mutateAsync({ name, parentId })
   }
 
   async function selectCreatedChat(sessionId: string, workspaceId?: string) {
@@ -647,7 +642,7 @@ export function WorkspaceSidebar({
             <Plus className="h-4 w-4" aria-hidden="true" />
           </button>
           <button
-            onClick={() => setFolderCreate({ parentId: null, name: '' })}
+            onClick={() => void openFolderCreate(null)}
             disabled={createFolder.isPending}
             className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
             aria-label="Create workspace folder"
@@ -690,52 +685,6 @@ export function WorkspaceSidebar({
         </WorkspaceAgentEnvProvider>
       )}
     </aside>
-    {folderCreate && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submitFolderCreate()
-          }}
-          className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl"
-        >
-          <div className="border-b border-neutral-800 px-4 py-3">
-            <h2 className="text-sm font-semibold text-neutral-100">New workspace folder</h2>
-            <p className="mt-1 text-xs text-neutral-500">Create a folder for organizing project workspaces.</p>
-          </div>
-          <div className="p-4">
-            <label className="block space-y-1 text-xs text-neutral-400">
-              <span>Folder name</span>
-              <input
-                ref={folderInputRef}
-                value={folderCreate.name}
-                onChange={(event) => setFolderCreate({ ...folderCreate, name: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') setFolderCreate(null)
-                }}
-                className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-brand-500"
-              />
-            </label>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-neutral-800 px-4 py-3">
-            <button
-              type="button"
-              onClick={() => setFolderCreate(null)}
-              className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={createFolder.isPending || !folderCreate.name.trim()}
-              className="rounded bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-            >
-              {createFolder.isPending ? 'Creating...' : 'Create folder'}
-            </button>
-          </div>
-        </form>
-      </div>
-    )}
     </>
   )
 
@@ -771,7 +720,7 @@ export function WorkspaceSidebar({
                   <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
                 <button
-                  onClick={() => setFolderCreate({ parentId: folder.id, name: '' })}
+                  onClick={() => void openFolderCreate(folder.id)}
                   disabled={createFolder.isPending}
                   className="rounded px-1 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
                   aria-label={`Create folder in ${folder.name}`}
@@ -1142,10 +1091,15 @@ function WorkspaceSidebarNewChatButton({
   onCreated: (sessionId: string) => void | Promise<void>
 }) {
   const queryClient = useQueryClient()
+  const ctx = useWorkspaceContext()
+  const target = ctx.localEnvTarget
   return (
     <div className="opacity-0 transition-opacity group-hover:opacity-100">
       <NewSessionPopover
         workspaceId={workspaceId}
+        onOpenNewChat={target?.token ? async () => {
+          await openNewAgentChatOverlay({ workspaceId, env: target.env, envToken: target.token! })
+        } : undefined}
         onCreated={async (sessionId) => {
           await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId }) })
           await onCreated(sessionId)

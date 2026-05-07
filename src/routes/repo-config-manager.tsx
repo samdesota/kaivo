@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
+import { openConfirmOverlay } from '../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../lib/trpc-plain'
 import { extractTrpcMessage } from '../lib/utils'
 import { RepoCombobox } from './repo-combobox'
@@ -205,7 +206,13 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
   }
 
   async function onDelete() {
-    if (!confirm(`Delete config "${cfg.data?.name}"? Cloned repos using it remain but lose the link.`)) return
+    const confirmed = await openConfirmOverlay({
+      title: 'Delete repo config?',
+      message: `Delete config "${cfg.data?.name}"? Cloned repos using it remain but lose the link.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!confirmed) return
     try {
       await remove.mutateAsync({ id: configId })
       await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.list') })
@@ -215,7 +222,13 @@ export function RepoConfigEditor({ configId }: { configId: string }) {
   }
 
   async function onRemoveFile(fileId: string, path: string) {
-    if (!confirm(`Remove file "${path}" from this config?`)) return
+    const confirmed = await openConfirmOverlay({
+      title: 'Remove config file?',
+      message: `Remove file "${path}" from this config?`,
+      confirmLabel: 'Remove',
+      destructive: true,
+    })
+    if (!confirmed) return
     try {
       await removeFile.mutateAsync({ configId, fileId })
       await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.listFiles', { configId }) })

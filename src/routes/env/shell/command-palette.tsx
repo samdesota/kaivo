@@ -172,10 +172,10 @@ export function CommandPalette({
 
   if (!open) return null
 
-  function pick(i: number) {
+  async function pick(i: number) {
     const item = filtered[i]
     if (!item) return
-    void item.run()
+    await item.run()
     onClose()
   }
 
@@ -208,7 +208,7 @@ export function CommandPalette({
               setActive((a) => Math.max(0, a - 1))
             } else if (e.key === 'Enter') {
               e.preventDefault()
-              pick(active)
+              void pick(active)
             }
           }}
           placeholder="Search shells, previews, actions…"
@@ -224,7 +224,7 @@ export function CommandPalette({
               <li
                 key={it.id}
                 onMouseEnter={() => setActive(i)}
-                onClick={() => pick(i)}
+                onClick={() => void pick(i)}
                 className={
                   'flex cursor-pointer items-center gap-3 px-4 py-1.5 text-sm ' +
                   (i === active ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-300')

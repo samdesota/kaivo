@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
 import { handleAgentUiOpenPaneEvent } from '../../../lib/agent-ui-open-pane'
+import { openConfirmOverlay } from '../../../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
@@ -253,7 +254,13 @@ function AgentConnectivityMenu() {
   }, [open])
 
   async function onClick() {
-    if (!confirm('Restart agent? Active runs will be interrupted.')) return
+    const confirmed = await openConfirmOverlay({
+      title: 'Restart agent?',
+      message: 'Active runs will be interrupted.',
+      confirmLabel: 'Restart',
+      destructive: true,
+    })
+    if (!confirmed) return
     setErr(null)
     try {
       await restart.mutateAsync()

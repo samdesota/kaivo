@@ -1,13 +1,32 @@
 import { createRoot, type Root } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { EnvRef } from './env-client'
 import { browserApi } from './browser-api'
+import { makeTrpcClient, trpc } from '../trpc'
 import { OVERLAY_CHANNEL, OverlayLayerApp, type OverlayRequest, type OverlayResponse } from '../routes/internal/overlay-layer'
+import type { PaneContent } from '../routes/env/shell/tab-state'
+import type { NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
 
 type NewAgentChatInput = {
-  workspaceId: string
+  workspaceId?: string
+  workspaceName?: string
+  initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  folderId?: string | null
   env: EnvRef & { label: string }
   envToken: string
 }
+
+export type NewAgentChatOverlayResult = { sessionId: string; workspaceId?: string }
+
+type EnvOverlayInput = {
+  env: EnvRef & { label: string }
+  envToken: string
+}
+
+export type CommandPaletteOverlayResult =
+  | { type: 'open-pane'; content: PaneContent }
+  | { type: 'close-tab' }
+  | { type: 'closed' }
 
 let detachedOverlayId: string | null = null
 let readyPromise: Promise<void> | null = null
@@ -20,10 +39,93 @@ export function prewarmOverlayLayer(): void {
 }
 
 export async function openNewAgentChatOverlay(input: NewAgentChatInput): Promise<string | null> {
+  const result = await openNewAgentChatOverlayDetailed(input)
+  return result?.sessionId ?? null
+}
+
+export async function openNewAgentChatOverlayDetailed(input: NewAgentChatInput): Promise<NewAgentChatOverlayResult | null> {
   const request: OverlayRequest = {
-    requestId: `overlay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    requestId: makeOverlayRequestId(),
     type: 'new-agent-chat',
     ...input,
+  }
+
+  const response = await openOverlayRequest(request)
+  if (response.type === 'created-agent-chat') return { sessionId: response.sessionId, workspaceId: response.workspaceId }
+  if (response.type === 'closed') return null
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openFolderPickerOverlay(
+  input: EnvOverlayInput & { title?: string; busy?: boolean },
+): Promise<string | null> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'folder-picker',
+    ...input,
+  })
+  if (response.type === 'selected-folder') return response.path
+  if (response.type === 'closed') return null
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openCommandPaletteOverlay(
+  input: EnvOverlayInput & {
+    workspaceId?: string
+    activeSessionId?: string | null
+    hasActiveTab: boolean
+  },
+): Promise<CommandPaletteOverlayResult> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'command-palette',
+    ...input,
+  })
+  if (response.type === 'open-pane') return { type: 'open-pane', content: response.content }
+  if (response.type === 'close-tab') return { type: 'close-tab' }
+  if (response.type === 'closed') return { type: 'closed' }
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openConfirmOverlay(input: {
+  title: string
+  message: string
+  confirmLabel?: string
+  cancelLabel?: string
+  destructive?: boolean
+}): Promise<boolean> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'confirm',
+    ...input,
+  })
+  if (response.type === 'confirmed') return response.confirmed
+  if (response.type === 'closed') return false
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openTextInputOverlay(input: {
+  title: string
+  message?: string
+  label: string
+  initialValue?: string
+  placeholder?: string
+  confirmLabel?: string
+  cancelLabel?: string
+}): Promise<string | null> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'text-input',
+    ...input,
+  })
+  if (response.type === 'text-submitted') return response.value
+  if (response.type === 'closed') return null
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+async function openOverlayRequest(request: OverlayRequest): Promise<OverlayResponse> {
+  if (request.type !== 'confirm' && request.type !== 'text-input' && !request.envToken) {
+    throw new Error('env token is required for env overlays')
   }
 
   if (browserApi.isAvailable()) {
@@ -36,7 +138,7 @@ export async function openNewAgentChatOverlay(input: NewAgentChatInput): Promise
   return openFallbackOverlay(request)
 }
 
-async function openElectronOverlay(request: OverlayRequest): Promise<string | null> {
+async function openElectronOverlay(request: OverlayRequest): Promise<OverlayResponse> {
   await ensureElectronOverlay()
   if (!detachedOverlayId) throw new Error('overlay did not initialize')
 
@@ -46,15 +148,14 @@ async function openElectronOverlay(request: OverlayRequest): Promise<string | nu
 
   const channel = new BroadcastChannel(OVERLAY_CHANNEL)
   try {
-    return await new Promise<string | null>((resolve, reject) => {
+    return await new Promise<OverlayResponse>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error('overlay modal timed out')), 120_000)
       channel.onmessage = (event: MessageEvent<OverlayResponse>) => {
         const response = event.data
         if (response.requestId !== request.requestId) return
         window.clearTimeout(timeout)
-        if (response.type === 'created-agent-chat') resolve(response.sessionId)
-        else if (response.type === 'closed') resolve(null)
-        else if (response.type === 'error') reject(new Error(response.message))
+        if (response.type === 'error') reject(new Error(response.message))
+        else resolve(response)
       }
       channel.postMessage(request)
     })
@@ -103,11 +204,13 @@ function waitForOverlayReady(): Promise<void> {
   })
 }
 
-function openFallbackOverlay(request: OverlayRequest): Promise<string | null> {
+function openFallbackOverlay(request: OverlayRequest): Promise<OverlayResponse> {
   const host = document.createElement('div')
   host.dataset.overlayRoot = 'true'
   document.body.appendChild(host)
   let root: Root | null = createRoot(host)
+  const queryClient = new QueryClient()
+  const trpcClient = makeTrpcClient()
 
   function cleanup() {
     root?.unmount()
@@ -117,16 +220,23 @@ function openFallbackOverlay(request: OverlayRequest): Promise<string | null> {
 
   return new Promise((resolve, reject) => {
     root?.render(
-      <OverlayLayerApp
-        initialRequest={request}
-        onResponse={(response) => {
-          if (response.requestId !== request.requestId) return
-          cleanup()
-          if (response.type === 'created-agent-chat') resolve(response.sessionId)
-          else if (response.type === 'closed') resolve(null)
-          else if (response.type === 'error') reject(new Error(response.message))
-        }}
-      />,
+      <trpc.Provider client={trpcClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          <OverlayLayerApp
+            initialRequest={request}
+            onResponse={(response) => {
+              if (response.requestId !== request.requestId) return
+              cleanup()
+              if (response.type === 'error') reject(new Error(response.message))
+              else resolve(response)
+            }}
+          />
+        </QueryClientProvider>
+      </trpc.Provider>,
     )
   })
+}
+
+function makeOverlayRequestId(): string {
+  return `overlay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }

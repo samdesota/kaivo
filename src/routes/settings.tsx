@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
 import { trpcQueryKey } from '../lib/trpc-plain'
 import { Button, Card, FormError, Input } from '../components/ui'
+import { openConfirmOverlay } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { ProvidersSection } from './settings/providers'
 import { FONT_SIZE_BOUNDS, useFontSize } from '../lib/ui-prefs'
@@ -38,7 +39,13 @@ export function SettingsPage() {
 
   async function onDisconnect() {
     setError(null)
-    if (!confirm('Disconnect the GitHub App? This only removes local metadata; uninstall from GitHub separately.')) return
+    const confirmed = await openConfirmOverlay({
+      title: 'Disconnect GitHub App?',
+      message: 'This only removes local metadata; uninstall from GitHub separately.',
+      confirmLabel: 'Disconnect',
+      destructive: true,
+    })
+    if (!confirmed) return
     try {
       await disconnect.mutateAsync()
       await status.refetch()

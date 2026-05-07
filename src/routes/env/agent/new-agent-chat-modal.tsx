@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
+import { openConfirmOverlay, openNewAgentChatOverlayDetailed } from '../../../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
+import { useEnv } from '../env-context'
 import { FolderPickerModal } from './folder-picker-modal'
 import {
   defaultWorkspaceName,
@@ -44,18 +46,33 @@ export function NewAgentChatModal({
   onClose: () => void
   onCreated: (sessionId: string, workspaceId?: string) => void
 }) {
-  if (!open) return null
+  const envContext = useEnv()
+  const launchedRef = useRef(false)
 
-  return (
-    <NewAgentChatOverlay
-      workspaceId={workspaceId}
-      workspaceName={workspaceName}
-      initialWorkspaceMode={initialWorkspaceMode}
-      folderId={folderId}
-      onClose={onClose}
-      onCreated={onCreated}
-    />
-  )
+  useEffect(() => {
+    if (!open) {
+      launchedRef.current = false
+      return
+    }
+    if (launchedRef.current) return
+    launchedRef.current = true
+    void openNewAgentChatOverlayDetailed({
+      workspaceId,
+      workspaceName,
+      initialWorkspaceMode,
+      folderId,
+      env: envContext.env,
+      envToken: envContext.envToken,
+    }).then((result) => {
+      if (result) onCreated(result.sessionId, result.workspaceId)
+      onClose()
+    }).catch((error) => {
+      console.warn('new agent chat overlay failed', error)
+      onClose()
+    })
+  }, [envContext.env, envContext.envToken, folderId, initialWorkspaceMode, onClose, onCreated, open, workspaceId, workspaceName])
+
+  return null
 }
 
 export function NewAgentChatOverlay({
@@ -156,7 +173,13 @@ export function NewAgentChatOverlay({
   const workspaceNameValue = resolveWorkspaceName(selection, workspaceNameDraft).name
 
   async function removeWorktree(worktree: RepoWorktree) {
-    if (!window.confirm(`Delete ${worktree.name}/${worktree.worktreeName}?\n\n${worktree.workingDir}`)) return
+    const confirmed = await openConfirmOverlay({
+      title: `Delete ${worktree.name}/${worktree.worktreeName}?`,
+      message: worktree.workingDir,
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!confirmed) return
     setError(null)
     try {
       await deleteWorktree.mutateAsync({ repoId: worktree.id })
