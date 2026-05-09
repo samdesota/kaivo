@@ -10,8 +10,9 @@ import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
 import { QuestionBanner } from './parts/question-banner'
+import { PermissionBanner } from './parts/permission-banner'
 import { TodosPanel } from './todos-panel'
-import { flattenParts, type TranscriptState } from './transcript-store'
+import { flattenParts, type PermissionRequest, type TranscriptState } from './transcript-store'
 import { PartRenderer } from './parts'
 import { OpenStateProvider } from './parts/open-state'
 import { SessionTabs } from './session-tabs'
@@ -226,6 +227,120 @@ function ContextUsageBar({ used, limit }: { used: number; limit: number }) {
   )
 }
 
+function PermissionApprovalTray({
+  requests,
+  sessionId,
+  onOptimisticDismiss,
+  onRestoreDismissed,
+}: {
+  requests: PermissionRequest[]
+  sessionId: string
+  onOptimisticDismiss: (ids: string[]) => void
+  onRestoreDismissed: (ids: string[]) => void
+}) {
+  const approve = envTrpc.agent.sessionApprove.useMutation()
+  const reject = envTrpc.agent.sessionReject.useMutation()
+  const [err, setErr] = useState<string | null>(null)
+  const busy = approve.isPending || reject.isPending
+
+  async function approveOne(req: PermissionRequest, always: boolean) {
+    if (busy) return
+    setErr(null)
+    onOptimisticDismiss([req.id])
+    try {
+      await approve.mutateAsync({ sessionId, permissionId: req.id, always })
+    } catch (e) {
+      onRestoreDismissed([req.id])
+      setErr(extractTrpcMessage(e))
+    }
+  }
+
+  async function rejectOne(req: PermissionRequest) {
+    if (busy) return
+    setErr(null)
+    onOptimisticDismiss([req.id])
+    try {
+      await reject.mutateAsync({ sessionId, permissionId: req.id })
+    } catch (e) {
+      onRestoreDismissed([req.id])
+      setErr(extractTrpcMessage(e))
+    }
+  }
+
+  async function approveAll() {
+    if (busy) return
+    const ids = requests.map((req) => req.id)
+    setErr(null)
+    onOptimisticDismiss(ids)
+    try {
+      await Promise.all(requests.map((req) => approve.mutateAsync({ sessionId, permissionId: req.id, always: false })))
+    } catch (e) {
+      onRestoreDismissed(ids)
+      setErr(extractTrpcMessage(e))
+    }
+  }
+
+  async function rejectAll() {
+    if (busy) return
+    const ids = requests.map((req) => req.id)
+    setErr(null)
+    onOptimisticDismiss(ids)
+    try {
+      await Promise.all(requests.map((req) => reject.mutateAsync({ sessionId, permissionId: req.id })))
+    } catch (e) {
+      onRestoreDismissed(ids)
+      setErr(extractTrpcMessage(e))
+    }
+  }
+
+  if (requests.length === 0) return null
+
+  return (
+    <div className="shrink-0 border-t border-amber-500/30 bg-neutral-975 p-1.5">
+      <div className="mb-1 px-1">
+        <div className="text-[11px] font-medium text-amber-200">
+          {requests.length} permission approval{requests.length === 1 ? '' : 's'} required
+        </div>
+      </div>
+      <div className="max-h-40 space-y-1 overflow-auto pr-1">
+        {requests.map((req) => (
+          <PermissionBanner
+            key={req.id}
+            req={req}
+            compact
+            busy={busy}
+            onApprove={(always) => approveOne(req, always)}
+            onReject={() => rejectOne(req)}
+          />
+        ))}
+      </div>
+      <div className="mt-1.5 flex justify-end gap-1.5 border-t border-amber-500/20 pt-1.5">
+        <button
+          type="button"
+          onClick={() => void approveAll()}
+          disabled={busy}
+          className="rounded bg-amber-500 px-1.5 py-0 text-[10px] font-medium text-black hover:bg-amber-400 disabled:opacity-60"
+        >
+          {approve.isPending ? 'Approving…' : 'Approve all'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void rejectAll()}
+          disabled={busy}
+          className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0 text-[10px] text-neutral-200 hover:bg-neutral-800 disabled:opacity-60"
+        >
+          {reject.isPending ? 'Rejecting…' : 'Reject all'}
+        </button>
+      </div>
+      {err && (
+        <div className="mt-2 rounded border border-red-900 bg-red-950/50 px-2 py-1 text-[11px] text-red-300">
+          {err}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * Bounces opencode in the env (env-side `agent.restart`). Useful after
  * provider keys change in /settings — opencode reloads them on boot.
@@ -374,6 +489,7 @@ function SessionPane({
   const chat = useChatSession(sessionId)
   const chatStore = useChatStateStore()
   const { state, loading, error, reconnecting, running, status } = chat
+  const [optimisticDismissedPermissionIds, setOptimisticDismissedPermissionIds] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     chatDebug('session-pane:snapshot', {
@@ -405,10 +521,41 @@ function SessionPane({
   )
 
   const statusData = status
-  const pendingFromStatus = statusData?.pendingApprovals ?? []
-  const pendingCount = state.permissions.size > 0 ? state.permissions.size : pendingFromStatus.length
+  const pendingFromStatus = useMemo(() => statusData?.pendingApprovals ?? [], [statusData?.pendingApprovals])
+
+  useEffect(() => {
+    if (optimisticDismissedPermissionIds.size === 0) return
+    const pendingIds = new Set<string>([
+      ...Array.from(state.permissions.keys()),
+      ...pendingFromStatus.map((p) => p.id),
+    ])
+    let changed = false
+    const next = new Set(optimisticDismissedPermissionIds)
+    for (const id of optimisticDismissedPermissionIds) {
+      if (!pendingIds.has(id)) {
+        next.delete(id)
+        changed = true
+      }
+    }
+    if (changed) setOptimisticDismissedPermissionIds(next)
+  }, [optimisticDismissedPermissionIds, pendingFromStatus, state.permissions])
 
   const activeQuestions = Array.from(state.questions.values())
+  const activePermissions = Array.from(state.permissions.values())
+  for (const p of pendingFromStatus) {
+    if (state.permissions.has(p.id)) continue
+    activePermissions.push({
+      id: p.id,
+      title: p.title,
+      pattern: p.pattern,
+      metadata: p.metadata,
+      callID: p.callID,
+      createdAt: p.createdAt,
+    })
+  }
+  activePermissions.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+  const visiblePermissions = activePermissions.filter((req) => !optimisticDismissedPermissionIds.has(req.id))
+  const visiblePermissionCount = visiblePermissions.length
 
   const parts = useMemo(() => flattenParts(state), [state])
   const renderables = useMemo(() => {
@@ -485,7 +632,6 @@ function SessionPane({
                     >
                       <PartRenderer
                         part={part}
-                        state={state}
                         role={role}
                         sessionId={sessionId}
                         onOpenShell={onOpenPane}
@@ -506,11 +652,25 @@ function SessionPane({
           </div>
         )}
         <TodosPanel todos={state.todos} />
+        <PermissionApprovalTray
+          requests={visiblePermissions}
+          sessionId={sessionId}
+          onOptimisticDismiss={(ids) => {
+            setOptimisticDismissedPermissionIds((prev) => new Set([...prev, ...ids]))
+          }}
+          onRestoreDismissed={(ids) => {
+            setOptimisticDismissedPermissionIds((prev) => {
+              const next = new Set(prev)
+              for (const id of ids) next.delete(id)
+              return next
+            })
+          }}
+        />
         <Composer
           sessionId={sessionId}
           pendingApprovalReason={
-            pendingCount > 0
-              ? `Waiting on ${pendingCount} permission approval${pendingCount === 1 ? '' : 's'}.`
+            visiblePermissionCount > 0
+              ? `Waiting on ${visiblePermissionCount} permission approval${visiblePermissionCount === 1 ? '' : 's'}.`
               : activeQuestions.length > 0
                 ? `Agent is asking ${activeQuestions.length} question${activeQuestions.length === 1 ? '' : 's'}.`
                 : null

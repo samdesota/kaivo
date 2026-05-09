@@ -1,11 +1,8 @@
 import type { PaneContent } from '../../shell/tab-state'
 import { XTermAttached } from '../../xterm-attached'
 import { useOpenState } from './open-state'
-import { PermissionBanner } from './permission-banner'
 import {
   flattenParts,
-  permissionForCall,
-  type PermissionRequest,
   type Part,
   type TranscriptState,
 } from '../transcript-store'
@@ -27,13 +24,11 @@ interface ToolState {
 
 export function ToolPart({
   part,
-  permission,
   sessionId,
   onOpenShell,
   childTranscript,
 }: {
   part: Part
-  permission?: PermissionRequest
   sessionId: string
   onOpenShell?: (content: PaneContent) => void
   childTranscript?: TranscriptState
@@ -49,8 +44,6 @@ export function ToolPart({
         partId={part.id}
         callID={callID}
         state={state}
-        permission={permission}
-        sessionId={sessionId}
       />
     )
   }
@@ -58,8 +51,6 @@ export function ToolPart({
     return (
       <PtyToolPart
         state={state}
-        permission={permission}
-        sessionId={sessionId}
         onOpenShell={onOpenShell}
       />
     )
@@ -69,8 +60,6 @@ export function ToolPart({
       <ApplyPatchToolPart
         partId={part.id}
         state={state}
-        permission={permission}
-        sessionId={sessionId}
       />
     )
   }
@@ -79,7 +68,6 @@ export function ToolPart({
       partId={part.id}
       tool={tool}
       state={state}
-      permission={permission}
       sessionId={sessionId}
       childTranscript={childTranscript}
       onOpenShell={onOpenShell}
@@ -90,13 +78,9 @@ export function ToolPart({
 function ApplyPatchToolPart({
   partId,
   state,
-  permission,
-  sessionId,
 }: {
   partId: string
   state: ToolState
-  permission?: PermissionRequest
-  sessionId: string
 }) {
   const [open, setOpen] = useOpenState(`tool:${partId}`, true)
   const patchText = typeof state.input?.patchText === 'string' ? state.input.patchText : ''
@@ -134,11 +118,6 @@ function ApplyPatchToolPart({
               {state.error}
             </div>
           )}
-        </ToolBody>
-      )}
-      {permission && (
-        <ToolBody>
-          <PermissionBanner req={permission} sessionId={sessionId} />
         </ToolBody>
       )}
     </div>
@@ -184,14 +163,10 @@ function BashToolPart({
   partId,
   callID,
   state,
-  permission,
-  sessionId,
 }: {
   partId: string
   callID: string
   state: ToolState
-  permission?: PermissionRequest
-  sessionId: string
 }) {
   const running = state.status === 'running' || state.status === 'pending'
   const [open, setOpen] = useOpenState(`tool:${partId}`, running)
@@ -246,11 +221,6 @@ function BashToolPart({
           )}
         </ToolBody>
       )}
-      {permission && (
-        <ToolBody>
-          <PermissionBanner req={permission} sessionId={sessionId} />
-        </ToolBody>
-      )}
       {!callID && null}
     </div>
   )
@@ -291,13 +261,9 @@ function ToolBody({ children }: { children: React.ReactNode }) {
 
 function PtyToolPart({
   state,
-  permission,
-  sessionId,
   onOpenShell,
 }: {
   state: ToolState
-  permission?: PermissionRequest
-  sessionId: string
   onOpenShell?: (content: PaneContent) => void
 }) {
   const shellId = state.metadata?.cloudcode_shell_id
@@ -323,11 +289,6 @@ function PtyToolPart({
           </button>
         )}
       </div>
-      {permission && (
-        <ToolBody>
-          <PermissionBanner req={permission} sessionId={sessionId} />
-        </ToolBody>
-      )}
     </div>
   )
 }
@@ -336,7 +297,6 @@ function GenericToolPart({
   partId,
   tool,
   state,
-  permission,
   sessionId,
   childTranscript,
   onOpenShell,
@@ -344,7 +304,6 @@ function GenericToolPart({
   partId: string
   tool: string
   state: ToolState
-  permission?: PermissionRequest
   sessionId: string
   childTranscript?: TranscriptState
   onOpenShell?: (content: PaneContent) => void
@@ -416,11 +375,6 @@ function GenericToolPart({
           </div>
         </ToolBody>
       )}
-      {permission && (
-        <ToolBody>
-          <PermissionBanner req={permission} sessionId={sessionId} />
-        </ToolBody>
-      )}
     </div>
   )
 }
@@ -465,13 +419,10 @@ function SubagentTranscript({
         }
         if (p.type === 'reasoning') return <ReasoningPart key={p.id} part={p} />
         if (p.type === 'tool') {
-          const callID = (p as { callID?: string }).callID
-          const perm = callID ? permissionForCall(transcript, callID) : undefined
           return (
             <ToolPart
               key={p.id}
               part={p}
-              permission={perm}
               sessionId={sessionId}
               onOpenShell={onOpenShell}
             />

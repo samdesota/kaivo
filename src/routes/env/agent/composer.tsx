@@ -192,11 +192,6 @@ export function Composer({
           <span className="ml-auto text-[10px] text-neutral-500">esc to stop</span>
         </div>
       )}
-      {pendingApprovalReason && (
-        <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-200">
-          {pendingApprovalReason}
-        </div>
-      )}
       {err && (
         <div className="mb-2 rounded border border-red-900 bg-red-950/50 px-2 py-1 text-[11px] text-red-300">
           {err}
