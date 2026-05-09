@@ -97,6 +97,7 @@ export function NewAgentChatOverlay({
   const deleteWorktree = envTrpc.repo.deleteWorktree.useMutation()
   const start = envTrpc.agent.sessionStart.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
+  const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
   const queryClient = useQueryClient()
   const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -107,8 +108,24 @@ export function NewAgentChatOverlay({
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
   const folderSearchRef = useRef<HTMLInputElement | null>(null)
 
-  const busy = start.isPending || cloneConfig.isPending || deleteWorktree.isPending || createWorkspace.isPending
+  const busy = start.isPending || cloneConfig.isPending || deleteWorktree.isPending || createWorkspace.isPending || upsertWorkspaceResource.isPending
   const validation = validateNewAgentChatSelection(selection)
+
+  envTrpc.sync.changes.useSubscription(
+    { afterSeq: 0, tables: ['repos', 'recent_folders'] },
+    {
+      onData(events) {
+        const rows = events as Array<{ table?: string }>
+        if (rows.some((event) => event.table === 'repos')) {
+          void queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') })
+          void queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.list') })
+        }
+        if (rows.some((event) => event.table === 'recent_folders')) {
+          void queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listRecentFolders') })
+        }
+      },
+    },
+  )
 
   async function createChat() {
     const invalid = validateNewAgentChatSelection(selection)
@@ -119,16 +136,19 @@ export function NewAgentChatOverlay({
     setError(null)
     try {
       let workingDir: string
+      let worktreeRepoId: string | undefined
       if (selection.type === 'folder') {
         workingDir = selection.path
       } else if (selection.type === 'worktree') {
         workingDir = selection.path
+        worktreeRepoId = selection.repoId
       } else {
         const cloned = await cloneConfig.mutateAsync({
           configId: selection.configId,
           worktreeName: selection.worktreeName,
         })
         workingDir = cloned.workingDir
+        worktreeRepoId = cloned.repoId
       }
       let targetWorkspaceId = workspaceId
       if (workspaceMode === 'new' || !targetWorkspaceId) {
@@ -141,6 +161,28 @@ export function NewAgentChatOverlay({
           sourcePath: workingDir,
         })
         targetWorkspaceId = workspace.id
+      }
+      const matchingWorktree = existingWorktrees.find((worktree) => isPathWithinWorktree(workingDir, worktree.workingDir))
+      if (targetWorkspaceId && (selection.type === 'worktree' || selection.type === 'repoConfig' || matchingWorktree)) {
+        const resourceRepoId = worktreeRepoId ?? matchingWorktree?.id
+        const resourceName = selection.type === 'worktree'
+          ? selection.name
+          : selection.type === 'repoConfig'
+            ? selection.worktreeName
+            : matchingWorktree?.worktreeName
+        await upsertWorkspaceResource.mutateAsync({
+          workspaceId: targetWorkspaceId,
+          resource: {
+            type: 'worktree',
+            resourceKey: resourceRepoId ? `repo:${resourceRepoId}` : `path:${matchingWorktree?.workingDir ?? workingDir}`,
+            shared: true,
+            data: {
+              repoId: resourceRepoId,
+              workingDir: matchingWorktree?.workingDir ?? workingDir,
+              name: resourceName,
+            },
+          },
+        })
       }
       const session = (await start.mutateAsync(newAgentChatStartInput(targetWorkspaceId, workingDir))) as { id: string }
       await Promise.all([
@@ -432,6 +474,12 @@ function compactChoiceClass(selected: boolean, layout: 'col' | 'row' = 'col'): s
 
 function folderName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path
+}
+
+function isPathWithinWorktree(pathname: string, worktreePath: string): boolean {
+  const path = pathname.replace(/\/+$/, '')
+  const root = worktreePath.replace(/\/+$/, '')
+  return path === root || path.startsWith(`${root}/`)
 }
 
 function slugify(name: string): string {

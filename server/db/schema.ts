@@ -12,6 +12,7 @@ export type ShellOwnerKind = 'human' | 'agent'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 export type WorkspaceNameSource = 'explicit' | 'folder_path' | 'worktree' | 'derived'
 export type WorkspaceSourceKind = 'folder' | 'worktree' | 'repo_config'
+export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'other'
 
 export type WorkspaceUiState = {
   activeAgentSessionId: string | null
@@ -51,6 +52,17 @@ export type WorkspaceAgentTabRow = {
   workspaceId: string
   sessionId: string
   position: number
+  updatedAt: Date
+}
+
+export type WorkspaceResourceRow = {
+  id: string
+  workspaceId: string
+  type: WorkspaceResourceType
+  resourceKey: string
+  shared: boolean
+  data: Record<string, unknown>
+  createdAt: Date
   updatedAt: Date
 }
 
@@ -171,6 +183,19 @@ export const workspaceAgentTabs = sqliteTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.workspaceId, t.sessionId] }) }),
 )
+
+export const workspaceResources = sqliteTable('workspace_resources', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  type: text('type').$type<WorkspaceResourceType>().notNull(),
+  resourceKey: text('resource_key').notNull(),
+  shared: integer('shared', { mode: 'boolean' }).notNull().default(false),
+  data: jsonText<Record<string, unknown>>('data').notNull(),
+  createdAt: timestamp('created_at').notNull().default(nowMs),
+  updatedAt: timestamp('updated_at').notNull().default(nowMs),
+})
 
 export const agentNotifications = sqliteTable('agent_notifications', {
   id: text('id').primaryKey(),

@@ -6,6 +6,7 @@ import {
   agentNotifications,
   workspaceAgentTabs,
   workspaceFolders,
+  workspaceResources,
   workspaceTabs,
   workspaceUiStates,
   workspaceViewStates,
@@ -16,6 +17,8 @@ import {
   type AgentNotificationRow,
   type WorkspaceUiState,
   type WorkspaceViewState,
+  type WorkspaceResourceRow,
+  type WorkspaceResourceType,
 } from '../db/schema.js'
 
 export type Workspace = typeof workspaces.$inferSelect
@@ -75,6 +78,13 @@ export type AgentNotificationInput = {
   kind?: AgentNotificationRow['kind']
   title: string
   summary: string
+}
+
+export type WorkspaceResourceInput = {
+  type: WorkspaceResourceType
+  resourceKey: string
+  shared?: boolean
+  data?: Record<string, unknown>
 }
 
 function emptyWorkspaceViewState(workspaceId: string, updatedAt = new Date()): WorkspaceViewState {
@@ -533,6 +543,49 @@ export function createWorkspaceService(database: Db = db) {
       .where(and(eq(workspaceAgentTabs.workspaceId, workspaceId), eq(workspaceAgentTabs.sessionId, sessionId)))
   }
 
+  async function listResources(workspaceId?: string): Promise<WorkspaceResourceRow[]> {
+    const rows = workspaceId
+      ? await database.select().from(workspaceResources).where(eq(workspaceResources.workspaceId, workspaceId)).orderBy(asc(workspaceResources.createdAt), asc(workspaceResources.id))
+      : await database.select().from(workspaceResources).orderBy(asc(workspaceResources.createdAt), asc(workspaceResources.id))
+    return rows as WorkspaceResourceRow[]
+  }
+
+  async function upsertResource(workspaceId: string, input: WorkspaceResourceInput): Promise<WorkspaceResourceRow> {
+    await get(workspaceId)
+    const resourceKey = input.resourceKey.trim()
+    if (!resourceKey) throw new WorkspaceError('invalid_name', 'workspace resource key is required')
+    const now = new Date()
+    const existing = (await listResources(workspaceId)).find((resource) => resource.type === input.type && resource.resourceKey === resourceKey)
+    if (existing) {
+      const rows = await database
+        .update(workspaceResources)
+        .set({
+          shared: input.shared ?? existing.shared,
+          data: input.data ?? existing.data,
+          updatedAt: now,
+        })
+        .where(eq(workspaceResources.id, existing.id))
+        .returning()
+      return (rows[0] as WorkspaceResourceRow | undefined) ?? { ...existing, shared: input.shared ?? existing.shared, data: input.data ?? existing.data, updatedAt: now }
+    }
+    const row: WorkspaceResourceRow = {
+      id: ulid().toLowerCase(),
+      workspaceId,
+      type: input.type,
+      resourceKey,
+      shared: input.shared ?? false,
+      data: input.data ?? {},
+      createdAt: now,
+      updatedAt: now,
+    }
+    await database.insert(workspaceResources).values(row)
+    return row
+  }
+
+  async function deleteResource(id: string): Promise<void> {
+    await database.delete(workspaceResources).where(eq(workspaceResources.id, id))
+  }
+
   async function createAgentNotification(input: AgentNotificationInput): Promise<AgentNotificationRow> {
     await get(input.workspaceId)
     const row: AgentNotificationRow = {
@@ -604,10 +657,22 @@ export function createWorkspaceService(database: Db = db) {
     async archiveFolder(id: string): Promise<void> {
       await getFolder(id)
       const now = new Date()
-      await database
-        .update(workspaceFolders)
-        .set({ archivedAt: now, updatedAt: now })
-        .where(eq(workspaceFolders.id, id))
+      const folders = await listActiveFolders()
+      const folderIds = new Set([id, ...folderDescendantIds(folders, id)])
+      for (const folderId of folderIds) {
+        await database
+          .update(workspaceFolders)
+          .set({ archivedAt: now, updatedAt: now })
+          .where(eq(workspaceFolders.id, folderId))
+      }
+      const workspaceRows = await listActiveWorkspaces()
+      for (const workspace of workspaceRows) {
+        if (!workspace.folderId || !folderIds.has(workspace.folderId)) continue
+        await database
+          .update(workspaces)
+          .set({ archivedAt: now, updatedAt: now })
+          .where(eq(workspaces.id, workspace.id))
+      }
     },
 
     async setFolderCollapsed(id: string, collapsed: boolean): Promise<WorkspaceFolder> {
@@ -735,6 +800,12 @@ export function createWorkspaceService(database: Db = db) {
     upsertAgentTab,
 
     deleteAgentTab,
+
+    listResources,
+
+    upsertResource,
+
+    deleteResource,
 
     createAgentNotification,
 

@@ -69,6 +69,16 @@ export interface AgentNotificationInput {
   summary: string
 }
 
+export interface WorkspaceResourceInput {
+  workspaceId: string
+  resource: {
+    type: 'browser_tab' | 'worktree' | 'shell' | 'other'
+    resourceKey: string
+    shared?: boolean
+    data?: Record<string, unknown>
+  }
+}
+
 // Superjson wire format matches what the plugin client uses: `{ json: <val> }`.
 // We don't use any special Date/Map/Set values on this surface, so the
 // identity shape round-trips cleanly.
@@ -201,4 +211,8 @@ export async function openPane(input: OpenPaneInput): Promise<{ ok: true; tab: u
 
 export async function createAgentNotification(input: AgentNotificationInput): Promise<unknown> {
   return mutation<unknown>('envApi.createAgentNotification', input as unknown as Record<string, unknown>)
+}
+
+export async function upsertWorkspaceResource(input: WorkspaceResourceInput): Promise<unknown> {
+  return mutation<unknown>('envApi.upsertWorkspaceResource', input as unknown as Record<string, unknown>)
 }

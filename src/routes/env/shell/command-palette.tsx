@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpc } from '../../../trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { type PaneContent } from './tab-state'
@@ -92,6 +93,7 @@ export function CommandPalette({
   })
   const queryClient = useQueryClient()
   const createShell = envTrpc.shell.create.useMutation()
+  const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
   const createShellAsync = createShell.mutateAsync
   const sessions = envTrpc.agent.sessionList.useQuery(workspaceInput, {
     enabled: open,
@@ -117,6 +119,17 @@ export function CommandPalette({
           const info = (await createShellAsync(
             { ...workspaceInput, ...(activeCwd ? { cwd: activeCwd } : {}) },
           )) as ShellCreateResult
+          if (workspaceId) {
+            await upsertWorkspaceResource.mutateAsync({
+              workspaceId,
+              resource: {
+                type: 'shell',
+                resourceKey: info.id,
+                shared: false,
+                data: { shellId: info.id, cwd: activeCwd, ownerKind: 'human' },
+              },
+            })
+          }
           await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', workspaceInput) })
           onOpenContent({ type: 'shell', shellId: info.id })
         } catch (e) {

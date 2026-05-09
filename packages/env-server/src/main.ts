@@ -7,9 +7,11 @@ import { logger } from './logger.js'
 import { terminalService } from './terminal/service.js'
 import { initIdentityToken } from './identity/client.js'
 import { ensureOpencodeBootstrapped, opencodeSupervisor } from './agent/opencode.js'
+import { initializeEnvRealtime } from './realtime/env-realtime.js'
 
 async function main(): Promise<void> {
   await runMigrations()
+  initializeEnvRealtime()
   await initEnvMetaFromSecrets()
   await initIdentityToken()
 

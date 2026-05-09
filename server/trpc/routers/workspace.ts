@@ -26,6 +26,13 @@ const viewStatePatchSchema = z.object({
   agentCollapsed: z.boolean().optional(),
 })
 
+const workspaceResourceSchema = z.object({
+  type: z.enum(['browser_tab', 'worktree', 'shell', 'other']),
+  resourceKey: z.string().min(1).max(1_000),
+  shared: z.boolean().optional(),
+  data: z.record(z.unknown()).optional(),
+})
+
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof WorkspaceError) {
     return new TRPCError({
@@ -253,6 +260,37 @@ export const workspaceRouter = router({
     .mutation(async ({ input }) => {
       try {
         await workspaceService.deleteAgentTab(input.workspaceId, input.sessionId)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  listResources: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1).optional() }).optional())
+    .query(async ({ input }) => {
+      try {
+        return await workspaceService.listResources(input?.workspaceId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  upsertResource: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1), resource: workspaceResourceSchema }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.upsertResource(input.workspaceId, input.resource)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  deleteResource: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        await workspaceService.deleteResource(input.id)
         return { ok: true as const }
       } catch (err) {
         throw toTrpcError(err)

@@ -19,6 +19,7 @@ export type BrowserTabCreated = {
 export type BrowserApi = {
   isAvailable(): boolean
   getWindowId(): Promise<string>
+  listTabs(): Promise<Array<{ browserTabId: string; url?: string }>>
   createTab(input: { paneId: string; url?: string }): Promise<{ browserTabId: string }>
   attachTab(input: { paneId: string; browserTabId: string }): Promise<void>
   focusTab(input: { browserTabId: string }): Promise<void>
@@ -47,6 +48,7 @@ type WebframeGlobal = {
       setSlots: { mutate: (input: unknown) => Promise<unknown> }
     }
     tabs: {
+      list?: { query: (input?: unknown) => Promise<Array<{ id: string; url?: string }>> }
       create: { mutate: (input: unknown) => Promise<{ id: string }> }
       move: { mutate: (input: unknown) => Promise<unknown> }
       setActive: { mutate: (input: unknown) => Promise<unknown> }
@@ -123,6 +125,13 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     },
 
     getWindowId,
+
+    async listTabs() {
+      const webframe = getWebframe(win)
+      if (!webframe.trpc.tabs.list) return []
+      const records = await webframe.trpc.tabs.list.query()
+      return records.map((record) => ({ browserTabId: record.id, url: record.url }))
+    },
 
     async createTab(input) {
       const webframe = getWebframe(win)

@@ -5,6 +5,7 @@ import { agentShellProcedure, router } from '../trpc.js'
 import { ShellError, terminalService } from '../../terminal/service.js'
 import { terminalDaemonClient, useTerminalDaemon } from '../../terminal/daemon-client.js'
 import { logger } from '../../logger.js'
+import { upsertWorkspaceResource } from '../../identity/client.js'
 
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof ShellError) {
@@ -119,6 +120,18 @@ export const agentShellRouter = router({
           ownerSessionId: input.opencodeSessionId ?? null,
           ownerAgentSessionId: input.ownerAgentSessionId ?? null,
         }))
+        const workspaceId = info.workspaceId ?? input.workspaceId
+        if (workspaceId) {
+          void upsertWorkspaceResource({
+            workspaceId,
+            resource: {
+              type: 'shell',
+              resourceKey: info.id,
+              shared: false,
+              data: { shellId: info.id, cwd: info.cwd, ownerKind: 'agent' },
+            },
+          }).catch((err) => logger.warn({ err, shellId: info.id, workspaceId }, 'workspace shell resource registration failed'))
+        }
         return { shellId: info.id }
       } catch (err) {
         throw toTrpcError(err)

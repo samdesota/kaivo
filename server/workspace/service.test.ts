@@ -61,6 +61,17 @@ type WorkspaceAgentTabRow = {
   updatedAt: Date
 }
 
+type WorkspaceResourceRow = {
+  id: string
+  workspaceId: string
+  type: 'browser_tab' | 'worktree' | 'shell' | 'other'
+  resourceKey: string
+  shared: boolean
+  data: Record<string, unknown>
+  createdAt: Date
+  updatedAt: Date
+}
+
 type AgentNotificationRow = {
   id: string
   workspaceId: string
@@ -88,6 +99,7 @@ const uiStateRows: UiStateRow[] = []
 const viewStateRows: WorkspaceViewStateRow[] = []
 const tabRows: WorkspaceTabRow[] = []
 const agentTabRows: WorkspaceAgentTabRow[] = []
+const resourceRows: WorkspaceResourceRow[] = []
 const notificationRows: AgentNotificationRow[] = []
 
 function resetState() {
@@ -97,6 +109,7 @@ function resetState() {
   viewStateRows.length = 0
   tabRows.length = 0
   agentTabRows.length = 0
+  resourceRows.length = 0
   notificationRows.length = 0
 }
 
@@ -171,6 +184,17 @@ vi.mock('../db/schema.js', () => ({
     sessionId: { _col: 'sessionId' },
     position: { _col: 'position' },
   },
+  workspaceResources: {
+    _table: 'workspace_resources',
+    id: { _col: 'id' },
+    workspaceId: { _col: 'workspaceId' },
+    type: { _col: 'type' },
+    resourceKey: { _col: 'resourceKey' },
+    shared: { _col: 'shared' },
+    data: { _col: 'data' },
+    createdAt: { _col: 'createdAt' },
+    updatedAt: { _col: 'updatedAt' },
+  },
   agentNotifications: {
     _table: 'agent_notifications',
     id: { _col: 'id' },
@@ -193,6 +217,7 @@ function rowsFor(table: { _table: string }) {
   if (table._table === 'workspace_ui_states') return uiStateRows
   if (table._table === 'workspace_view_states') return viewStateRows
   if (table._table === 'workspace_agent_tabs') return agentTabRows
+  if (table._table === 'workspace_resources') return resourceRows
   if (table._table === 'agent_notifications') return notificationRows
   return tabRows
 }
@@ -230,6 +255,12 @@ vi.mock('../db/client.js', () => ({
             if (idx >= 0) agentTabRows[idx] = row
             else agentTabRows.push(row)
           }
+        } else if (table._table === 'workspace_resources') {
+          for (const row of values as WorkspaceResourceRow[]) {
+            const idx = resourceRows.findIndex((r) => r.id === row.id)
+            if (idx >= 0) resourceRows[idx] = row
+            else resourceRows.push(row)
+          }
         } else if (table._table === 'agent_notifications') {
           notificationRows.push(...(values as AgentNotificationRow[]))
         }
@@ -264,7 +295,7 @@ vi.mock('../db/client.js', () => ({
               return String(a.id ?? '').localeCompare(String(b.id ?? ''))
             })
           }
-          if (table._table !== 'workspace_tabs' && table._table !== 'workspace_agent_tabs') return rows
+          if (table._table !== 'workspace_tabs' && table._table !== 'workspace_agent_tabs' && table._table !== 'workspace_resources') return rows
           return [...rows].sort((a, b) => {
             const pos = Number(a.position ?? 0) - Number(b.position ?? 0)
             if (pos !== 0) return pos
@@ -478,6 +509,46 @@ describe('workspace service', () => {
 
     await workspaceService.moveSidebarNode({ nodeType: 'folder', nodeId: child.id, parentFolderId: target.id })
     expect(folderRows.find((row) => row.id === child.id)).toMatchObject({ parentId: target.id, position: 0 })
+  })
+
+  it('archives a folder with all descendant folders and workspaces', async () => {
+    const { workspaceService } = await import('./service.js')
+    const root = await workspaceService.createFolder({ name: 'Root' })
+    const child = await workspaceService.createFolder({ name: 'Child', parentId: root.id })
+    const sibling = await workspaceService.createFolder({ name: 'Sibling' })
+    const rootWorkspace = await workspaceService.create({ name: 'root workspace', folderId: root.id })
+    const childWorkspace = await workspaceService.create({ name: 'child workspace', folderId: child.id })
+    const siblingWorkspace = await workspaceService.create({ name: 'sibling workspace', folderId: sibling.id })
+
+    await workspaceService.archiveFolder(root.id)
+
+    expect(folderRows.find((row) => row.id === root.id)?.archivedAt).toBeInstanceOf(Date)
+    expect(folderRows.find((row) => row.id === child.id)?.archivedAt).toBeInstanceOf(Date)
+    expect(folderRows.find((row) => row.id === sibling.id)?.archivedAt).toBeNull()
+    expect(workspaceRows.find((row) => row.id === rootWorkspace.id)?.archivedAt).toBeInstanceOf(Date)
+    expect(workspaceRows.find((row) => row.id === childWorkspace.id)?.archivedAt).toBeInstanceOf(Date)
+    expect(workspaceRows.find((row) => row.id === siblingWorkspace.id)?.archivedAt).toBeNull()
+  })
+
+  it('upserts and lists workspace resources', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Resource workspace' })
+
+    const first = await workspaceService.upsertResource(workspace.id, {
+      type: 'browser_tab',
+      resourceKey: 'browser-1',
+      data: { browserTabId: 'browser-1' },
+    })
+    const second = await workspaceService.upsertResource(workspace.id, {
+      type: 'browser_tab',
+      resourceKey: 'browser-1',
+      data: { browserTabId: 'browser-1', url: 'https://example.com' },
+    })
+
+    expect(second.id).toBe(first.id)
+    await expect(workspaceService.listResources(workspace.id)).resolves.toMatchObject([
+      { id: first.id, workspaceId: workspace.id, type: 'browser_tab', resourceKey: 'browser-1', shared: false, data: { url: 'https://example.com' } },
+    ])
   })
 
   it('auto-renames folder-path workspaces from the first untitled chat prompt', async () => {

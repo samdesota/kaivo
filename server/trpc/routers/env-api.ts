@@ -70,6 +70,24 @@ export const envApiRouter = router({
       }
     }),
 
+  upsertWorkspaceResource: identityProcedure
+    .input(z.object({
+      workspaceId: z.string().min(1),
+      resource: z.object({
+        type: z.enum(['browser_tab', 'worktree', 'shell', 'other']),
+        resourceKey: z.string().min(1).max(1_000),
+        shared: z.boolean().optional(),
+        data: z.record(z.unknown()).optional(),
+      }),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.upsertResource(input.workspaceId, input.resource)
+      } catch (err) {
+        throw toWorkspaceTrpcError(err)
+      }
+    }),
+
   listRepoConfigs: identityProcedure.query(async () => {
     return repoConfigService.list()
   }),

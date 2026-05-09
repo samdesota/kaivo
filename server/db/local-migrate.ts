@@ -96,6 +96,22 @@ CREATE TABLE IF NOT EXISTS workspace_agent_tabs (
   PRIMARY KEY (workspace_id, session_id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_resources (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  resource_key TEXT NOT NULL,
+  shared INTEGER NOT NULL DEFAULT 0,
+  data TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT ${nowMs},
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+);
+
+CREATE INDEX IF NOT EXISTS workspace_resources_workspace_idx
+  ON workspace_resources(workspace_id);
+CREATE INDEX IF NOT EXISTS workspace_resources_resource_idx
+  ON workspace_resources(type, resource_key);
+
 CREATE TABLE IF NOT EXISTS agent_notifications (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -458,6 +474,25 @@ function migrateAgentNotificationKinds(sqlite: Database.Database) {
   }
 }
 
+function migrateWorkspaceResources(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_resources (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      resource_key TEXT NOT NULL,
+      shared INTEGER NOT NULL DEFAULT 0,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT ${nowMs},
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+    CREATE INDEX IF NOT EXISTS workspace_resources_workspace_idx
+      ON workspace_resources(workspace_id);
+    CREATE INDEX IF NOT EXISTS workspace_resources_resource_idx
+      ON workspace_resources(type, resource_key);
+  `)
+}
+
 function migrateWorkspaceFolders(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS workspace_folders (
@@ -589,6 +624,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(agentNotificationKindsMigrationName)
     }
 
+    const workspaceResourcesMigrationName = '0008_workspace_resources'
+    const workspaceResourcesMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceResourcesMigrationName)
+    if (!workspaceResourcesMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceResources(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceResourcesMigrationName)
+      })()
+      applied.push(workspaceResourcesMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -605,6 +652,7 @@ export const localAppTables = [
   'workspace_view_states',
   'workspace_tabs',
   'workspace_agent_tabs',
+  'workspace_resources',
   'agent_notifications',
   'sandboxes',
   'github_install',

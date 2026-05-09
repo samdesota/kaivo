@@ -47,6 +47,20 @@ export function getAppRealtime(): SqliteRealtimeEngine {
         { name: 'created_at', jsonName: 'createdAt' },
       ],
     },
+    {
+      table: 'workspace_resources',
+      keyColumns: ['id'],
+      columns: [
+        { name: 'id' },
+        { name: 'workspace_id', jsonName: 'workspaceId' },
+        { name: 'type' },
+        { name: 'resource_key', jsonName: 'resourceKey' },
+        { name: 'shared' },
+        { name: 'data' },
+        { name: 'created_at', jsonName: 'createdAt' },
+        { name: 'updated_at', jsonName: 'updatedAt' },
+      ],
+    },
   ])
   return appRealtime
 }
