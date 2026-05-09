@@ -14,6 +14,7 @@ describe('resolveViteServerConfig', () => {
     expect(config.proxy['/trpc']).toEqual({ target: 'http://127.0.0.1:3456', ws: true })
     expect(config.proxy['/api']).toBe('http://127.0.0.1:3456')
     expect(config.proxy['/preview']).toEqual({ target: 'http://127.0.0.1:3456', ws: true })
+    expect(config.watch.ignored).toContain('**/.cloud-code/**')
   })
 
   it('keeps legacy defaults for direct Vite runs', () => {

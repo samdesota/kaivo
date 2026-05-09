@@ -28,6 +28,7 @@ type RepoWorktree = {
   githubFullName?: string | null
 }
 type NewChatTab = 'folder' | 'worktree' | 'clone'
+type WorktreeGroup = { parent: string; worktrees: RepoWorktree[] }
 
 export function NewAgentChatModal({
   open,
@@ -106,6 +107,7 @@ export function NewAgentChatOverlay({
   const [folderFilter, setFolderFilter] = useState('')
   const [workspaceMode, setWorkspaceMode] = useState<NewAgentChatWorkspaceMode>(initialWorkspaceMode)
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
+  const [deletingWorktreeId, setDeletingWorktreeId] = useState<string | null>(null)
   const folderSearchRef = useRef<HTMLInputElement | null>(null)
 
   const busy = start.isPending || cloneConfig.isPending || deleteWorktree.isPending || createWorkspace.isPending || upsertWorkspaceResource.isPending
@@ -202,6 +204,7 @@ export function NewAgentChatOverlay({
   const folders = (recentFolders.data ?? []) as RecentFolder[]
   const configs = (repoConfigs.data ?? []) as RepoConfig[]
   const existingWorktrees = (worktrees.data ?? []) as RepoWorktree[]
+  const worktreeGroups = useMemo(() => groupWorktreesByParent(existingWorktrees), [existingWorktrees])
   const filteredFolders = useMemo(() => {
     const q = folderFilter.trim().toLowerCase()
     if (!q) return folders
@@ -223,12 +226,15 @@ export function NewAgentChatOverlay({
     })
     if (!confirmed) return
     setError(null)
+    setDeletingWorktreeId(worktree.id)
     try {
       await deleteWorktree.mutateAsync({ repoId: worktree.id })
       if (selection?.type === 'worktree' && selection.repoId === worktree.id) setSelection(null)
       await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') })
     } catch (err) {
       setError(extractTrpcMessage(err))
+    } finally {
+      setDeletingWorktreeId(null)
     }
   }
 
@@ -260,7 +266,7 @@ export function NewAgentChatOverlay({
           <TabButton active={activeTab === 'worktree'} onClick={() => setActiveTab('worktree')}>Work trees</TabButton>
           <TabButton active={activeTab === 'clone'} onClick={() => setActiveTab('clone')}>Clone config</TabButton>
         </div>
-        <div className="min-h-0 flex-1 overflow-hidden p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {activeTab === 'folder' && (
             <section className="flex h-full min-h-0 flex-col gap-3">
               <div className="flex gap-2">
@@ -279,7 +285,7 @@ export function NewAgentChatOverlay({
                 </button>
               </div>
               {recentFolders.isLoading && <div className="text-xs text-neutral-500">Loading recent folders…</div>}
-              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
+              <div className="rounded border border-neutral-900 bg-neutral-950/40 p-1">
                 {filteredFolders.map((folder) => (
                   <button
                     key={folder.path}
@@ -300,29 +306,40 @@ export function NewAgentChatOverlay({
           {activeTab === 'worktree' && (
             <section className="flex h-full min-h-0 flex-col gap-2">
               {worktrees.isLoading && <div className="text-xs text-neutral-500">Loading work trees…</div>}
-              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
-                {existingWorktrees.map((worktree) => (
-                  <div
-                    key={worktree.id}
-                    className={compactChoiceClass(selection?.type === 'worktree' && selection.repoId === worktree.id, 'row')}
-                  >
-                    <button
-                      onClick={() => setSelection({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName })}
-                      className="min-w-0 flex-1 text-left"
-                    >
-                      <span className="block truncate text-neutral-100">{worktree.name} / {worktree.worktreeName}</span>
-                      <span className="block truncate font-mono text-[10px] text-neutral-500" title={worktree.workingDir}>{worktree.workingDir}</span>
-                    </button>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void removeWorktree(worktree)
-                      }}
-                      disabled={busy}
-                      className="ml-2 shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-50"
-                    >
-                      Delete
-                    </button>
+              <div className="rounded border border-neutral-900 bg-neutral-950/40 p-1">
+                {worktreeGroups.map((group) => (
+                  <div key={group.parent} className="space-y-1">
+                    <div className="sticky top-0 z-10 bg-neutral-950/95 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+                      {group.parent}
+                    </div>
+                    {group.worktrees.map((worktree) => {
+                      const deleting = deletingWorktreeId === worktree.id
+                      return (
+                        <div
+                          key={worktree.id}
+                          className={compactChoiceClass(selection?.type === 'worktree' && selection.repoId === worktree.id, 'row')}
+                        >
+                          <button
+                            onClick={() => setSelection({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName })}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <span className="block truncate text-neutral-100">{worktree.worktreeName}</span>
+                            <span className="block truncate font-mono text-[10px] text-neutral-500" title={worktree.workingDir}>{worktree.workingDir}</span>
+                          </button>
+                          <button
+                            aria-label={`Delete ${worktree.name}/${worktree.worktreeName}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void removeWorktree(worktree)
+                            }}
+                            disabled={busy}
+                            className="ml-2 flex h-6 w-16 shrink-0 items-center justify-center rounded border border-neutral-700 text-[10px] text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-50"
+                          >
+                            {deleting ? <span className="h-3 w-3 animate-spin rounded-full border border-red-300 border-t-transparent" aria-label="Deleting" /> : 'Delete'}
+                          </button>
+                        </div>
+                      )
+                    })}
                   </div>
                 ))}
                 {existingWorktrees.length === 0 && !worktrees.isLoading && <EmptyList>No cloned work trees yet.</EmptyList>}
@@ -332,7 +349,7 @@ export function NewAgentChatOverlay({
           {activeTab === 'clone' && (
             <section className="flex h-full min-h-0 flex-col gap-3">
               {repoConfigs.isLoading && <div className="text-xs text-neutral-500">Loading repo configs…</div>}
-              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
+              <div className="rounded border border-neutral-900 bg-neutral-950/40 p-1">
                 {configs.map((config) => (
                   <button
                     key={config.id}
@@ -463,6 +480,17 @@ export function WorkspaceModeControl({
 
 function EmptyList({ children }: { children: ReactNode }) {
   return <div className="p-4 text-center text-xs text-neutral-500">{children}</div>
+}
+
+function groupWorktreesByParent(worktrees: RepoWorktree[]): WorktreeGroup[] {
+  const groups = new Map<string, RepoWorktree[]>()
+  for (const worktree of worktrees) {
+    const parent = worktree.name || worktree.githubFullName || 'Other work trees'
+    const group = groups.get(parent) ?? []
+    group.push(worktree)
+    groups.set(parent, group)
+  }
+  return Array.from(groups, ([parent, items]) => ({ parent, worktrees: items }))
 }
 
 function compactChoiceClass(selected: boolean, layout: 'col' | 'row' = 'col'): string {

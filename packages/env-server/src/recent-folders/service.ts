@@ -1,4 +1,5 @@
 import path from 'node:path'
+import fs from 'node:fs/promises'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { recentFolders } from '../db/schema.js'
@@ -22,13 +23,18 @@ function labelFor(folderPath: string): string {
 }
 
 class RecentFolderService {
-  list(): RecentFolderSummary[] {
-    return db
+  async list(): Promise<RecentFolderSummary[]> {
+    const rows = db
       .select()
       .from(recentFolders)
       .orderBy(desc(recentFolders.lastOpenedAt))
       .all()
-      .map(toSummary)
+    const existing: RecentFolderSummary[] = []
+    for (const row of rows) {
+      if (await isExistingDirectory(row.path)) existing.push(toSummary(row))
+      else this.remove(row.path)
+    }
+    return existing
   }
 
   upsert(folderPath: string, label?: string | null): RecentFolderSummary {
@@ -51,6 +57,14 @@ class RecentFolderService {
 
   remove(folderPath: string): void {
     db.delete(recentFolders).where(eq(recentFolders.path, path.resolve(folderPath))).run()
+  }
+}
+
+async function isExistingDirectory(folderPath: string): Promise<boolean> {
+  try {
+    return (await fs.stat(folderPath)).isDirectory()
+  } catch {
+    return false
   }
 }
 

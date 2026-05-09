@@ -14,6 +14,9 @@ export function resolveViteServerConfig(env: NodeJS.ProcessEnv = process.env) {
     strictPort: true,
     // Allow the Tailscale Funnel / tailnet hostname to reach the dev server.
     allowedHosts: ['samuels-macbook-pro.tailf71199.ts.net', 'localhost', '127.0.0.1'],
+    watch: {
+      ignored: ['**/.cloud-code/**'],
+    },
     proxy: {
       '/trpc': { target: appUrl, ws: true },
       '/ws': { target: appUrl, ws: true },
