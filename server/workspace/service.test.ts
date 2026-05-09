@@ -61,6 +61,16 @@ type WorkspaceAgentTabRow = {
   updatedAt: Date
 }
 
+type AgentNotificationRow = {
+  id: string
+  workspaceId: string
+  sessionId: string
+  kind: 'finished' | 'question' | 'permission' | 'error'
+  title: string
+  summary: string
+  createdAt: Date
+}
+
 type WorkspaceFolderRow = {
   id: string
   parentId: string | null
@@ -78,6 +88,7 @@ const uiStateRows: UiStateRow[] = []
 const viewStateRows: WorkspaceViewStateRow[] = []
 const tabRows: WorkspaceTabRow[] = []
 const agentTabRows: WorkspaceAgentTabRow[] = []
+const notificationRows: AgentNotificationRow[] = []
 
 function resetState() {
   workspaceRows.length = 0
@@ -86,6 +97,7 @@ function resetState() {
   viewStateRows.length = 0
   tabRows.length = 0
   agentTabRows.length = 0
+  notificationRows.length = 0
 }
 
 vi.mock('drizzle-orm', () => ({
@@ -159,6 +171,14 @@ vi.mock('../db/schema.js', () => ({
     sessionId: { _col: 'sessionId' },
     position: { _col: 'position' },
   },
+  agentNotifications: {
+    _table: 'agent_notifications',
+    id: { _col: 'id' },
+    workspaceId: { _col: 'workspaceId' },
+    sessionId: { _col: 'sessionId' },
+    summary: { _col: 'summary' },
+    createdAt: { _col: 'createdAt' },
+  },
 }))
 
 vi.mock('../envauth/service.js', () => ({
@@ -173,6 +193,7 @@ function rowsFor(table: { _table: string }) {
   if (table._table === 'workspace_ui_states') return uiStateRows
   if (table._table === 'workspace_view_states') return viewStateRows
   if (table._table === 'workspace_agent_tabs') return agentTabRows
+  if (table._table === 'agent_notifications') return notificationRows
   return tabRows
 }
 
@@ -203,12 +224,14 @@ vi.mock('../db/client.js', () => ({
             if (idx >= 0) tabRows[idx] = row
             else tabRows.push(row)
           }
-        } else {
+        } else if (table._table === 'workspace_agent_tabs') {
           for (const row of values as WorkspaceAgentTabRow[]) {
             const idx = agentTabRows.findIndex((r) => r.workspaceId === row.workspaceId && r.sessionId === row.sessionId)
             if (idx >= 0) agentTabRows[idx] = row
             else agentTabRows.push(row)
           }
+        } else if (table._table === 'agent_notifications') {
+          notificationRows.push(...(values as AgentNotificationRow[]))
         }
         return {
           onConflictDoUpdate: async ({ set }: { set: Partial<UiStateRow | WorkspaceViewStateRow | WorkspaceTabRow | WorkspaceAgentTabRow> }) => {
@@ -341,6 +364,48 @@ describe('workspace service', () => {
       sourcePath: null,
     })
     expect(workspaceRows[0]).toMatchObject({ folderId: null, position: 0, nameSource: 'explicit' })
+  })
+
+  it('creates and dismisses agent notifications in app storage', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Project' })
+
+    const notification = await workspaceService.createAgentNotification({
+      workspaceId: workspace.id,
+      sessionId: 'session-1',
+      kind: 'finished',
+      title: 'Build notifications',
+      summary: 'Implemented notifications',
+    })
+
+    expect(notificationRows).toHaveLength(1)
+    expect(notificationRows[0]).toMatchObject({
+      id: notification.id,
+      workspaceId: workspace.id,
+      sessionId: 'session-1',
+      kind: 'finished',
+      title: 'Build notifications',
+      summary: 'Implemented notifications',
+    })
+
+    await workspaceService.dismissAgentNotificationsForSession('session-1')
+    expect(notificationRows).toEqual([])
+  })
+
+  it('creates agent notifications regardless of saved active chat state', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Project' })
+    await workspaceService.saveViewState(workspace.id, { activeAgentSessionId: 'session-1' })
+
+    const notification = await workspaceService.createAgentNotification({
+      workspaceId: workspace.id,
+      sessionId: 'session-1',
+      title: 'Build notifications',
+      summary: 'Implemented notifications',
+    })
+
+    expect(notification).toMatchObject({ workspaceId: workspace.id, sessionId: 'session-1' })
+    expect(notificationRows).toHaveLength(1)
   })
 
   it('returns folders and workspaces ordered by parent and position', async () => {

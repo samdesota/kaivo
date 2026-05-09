@@ -3,6 +3,7 @@ import { ulid } from 'ulid'
 import { workspaceTabFromPaneContent, workspaceTabKey, type PaneContent } from '../../shared/workspace-pane'
 import { db, type Db } from '../db/client.js'
 import {
+  agentNotifications,
   workspaceAgentTabs,
   workspaceFolders,
   workspaceTabs,
@@ -12,6 +13,7 @@ import {
   type WorkspaceTab,
   type WorkspaceTabRow,
   type WorkspaceAgentTabRow,
+  type AgentNotificationRow,
   type WorkspaceUiState,
   type WorkspaceViewState,
 } from '../db/schema.js'
@@ -65,6 +67,14 @@ export type WorkspaceOpenPaneInput = {
 export type WorkspaceAgentTabInput = {
   sessionId: string
   position: number
+}
+
+export type AgentNotificationInput = {
+  workspaceId: string
+  sessionId: string
+  kind?: AgentNotificationRow['kind']
+  title: string
+  summary: string
 }
 
 function emptyWorkspaceViewState(workspaceId: string, updatedAt = new Date()): WorkspaceViewState {
@@ -523,6 +533,29 @@ export function createWorkspaceService(database: Db = db) {
       .where(and(eq(workspaceAgentTabs.workspaceId, workspaceId), eq(workspaceAgentTabs.sessionId, sessionId)))
   }
 
+  async function createAgentNotification(input: AgentNotificationInput): Promise<AgentNotificationRow> {
+    await get(input.workspaceId)
+    const row: AgentNotificationRow = {
+      id: ulid().toLowerCase(),
+      workspaceId: input.workspaceId,
+      sessionId: input.sessionId,
+      kind: input.kind ?? 'finished',
+      title: input.title.trim().slice(0, 120) || 'Chat finished',
+      summary: input.summary.trim().slice(0, 120) || 'Chat finished',
+      createdAt: new Date(),
+    }
+    await database.insert(agentNotifications).values(row)
+    return row
+  }
+
+  async function dismissAgentNotification(id: string): Promise<void> {
+    await database.delete(agentNotifications).where(eq(agentNotifications.id, id))
+  }
+
+  async function dismissAgentNotificationsForSession(sessionId: string): Promise<void> {
+    await database.delete(agentNotifications).where(eq(agentNotifications.sessionId, sessionId))
+  }
+
   return {
     async list(): Promise<Workspace[]> {
       const rows = await listActiveWorkspaces()
@@ -702,6 +735,12 @@ export function createWorkspaceService(database: Db = db) {
     upsertAgentTab,
 
     deleteAgentTab,
+
+    createAgentNotification,
+
+    dismissAgentNotification,
+
+    dismissAgentNotificationsForSession,
 
     async saveUiState(workspaceId: string, state: WorkspaceUiState): Promise<WorkspaceUiState> {
       await get(workspaceId)

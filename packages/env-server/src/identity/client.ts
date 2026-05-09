@@ -61,6 +61,14 @@ export interface OpenPaneInput {
   activate?: boolean
 }
 
+export interface AgentNotificationInput {
+  workspaceId: string
+  sessionId: string
+  kind?: 'finished' | 'question' | 'permission' | 'error'
+  title: string
+  summary: string
+}
+
 // Superjson wire format matches what the plugin client uses: `{ json: <val> }`.
 // We don't use any special Date/Map/Set values on this surface, so the
 // identity shape round-trips cleanly.
@@ -189,4 +197,8 @@ export async function getRepoConfig(configId: string): Promise<RepoConfigBundle>
 
 export async function openPane(input: OpenPaneInput): Promise<{ ok: true; tab: unknown }> {
   return mutation<{ ok: true; tab: unknown }>('envApi.openPane', input as unknown as Record<string, unknown>)
+}
+
+export async function createAgentNotification(input: AgentNotificationInput): Promise<unknown> {
+  return mutation<unknown>('envApi.createAgentNotification', input as unknown as Record<string, unknown>)
 }

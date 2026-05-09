@@ -13,6 +13,8 @@
   --text-xs--line-height: 1.25rem;
 
   /* one-dark accent (blue) replaces brand */
+  --color-brand-300: #9cdcfe;
+  --color-brand-400: #7cc7ff;
   --color-brand-500: #61afef;
   --color-brand-600: #519aba;
 

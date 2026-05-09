@@ -148,9 +148,13 @@ export function useWorkspaceTabsStore(workspaceId: string) {
     {
       onData(events) {
         const batch = events as WorkspaceTabsChangeEvent[]
+        const deduped = new Map<string, WorkspaceTabsChangeEvent>()
+        for (const event of batch) {
+          if (event.seq <= syncedSeqRef.current) continue
+          deduped.set(event.key, event)
+        }
         collection.utils.writeBatch(() => {
-          for (const event of batch) {
-            if (event.seq <= syncedSeqRef.current) continue
+          for (const event of deduped.values()) {
             if (event.op === 'delete') {
               collection.utils.writeDelete(event.key)
             } else if (event.row) {

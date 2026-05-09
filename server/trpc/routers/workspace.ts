@@ -259,6 +259,20 @@ export const workspaceRouter = router({
       }
     }),
 
+  dismissAgentNotification: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      await workspaceService.dismissAgentNotification(input.id)
+      return { ok: true as const }
+    }),
+
+  dismissAgentNotificationsForSession: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      await workspaceService.dismissAgentNotificationsForSession(input.sessionId)
+      return { ok: true as const }
+    }),
+
   saveUiState: protectedProcedure
     .input(z.object({ workspaceId: z.string().min(1), state: uiStateSchema }))
     .mutation(async ({ input }) => {

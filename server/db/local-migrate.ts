@@ -96,6 +96,19 @@ CREATE TABLE IF NOT EXISTS workspace_agent_tabs (
   PRIMARY KEY (workspace_id, session_id)
 );
 
+CREATE TABLE IF NOT EXISTS agent_notifications (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'finished',
+  title TEXT NOT NULL DEFAULT 'Chat finished',
+  summary TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT ${nowMs}
+);
+
+CREATE INDEX IF NOT EXISTS agent_notifications_workspace_created_idx
+  ON agent_notifications(workspace_id, created_at);
+
 CREATE TABLE IF NOT EXISTS sandboxes (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -409,6 +422,42 @@ function migrateWorkspaceAgentTabs(sqlite: Database.Database) {
   `)
 }
 
+function migrateAgentNotifications(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS agent_notifications (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'finished',
+      title TEXT NOT NULL DEFAULT 'Chat finished',
+      summary TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+    CREATE INDEX IF NOT EXISTS agent_notifications_workspace_created_idx
+      ON agent_notifications(workspace_id, created_at);
+  `)
+  if (!columnExists(sqlite, 'agent_notifications', 'title')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN title TEXT NOT NULL DEFAULT 'Chat finished'")
+  }
+  if (!columnExists(sqlite, 'agent_notifications', 'kind')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'finished'")
+  }
+}
+
+function migrateAgentNotificationTitles(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'agent_notifications')) migrateAgentNotifications(sqlite)
+  if (!columnExists(sqlite, 'agent_notifications', 'title')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN title TEXT NOT NULL DEFAULT 'Chat finished'")
+  }
+}
+
+function migrateAgentNotificationKinds(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'agent_notifications')) migrateAgentNotifications(sqlite)
+  if (!columnExists(sqlite, 'agent_notifications', 'kind')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'finished'")
+  }
+}
+
 function migrateWorkspaceFolders(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS workspace_folders (
@@ -504,6 +553,42 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(workspaceFoldersMigrationName)
     }
 
+    const agentNotificationsMigrationName = '0005_agent_notifications'
+    const agentNotificationsMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(agentNotificationsMigrationName)
+    if (!agentNotificationsMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateAgentNotifications(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationsMigrationName)
+      })()
+      applied.push(agentNotificationsMigrationName)
+    }
+
+    const agentNotificationTitlesMigrationName = '0006_agent_notification_titles'
+    const agentNotificationTitlesMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(agentNotificationTitlesMigrationName)
+    if (!agentNotificationTitlesMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateAgentNotificationTitles(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationTitlesMigrationName)
+      })()
+      applied.push(agentNotificationTitlesMigrationName)
+    }
+
+    const agentNotificationKindsMigrationName = '0007_agent_notification_kinds'
+    const agentNotificationKindsMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(agentNotificationKindsMigrationName)
+    if (!agentNotificationKindsMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateAgentNotificationKinds(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationKindsMigrationName)
+      })()
+      applied.push(agentNotificationKindsMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -520,6 +605,7 @@ export const localAppTables = [
   'workspace_view_states',
   'workspace_tabs',
   'workspace_agent_tabs',
+  'agent_notifications',
   'sandboxes',
   'github_install',
   'github_token_cache',

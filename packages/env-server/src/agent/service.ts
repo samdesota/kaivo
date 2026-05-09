@@ -13,7 +13,7 @@ import {
   opencodeBasicAuthHeader,
   opencodeSupervisor,
 } from './opencode.js'
-import { IdentityAuthError, IdentityUnreachableError, resolveProviderKeys } from '../identity/client.js'
+import { createAgentNotification, IdentityAuthError, IdentityUnreachableError, resolveProviderKeys } from '../identity/client.js'
 
 const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
 const REASONING_EFFORT_VARIANTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
@@ -233,6 +233,8 @@ class AgentService {
   private childrenByParent = new Map<string, string[]>()
   private sessionModels = new Map<string, SessionModelSelection>()
   private contextLimitCache = new Map<string, number>()
+  private runningOpencodeSessions = new Set<string>()
+  private blockingNotificationKeys = new Set<string>()
   private openAIOAuthStatus: OpenAIOAuthStatus = {
     state: 'idle',
     message: null,
@@ -1270,6 +1272,18 @@ class AgentService {
 
     if (!ocSessionId) return
 
+    if (!this.parentByChild.has(ocSessionId)) {
+      if (type === 'message.part.updated') this.runningOpencodeSessions.add(ocSessionId)
+      if (type === 'session.idle' || type === 'session.error') {
+        const hadRunningRun = this.runningOpencodeSessions.delete(ocSessionId)
+        if (hadRunningRun && type === 'session.idle') void this.createFinishedNotification(ocSessionId)
+        if (type === 'session.error') {
+          const message = String((props as { error?: unknown; message?: unknown }).message ?? (props as { error?: unknown }).error ?? 'The agent hit an error and needs attention.')
+          void this.createBlockingNotification(ocSessionId, 'error', 'error', 'Agent error', message)
+        }
+      }
+    }
+
     if (type === 'permission.updated') {
       const p = props as unknown as {
         id: string
@@ -1285,18 +1299,21 @@ class AgentService {
         byPerm = new Map()
         this.pending.set(ocSessionId, byPerm)
       }
+      const title = p.title ?? 'Approval required'
       byPerm.set(p.id, {
         id: p.id,
         sessionId: p.sessionID,
         callID: p.callID ?? (p.metadata as { callID?: string } | undefined)?.callID,
-        title: p.title ?? 'Approval required',
+        title,
         pattern: p.pattern,
         metadata: p.metadata ?? {},
         createdAt: p.time?.created ?? Date.now(),
       })
+      void this.createBlockingNotification(ocSessionId, `permission:${p.id}`, 'permission', 'Approval required', title)
     } else if (type === 'permission.replied') {
       const p = props as { permissionID?: string }
       if (p.permissionID) this.pending.get(ocSessionId)?.delete(p.permissionID)
+      if (p.permissionID) this.blockingNotificationKeys.delete(`${ocSessionId}:permission:${p.permissionID}`)
     } else if (type === 'question.asked') {
       const q = props as unknown as {
         id?: string
@@ -1317,10 +1334,13 @@ class AgentService {
           tool: q.tool,
           createdAt: Date.now(),
         })
+        const question = Array.isArray(q.questions) ? q.questions[0]?.question : undefined
+        void this.createBlockingNotification(ocSessionId, `question:${q.id}`, 'question', 'Question asked', question ?? 'The agent needs an answer to continue.')
       }
     } else if (type === 'question.replied' || type === 'question.rejected') {
       const q = props as { requestID?: string }
       if (q.requestID) this.pendingQuestions.get(ocSessionId)?.delete(q.requestID)
+      if (q.requestID) this.blockingNotificationKeys.delete(`${ocSessionId}:question:${q.requestID}`)
     }
 
     const evt = await this.recordReplayEvent(ocSessionId, {
@@ -1424,6 +1444,107 @@ class AgentService {
     return out
   }
 
+  private async createFinishedNotification(opencodeSessionId: string): Promise<void> {
+    try {
+      const row = db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+        .limit(1)
+        .all()[0]
+      if (!row) return
+      if (!row.workspaceId) return
+      const responseText = await this.lastAgentResponseText(row)
+      const fallback = responseText || 'Chat finished'
+      const summary = await this.summarizeNotification(responseText, fallback)
+      await createAgentNotification({
+        workspaceId: row.workspaceId,
+        sessionId: row.id,
+        kind: 'finished',
+        title: row.title || 'Chat finished',
+        summary,
+      })
+    } catch (err) {
+      logger.warn({ err, opencodeSessionId }, 'failed to create agent notification')
+    }
+  }
+
+  private async createBlockingNotification(opencodeSessionId: string, key: string, kind: 'question' | 'permission' | 'error', fallbackTitle: string, summary: string): Promise<void> {
+    const notificationKey = `${opencodeSessionId}:${key}`
+    if (this.blockingNotificationKeys.has(notificationKey)) return
+    this.blockingNotificationKeys.add(notificationKey)
+    try {
+      const row = db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+        .limit(1)
+        .all()[0]
+      if (!row?.workspaceId) return
+      await createAgentNotification({
+        workspaceId: row.workspaceId,
+        sessionId: row.id,
+        kind,
+        title: row.title || fallbackTitle,
+        summary: truncateNotificationSummary(summary),
+      })
+    } catch (err) {
+      this.blockingNotificationKeys.delete(notificationKey)
+      logger.warn({ err, opencodeSessionId, key }, 'failed to create blocking agent notification')
+    }
+  }
+
+  private async lastAgentResponseText(row: { id: string; opencodeSessionId: string; workingDir: string | null }): Promise<string> {
+    try {
+      const client = await this.getClient()
+      const res = await client.session.messages({
+        path: { id: row.opencodeSessionId },
+        ...directoryOpts(row.workingDir),
+        throwOnError: true,
+      })
+      const msgs = (res.data ?? []) as Array<{
+        info?: { role?: string }
+        parts?: Array<{ type?: string; text?: string }>
+      }>
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        const msg = msgs[i]
+        if (msg?.info?.role !== 'assistant') continue
+        const text = (msg.parts ?? [])
+          .filter((part) => part.type === 'text' && part.text)
+          .map((part) => part.text)
+          .join('\n')
+          .replace(/\s+/g, ' ')
+          .trim()
+        if (text) return text.slice(-8_000)
+      }
+    } catch {
+      // Fall back to replay rows below; opencode may already be restarting.
+    }
+    return this.lastTranscriptText(row.id)
+  }
+
+  private lastTranscriptText(sessionId: string): string {
+    const assistantMessageIds = new Set<string>()
+    let last = ''
+    for (const evt of this.transcriptReplayRows(sessionId, 0)) {
+      if (evt.parentSessionId) continue
+      if (evt.type === 'message.updated') {
+        const info = (evt.payload as { info?: { id?: string; role?: string } }).info
+        if (info?.role === 'assistant' && info.id) assistantMessageIds.add(info.id)
+      }
+      if (evt.type === 'message.part.updated') {
+        const part = (evt.payload as { part?: { type?: string; text?: string; messageID?: string } }).part
+        if (part?.type === 'text' && part.text && (!part.messageID || assistantMessageIds.has(part.messageID))) last = part.text
+      }
+    }
+    return last.replace(/\s+/g, ' ').trim().slice(-8_000)
+  }
+
+  private async summarizeNotification(text: string, fallback: string): Promise<string> {
+    const fallbackSummary = text ? briefResponseSummary(text) : truncateNotificationSummary(fallback)
+    return fallbackSummary
+  }
+
   private async requireSession(id: string) {
     const rows = db
       .select()
@@ -1449,6 +1570,24 @@ class AgentService {
       this.opencodeFetch(pth, init, row.workingDir)
     return { row, client, model, variant, dirOpts, fetch: scopedFetch }
   }
+}
+
+function truncateNotificationSummary(value: string): string {
+  const flat = value.replace(/\s+/g, ' ').replace(/^['"]|['"]$/g, '').trim()
+  if (!flat) return 'Chat finished'
+  return flat.length <= 80 ? flat : `${flat.slice(0, 77).replace(/[\s.,;:!?-]+$/, '')}...`
+}
+
+function briefResponseSummary(value: string): string {
+  const flat = value
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^[\s*-]+/gm, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^['"]|['"]$/g, '')
+    .trim()
+  if (!flat) return 'Chat finished'
+  const sentence = flat.match(/^.{12,}?[.!?](?=\s|$)/)?.[0] ?? flat
+  return truncateNotificationSummary(sentence)
 }
 
 export const agentService = new AgentService()

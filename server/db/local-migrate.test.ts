@@ -13,7 +13,7 @@ describe('runLocalAppMigrations', () => {
 
     expect(result).toEqual({
       sqlitePath,
-      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders'],
+      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds'],
     })
     const sqlite = new Database(sqlitePath, { readonly: true })
     try {
@@ -77,7 +77,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT * FROM workspace_view_states').get()).toMatchObject({
@@ -100,6 +100,10 @@ describe('runLocalAppMigrations', () => {
       })
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_agent_tabs'").get()).toBeTruthy()
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()
+      expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_notifications'").get()).toBeTruthy()
+      expect(migrated.prepare('PRAGMA table_info(agent_notifications)').all()).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: 'title' }), expect.objectContaining({ name: 'kind' })]),
+      )
     } finally {
       migrated.close()
     }
@@ -132,7 +136,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()

@@ -54,6 +54,16 @@ export type WorkspaceAgentTabRow = {
   updatedAt: Date
 }
 
+export type AgentNotificationRow = {
+  id: string
+  workspaceId: string
+  sessionId: string
+  kind: 'finished' | 'question' | 'permission' | 'error'
+  title: string
+  summary: string
+  createdAt: Date
+}
+
 const nowMs = sql`(unixepoch() * 1000)`
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' })
 const jsonText = <T>(name: string) => text(name, { mode: 'json' }).$type<T>()
@@ -161,6 +171,18 @@ export const workspaceAgentTabs = sqliteTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.workspaceId, t.sessionId] }) }),
 )
+
+export const agentNotifications = sqliteTable('agent_notifications', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id').notNull(),
+  kind: text('kind').$type<AgentNotificationRow['kind']>().notNull().default('finished'),
+  title: text('title').notNull().default('Chat finished'),
+  summary: text('summary').notNull(),
+  createdAt: timestamp('created_at').notNull().default(nowMs),
+})
 
 export const sandboxes = sqliteTable('sandboxes', {
   id: text('id').primaryKey(),

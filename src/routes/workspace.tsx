@@ -65,6 +65,7 @@ import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
+import { useAgentNotificationsStore, type AgentNotificationRecord } from './workspace/notifications-store'
 import {
   projectSidebarDropFromRows,
   flattenSidebarTree,
@@ -439,6 +440,7 @@ export function WorkspaceSidebar({
       return []
     }
   })
+  const [chatReadVersion, setChatReadVersion] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
   const dragPointerOffsetRef = useRef<{ x: number; y: number } | null>(null)
@@ -451,6 +453,12 @@ export function WorkspaceSidebar({
       inputRef.current?.select()
     }
   }, [edit.editingId])
+
+  useEffect(() => {
+    if (!ctx.uiState.activeAgentSessionId) return
+    markWorkspaceChatsRead(ctx.workspace.id)
+    setChatReadVersion((version) => version + 1)
+  }, [ctx.uiState.activeAgentSessionId, ctx.workspace.id])
 
   async function saveRename() {
     if (!edit.editingId) return
@@ -479,6 +487,7 @@ export function WorkspaceSidebar({
   const workspaces = (list.data ?? []) as WorkspaceSummary[]
   const nodes = (tree.data ?? []) as WorkspaceSidebarNode[]
   const displayNodes = localTree ?? nodes
+  const workspaceNames = useMemo(() => new Map(workspaces.map((workspace) => [workspace.id, workspace.name])), [workspaces])
   const dndNodes = displayNodes as unknown as SidebarTreeNode[]
   const flatRows = flattenSidebarTree(dndNodes)
   const sortableIds = flatRows.map((row) => sidebarDndId(row.kind, row.id))
@@ -490,7 +499,10 @@ export function WorkspaceSidebar({
   )
 
   function setWorkspaceExpanded(workspaceId: string, expanded: boolean) {
-    if (expanded) markWorkspaceChatsRead(workspaceId)
+    if (expanded) {
+      markWorkspaceChatsRead(workspaceId)
+      setChatReadVersion((version) => version + 1)
+    }
     setExpandedWorkspaceIds((current) => {
       const next = expanded
         ? Array.from(new Set([...current, workspaceId]))
@@ -694,6 +706,12 @@ export function WorkspaceSidebar({
             {activeDragId ? <SidebarDragPreview activeId={activeDragId} nodes={displayNodes} /> : null}
           </DragOverlay>
         </DndContext>
+        <WorkspaceSidebarNotifications
+          workspaceNames={workspaceNames}
+          activeWorkspaceId={ctx.workspace.id}
+          activeSessionId={ctx.uiState.activeAgentSessionId}
+          dispatchWorkspaceState={dispatchWorkspaceState}
+        />
       </div>
       <div className="flex-none border-t border-neutral-900 px-2 py-2">
         <Link
@@ -787,6 +805,7 @@ export function WorkspaceSidebar({
     const editing = edit.editingId === workspace.id
     const expanded = expandedWorkspaceIds.includes(workspace.id)
     const active = workspace.id === ctx.workspace.id && (!ctx.uiState.activeAgentSessionId || !expanded)
+    const showChatRollup = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
     return (
       <SortableSidebarRow
         key={dndId}
@@ -815,7 +834,7 @@ export function WorkspaceSidebar({
             {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
           </button>
           <div className={
-            'flex min-w-0 flex-1 items-center rounded px-[3px] transition-colors group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
+            'relative flex min-w-0 flex-1 items-center rounded px-[3px] transition-colors group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
             (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
           }>
           {editing ? (
@@ -848,10 +867,12 @@ export function WorkspaceSidebar({
               {workspace.name}
             </Link>
           )}
-          {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && (
-            <WorkspaceAgentEnvProvider>
-              <WorkspaceSidebarChatCount workspaceId={workspace.id} />
-            </WorkspaceAgentEnvProvider>
+          {showChatRollup && (
+          <span className="pointer-events-none absolute right-1 flex items-center transition-transform duration-150 group-hover:-translate-x-10">
+              <WorkspaceAgentEnvProvider>
+                <WorkspaceSidebarChatCount workspaceId={workspace.id} readVersion={chatReadVersion} />
+              </WorkspaceAgentEnvProvider>
+          </span>
           )}
           <button
             onClick={() => setNewChatContext({ mode: 'existing', workspace })}
@@ -893,7 +914,7 @@ export function WorkspaceSidebar({
   }
 }
 
-function WorkspaceSidebarChatCount({ workspaceId }: { workspaceId: string }) {
+function WorkspaceSidebarChatCount({ workspaceId, readVersion: _readVersion }: { workspaceId: string; readVersion: number }) {
   const summary = envTrpc.agent.workspaceChatSummary.useQuery({ workspaceIds: [workspaceId] }, { refetchInterval: 5_000 })
   const row = (summary.data ?? [])[0]
   if (!row) return null
@@ -910,11 +931,111 @@ function WorkspaceSidebarChatCount({ workspaceId }: { workspaceId: string }) {
   return (
     <span className="flex shrink-0 items-center gap-1">
       {row.chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{row.chatCount}</span>}
-      {glyph === '.' && <span className="h-1.5 w-1.5 rounded-full bg-brand-400" aria-label="New chat response" />}
+      {glyph === '.' && <span className="h-1 w-1 rounded-full bg-brand-500" aria-label="New chat response" />}
       {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-brand-400 border-t-transparent" aria-label="Chat running" />}
       {glyph === '!' && <span className="w-3 text-center text-[10px] font-semibold text-amber-300" aria-label="Chat needs attention">!</span>}
     </span>
   )
+}
+
+function WorkspaceSidebarNotifications({
+  workspaceNames,
+  activeWorkspaceId,
+  activeSessionId,
+  dispatchWorkspaceState,
+}: {
+  workspaceNames: Map<string, string>
+  activeWorkspaceId: string
+  activeSessionId: string | null
+  dispatchWorkspaceState: WorkspaceUiDispatch
+}) {
+  const navigate = useNavigate()
+  const notifications = useAgentNotificationsStore()
+  const activeNotificationIds = notifications.records
+    .filter((notification) => notification.sessionId === activeSessionId)
+    .map((notification) => notification.id)
+    .join('\0')
+  const rows = notifications.records.filter((notification) => notification.sessionId !== activeSessionId)
+
+  useEffect(() => {
+    if (activeSessionId && activeNotificationIds) void notifications.dismissForSession(activeSessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, activeNotificationIds])
+
+  async function openNotification(notification: AgentNotificationRecord) {
+    notifications.dismiss(notification.id)
+    if (notification.workspaceId === activeWorkspaceId) {
+      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: notification.sessionId })
+    }
+    await navigate({
+      to: '/w/$workspaceId',
+      params: { workspaceId: notification.workspaceId },
+      search: { chat: notification.sessionId, tab: undefined },
+    })
+  }
+
+  function clearNotifications() {
+    for (const notification of rows) notifications.dismiss(notification.id)
+  }
+
+  if (rows.length === 0) return null
+  return (
+    <div className="mt-3 pt-2">
+      <div className="flex items-center justify-between gap-2 px-1.5 pb-1">
+        <div className="text-[0.64em] font-medium uppercase tracking-wide text-neutral-600">Notifications</div>
+        <button
+          type="button"
+          onClick={clearNotifications}
+          className="rounded px-1 py-0.5 text-[0.64em] text-neutral-600 hover:bg-neutral-900 hover:text-neutral-300"
+        >
+          Clear
+        </button>
+      </div>
+      <div className="-mx-2 divide-y divide-neutral-900 border-y border-neutral-900">
+        {rows.map((notification) => {
+          const workspaceName = workspaceNames.get(notification.workspaceId) ?? null
+          const railClass = notificationRailClass(notification.kind)
+          return (
+            <div
+              key={notification.id}
+              className="group relative flex cursor-pointer items-start gap-1 px-2 py-1.5"
+            >
+              <span className={`absolute inset-y-0 right-0 w-0.5 ${railClass}`} aria-hidden="true" />
+              <button
+                type="button"
+                onClick={() => void openNotification(notification)}
+                className="min-w-0 flex-1 px-1.5 text-left"
+                title={`${workspaceName ?? 'Unknown workspace'} · ${notification.title} · ${new Date(notification.createdAt).toLocaleString()}`}
+              >
+                <div className="flex min-w-0 items-baseline gap-1.5 text-[0.74em] leading-snug">
+                  <span className="truncate font-medium text-neutral-400">{workspaceName ?? 'Unknown workspace'}</span>
+                  <span className="shrink-0 text-neutral-700">·</span>
+                  <span className="truncate text-neutral-400/75">{notification.title}</span>
+                </div>
+                <div className="mt-1.5 line-clamp-2 text-[0.64em] leading-snug text-neutral-500">{notification.summary}</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => notifications.dismiss(notification.id)}
+                className="mt-0.5 rounded p-0.5 text-neutral-700 opacity-0 hover:bg-neutral-900 hover:text-neutral-300 group-hover:opacity-100"
+                aria-label={`Dismiss notification ${notification.title}`}
+                title="Dismiss notification"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function notificationRailClass(kind: AgentNotificationRecord['kind']): string {
+  if (kind === 'permission') return 'bg-amber-400'
+  if (kind === 'question') return 'bg-violet-400'
+  if (kind === 'error') return 'bg-red-400'
+  return 'bg-brand-500'
 }
 
 const sidebarAnimateLayoutChanges: AnimateLayoutChanges = (args) =>
@@ -1277,7 +1398,7 @@ function WorkspaceSidebarSessionRow({
         {running ? (
           <span className="h-2.5 w-2.5 animate-spin rounded-full border border-brand-400 border-t-transparent" />
         ) : unreadFinished ? (
-          <span className="h-2 w-2 rounded-full bg-brand-400" />
+          <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
         ) : (
           <span className="h-1.5 w-1.5 rounded-full bg-neutral-700" />
         )}
