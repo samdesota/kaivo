@@ -132,11 +132,11 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       cloud_open_pane: tool({
         description:
-          'Open or focus a right-side pane tab in the Cloud Code UI. Supports file, shell, preview, and browser panes. Use this to show the human relevant context. This tool does not read, write, or execute anything by itself.',
+          'Open or focus a right-side pane tab in the Cloud Code UI. Supports file, shell, and browser panes. Use browser panes for web pages and local dev servers. This tool does not read, write, or execute anything by itself.',
         args: {
           kind: z
-            .enum(['file', 'shell', 'preview', 'browser'])
-            .describe('Pane type to open: file, shell, preview, or browser.'),
+            .enum(['file', 'shell', 'browser'])
+            .describe('Pane type to open: file, shell, or browser.'),
           path: z
             .string()
             .optional()
@@ -144,8 +144,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
               'For kind=file: the file to open. A path with NO leading slash (e.g. "src/app.ts") is resolved relative to your current working directory. A path with a leading slash (e.g. "/etc/hosts" or "/Users/sam/notes.md") is treated as an absolute filesystem path.',
             ),
           shellId: z.string().optional().describe('For kind=shell: shell id to open.'),
-          port: z.number().int().optional().describe('For kind=preview: local preview port to open.'),
-          url: z.string().optional().describe('For kind=browser: URL to open.'),
+          url: z.string().optional().describe('For kind=browser: URL to open, including local dev server URLs such as http://127.0.0.1:5173.'),
           title: z.string().optional().describe('Optional short tab title.'),
           activate: z
             .boolean()
@@ -434,10 +433,9 @@ function ptyError(shellId: string, err: unknown): { output: string; metadata: Re
 async function runCloudOpenPane(
   client: AgentShellClient,
   args: {
-    kind: 'file' | 'shell' | 'preview' | 'browser'
+    kind: 'file' | 'shell' | 'browser'
     path?: string
     shellId?: string
-    port?: number
     url?: string
     title?: string
     activate?: boolean
@@ -448,7 +446,6 @@ async function runCloudOpenPane(
     let content:
       | { type: 'file'; path: string }
       | { type: 'shell'; shellId: string }
-      | { type: 'preview'; port: number }
       | { type: 'browser'; url?: string }
     if (args.kind === 'file') {
       if (!args.path) throw new Error('path is required for kind=file')
@@ -456,9 +453,6 @@ async function runCloudOpenPane(
     } else if (args.kind === 'shell') {
       if (!args.shellId) throw new Error('shellId is required for kind=shell')
       content = { type: 'shell', shellId: args.shellId }
-    } else if (args.kind === 'preview') {
-      if (!args.port) throw new Error('port is required for kind=preview')
-      content = { type: 'preview', port: args.port }
     } else {
       content = args.url ? { type: 'browser', url: args.url } : { type: 'browser' }
     }
@@ -475,9 +469,7 @@ async function runCloudOpenPane(
         ? content.path
         : content.type === 'shell'
           ? content.shellId
-          : content.type === 'preview'
-            ? `:${content.port}`
-            : (content.url ?? 'browser')
+          : (content.url ?? 'browser')
     ctx.metadata({
       title: `open ${content.type} ${truncateTitle(label)}`,
       metadata: { status: 'success', pane_type: content.type },

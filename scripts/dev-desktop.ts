@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import * as runtime from '../packages/cloud-code-desktop/src/instance-runtime.ts'
 import { runLocalDevLauncher } from './local-launch'
 
@@ -64,7 +64,7 @@ function run(command: string, args: string[], cwd: string): void {
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited with ${result.status}`)
 }
 
-async function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function waitForExit(child: ChildProcess): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     child.once('error', reject)
     child.once('exit', (code, signal) => {

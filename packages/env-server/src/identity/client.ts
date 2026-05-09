@@ -55,7 +55,6 @@ export interface OpenPaneInput {
   content:
     | { type: 'shell'; shellId: string }
     | { type: 'file'; path: string; absolute?: boolean }
-    | { type: 'preview'; port: number }
     | { type: 'browser'; url?: string; browserTabId?: string }
   title?: string
   activate?: boolean

@@ -7,7 +7,6 @@ export const paneContentSchema = z.discriminatedUnion('type', [
     absolute: z.boolean().optional(),
   }),
   z.object({ type: z.literal('shell'), shellId: z.string().min(1) }),
-  z.object({ type: z.literal('preview'), port: z.number().int().min(1).max(65535) }),
   z.object({
     type: z.literal('browser'),
     url: z.string().min(1).max(4096).optional(),

@@ -794,7 +794,7 @@ describe('env api router', () => {
     expect(viewState.activeWorkspaceTabId).toBe(result.tab.id)
   })
 
-  it('persists shell, preview, and browser panes with correct identity fields', async () => {
+  it('persists shell and browser panes from env API with correct identity fields', async () => {
     const { workspaceService } = await import('./service.js')
     const { envApiRouter } = await import('../trpc/routers/env-api.js')
     const workspace = await workspaceService.create({ name: 'Pane types workspace' })
@@ -808,18 +808,12 @@ describe('env api router', () => {
     await caller.openPane({
       workspaceId: workspace.id,
       envId: 'local-default',
-      content: { type: 'preview', port: 5173 },
-    })
-    await caller.openPane({
-      workspaceId: workspace.id,
-      envId: 'local-default',
       content: { type: 'browser', url: 'https://example.com', browserTabId: 'native-1' },
     })
 
     await expect(workspaceService.listTabs(workspace.id)).resolves.toMatchObject([
       { type: 'shell', envId: 'local-default', shellId: 'shell-1', position: 0 },
-      { type: 'preview', envId: 'local-default', port: 5173, position: 1 },
-      { type: 'browser', url: 'https://example.com', browserTabId: 'native-1', position: 2 },
+      { type: 'browser', url: 'https://example.com', browserTabId: 'native-1', position: 1 },
     ])
   })
 })
