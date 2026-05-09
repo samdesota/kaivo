@@ -234,7 +234,13 @@ export function WorkspacePage() {
     [envTargets],
   )
 
-  if (workspace.isLoading || envs.isLoading || viewStateStore.isLoading || tabsStore.isLoading) {
+  const initiallyLoading =
+    (workspace.isLoading && !workspace.data) ||
+    (envs.isLoading && !envs.data) ||
+    (viewStateStore.isLoading && !viewStateStore.viewState) ||
+    (tabsStore.isLoading && !tabsStore.data)
+
+  if (initiallyLoading) {
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
