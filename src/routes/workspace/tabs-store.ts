@@ -195,6 +195,13 @@ export function useWorkspaceTabsStore(workspaceId: string) {
         draft.browserTabId = browserTabId
       })
     },
+    setTabUrl(tabId: string, url: string) {
+      const record = records.find((tab) => tab.id === tabId)
+      if (!record || record.type !== 'browser' || record.url === url) return
+      collection.update(workspaceTabRecordKey(record), (draft) => {
+        draft.url = url
+      })
+    },
     setTabTitle(tabId: string, title: string) {
       const record = records.find((tab) => tab.id === tabId)
       if (!record) return

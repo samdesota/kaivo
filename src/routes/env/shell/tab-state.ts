@@ -23,6 +23,7 @@ export type RightPaneAction =
   | { type: 'close'; tabId: string }
   | { type: 'setTitle'; tabId: string; title: string }
   | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
+  | { type: 'setBrowserUrl'; tabId: string; url: string }
   | { type: 'pruneShells'; liveShellIds: ReadonlySet<string> }
   | { type: 'hydrate'; state: RightPaneState }
 
@@ -123,6 +124,16 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
         tabs: state.tabs.map((t) =>
           t.id === action.tabId && t.content.type === 'browser'
             ? { ...t, content: { ...t.content, browserTabId: action.browserTabId } }
+            : t,
+        ),
+      }
+    }
+    case 'setBrowserUrl': {
+      return {
+        ...state,
+        tabs: state.tabs.map((t) =>
+          t.id === action.tabId && t.content.type === 'browser'
+            ? { ...t, content: { ...t.content, url: action.url } }
             : t,
         ),
       }

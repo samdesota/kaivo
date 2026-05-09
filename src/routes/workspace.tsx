@@ -214,6 +214,8 @@ export function WorkspacePage() {
       tabsStore.closeTab(action.tabId)
     } else if (action.type === 'setBrowserTabId') {
       tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
+    } else if (action.type === 'setTabUrl') {
+      tabsStore.setTabUrl(action.tabId, action.url)
     } else if (action.type === 'setTabTitle') {
       tabsStore.setTabTitle(action.tabId, action.title)
     } else if (action.type === 'setSplitRatio') {
@@ -1657,6 +1659,9 @@ function WorkspaceTabPane({
             onBrowserTabId={(browserTabId) =>
               dispatchWorkspaceState({ type: 'setBrowserTabId', tabId: activeTab.id, browserTabId })
             }
+            onUrlChange={(url) =>
+              dispatchWorkspaceState({ type: 'setTabUrl', tabId: activeTab.id, url })
+            }
             onTitleChange={(title) =>
               dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
             }
@@ -1682,6 +1687,7 @@ function WorkspaceTabContent({
   fileEditorState,
   onFileEditorStateChange,
   onBrowserTabId,
+  onUrlChange,
   onTitleChange,
 }: {
   tab: WorkspaceTab
@@ -1689,6 +1695,7 @@ function WorkspaceTabContent({
   fileEditorState?: FileEditorState
   onFileEditorStateChange?: (editorState: FileEditorState) => void
   onBrowserTabId: (browserTabId: string) => void
+  onUrlChange: (url: string) => void
   onTitleChange: (title: string) => void
 }) {
   const ctx = useWorkspaceContext()
@@ -1724,6 +1731,7 @@ function WorkspaceTabContent({
           browserTabId={tab.browserTabId}
           active
           onBrowserTabId={onBrowserTabId}
+          onUrlChange={onUrlChange}
           onTitleChange={onTitleChange}
           closeOnUnmount={false}
         />

@@ -8,16 +8,18 @@ interface BrowserPaneProps {
   active: boolean
   closeOnUnmount?: boolean
   onBrowserTabId?: (browserTabId: string) => void
+  onUrlChange?: (url: string) => void
   onTitleChange?: (title: string) => void
 }
 
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 }
 
-export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount = true, onBrowserTabId, onTitleChange }: BrowserPaneProps) {
+export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount = true, onBrowserTabId, onUrlChange, onTitleChange }: BrowserPaneProps) {
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
   const createdTabIdRef = useRef<string | null>(null)
   const onBrowserTabIdRef = useRef(onBrowserTabId)
+  const onUrlChangeRef = useRef(onUrlChange)
   const onTitleChangeRef = useRef(onTitleChange)
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
@@ -27,6 +29,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
 
   browserTabIdRef.current = browserTabId
   onBrowserTabIdRef.current = onBrowserTabId
+  onUrlChangeRef.current = onUrlChange
   onTitleChangeRef.current = onTitleChange
 
   useEffect(() => {
@@ -114,7 +117,10 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     if (!browserApi.isAvailable()) return
     return browserApi.onTabChange((event) => {
       if (event.browserTabId !== browserTabIdRef.current) return
-      if (typeof event.patch.url === 'string') setAddress(event.patch.url)
+      if (typeof event.patch.url === 'string') {
+        setAddress(event.patch.url)
+        onUrlChangeRef.current?.(event.patch.url)
+      }
       if (typeof event.patch.title === 'string') onTitleChangeRef.current?.(event.patch.title)
     })
   }, [])

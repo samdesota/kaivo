@@ -19,6 +19,7 @@ export type WorkspaceUiAction =
   | { type: 'activateTab'; tabId: string }
   | { type: 'closeTab'; tabId: string }
   | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
+  | { type: 'setTabUrl'; tabId: string; url: string }
   | { type: 'setTabTitle'; tabId: string; title: string }
   | { type: 'setActiveAgentSession'; sessionId: string | null }
   | { type: 'setSplitRatio'; splitRatio: number | null }
@@ -85,6 +86,16 @@ export function workspaceUiReducer(
       workspaceTabs: state.workspaceTabs.map((tab) =>
         tab.id === action.tabId && tab.type === 'browser'
           ? { ...tab, browserTabId: action.browserTabId }
+          : tab,
+      ),
+    }
+  }
+  if (action.type === 'setTabUrl') {
+    return {
+      ...state,
+      workspaceTabs: state.workspaceTabs.map((tab) =>
+        tab.id === action.tabId && tab.type === 'browser'
+          ? { ...tab, url: action.url }
           : tab,
       ),
     }

@@ -118,6 +118,7 @@ function TabContent({
         onBrowserTabId={(browserTabId) =>
           dispatch({ type: 'setBrowserTabId', tabId, browserTabId })
         }
+        onUrlChange={(url) => dispatch({ type: 'setBrowserUrl', tabId, url })}
         onTitleChange={(title) => dispatch({ type: 'setTitle', tabId, title: truncateTabTitle(title) })}
       />
     )

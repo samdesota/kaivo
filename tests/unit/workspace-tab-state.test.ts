@@ -67,6 +67,19 @@ describe('workspace tab state', () => {
     expect(state.workspaceTabs[0]).toMatchObject({ browserTabId: 'native-1' })
   })
 
+  it('stores current URL for browser workspace tabs', () => {
+    let state = workspaceUiReducer(emptyWorkspaceUiState(), {
+      type: 'openTab',
+      tab: { id: 'browser-1', type: 'browser', url: 'https://example.com', title: 'Example' },
+    })
+    state = workspaceUiReducer(state, {
+      type: 'setTabUrl',
+      tabId: 'browser-1',
+      url: 'https://example.org/docs',
+    })
+    expect(state.workspaceTabs[0]).toMatchObject({ url: 'https://example.org/docs' })
+  })
+
   it('updates file editor state for the target tab only', () => {
     const states = {
       'file-a': { draft: 'local a', draftBaseMtime: '2026-05-07T00:00:00.000Z' },
