@@ -38,7 +38,6 @@ import { AgentSessionView } from './env/agent/session-view'
 import { ShellsDropdown } from './env/shell/dropdowns'
 import { NewSessionPopover } from './env/agent/session-tabs'
 import { NewAgentChatModal } from './env/agent/new-agent-chat-modal'
-import { useChatSession, useRetainChatSessions } from './env/agent/chat-state'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -101,19 +100,9 @@ type WorkspaceSidebarNode =
   | { type: 'folder'; folder: WorkspaceFolderSummary; children: WorkspaceSidebarNode[] }
   | { type: 'workspace'; workspace: WorkspaceSummary }
 
-type SessionSummary = {
-  id: string
-  workspaceId?: string | null
-  title: string | null
-  status: string
-  createdAt: Date | string
-  lastActivityAt: Date | string
-}
-
 const WORKSPACE_SIDEBAR_WIDTH_KEY = 'cloud-code.workspaceSidebarWidth'
 const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
-const WORKSPACE_CHAT_EXPANDED_KEY = 'cloud-code.workspaceChatExpanded'
 const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
 
 type WorkspaceEnvResources = {
@@ -440,14 +429,6 @@ export function WorkspaceSidebar({
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
   const [localTree, setLocalTree] = useState<WorkspaceSidebarNode[] | null>(null)
   const [sidebarWidth, setSidebarWidth] = useState(() => readWorkspaceSidebarWidth())
-  const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<string[]>(() => {
-    try {
-      const raw = window.localStorage.getItem(WORKSPACE_CHAT_EXPANDED_KEY)
-      return raw ? (JSON.parse(raw) as string[]) : []
-    } catch {
-      return []
-    }
-  })
   const [chatReadVersion, setChatReadVersion] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
@@ -505,24 +486,6 @@ export function WorkspaceSidebar({
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-
-  function setWorkspaceExpanded(workspaceId: string, expanded: boolean) {
-    if (expanded) {
-      markWorkspaceChatsRead(workspaceId)
-      setChatReadVersion((version) => version + 1)
-    }
-    setExpandedWorkspaceIds((current) => {
-      const next = expanded
-        ? Array.from(new Set([...current, workspaceId]))
-        : current.filter((id) => id !== workspaceId)
-      try {
-        window.localStorage.setItem(WORKSPACE_CHAT_EXPANDED_KEY, JSON.stringify(next))
-      } catch {
-        // ignore disabled/quota storage
-      }
-      return next
-    })
-  }
 
   async function openFolderCreate(parentId: string | null) {
     const name = await openTextInputOverlay({
@@ -761,7 +724,7 @@ export function WorkspaceSidebar({
           active={activeDragId === dndId}
           guideDepths={row.ancestorFolderIds.map((_, index) => index)}
         >
-          <div className="relative mb-1">
+          <div className="relative mb-0.5">
             {folderHasVisibleChildren && (
               <span
                 className="pointer-events-none absolute bottom-[-5px] left-[3.5px] top-[20px] border-l border-neutral-800/80"
@@ -771,21 +734,22 @@ export function WorkspaceSidebar({
             <div className="group flex items-center gap-px py-px text-xs text-neutral-400 transition-all duration-150">
               <button
                 onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}
-                className={
-                  '-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300 ' +
-                  (folder.collapsed ? 'opacity-0 group-hover:opacity-100' : 'opacity-100')
-                }
+                className="-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300"
                 aria-label={`${folder.collapsed ? 'Expand' : 'Collapse'} folder ${folder.name}`}
               >
                 {folder.collapsed ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
               </button>
               <div className={
-                'flex min-w-0 flex-1 items-center rounded px-[3px] group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
+                'flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
                 (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-brand-500/10 text-neutral-100 ring-1 ring-brand-400/60 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
-              }>
+              }
+              onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}>
                 <span className="min-w-0 flex-1 truncate px-0.5 font-medium" title={folder.name}>{folder.name}</span>
                 <button
-                  onClick={() => setNewChatContext({ mode: 'new', folderId: folder.id })}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setNewChatContext({ mode: 'new', folderId: folder.id })
+                  }}
                   className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
                   aria-label={`Create workspace in ${folder.name}`}
                   title="New workspace from chat"
@@ -793,7 +757,10 @@ export function WorkspaceSidebar({
                   <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
                 <button
-                  onClick={() => void openFolderCreate(folder.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void openFolderCreate(folder.id)
+                  }}
                   disabled={createFolder.isPending}
                   className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
                   aria-label={`Create folder in ${folder.name}`}
@@ -811,8 +778,7 @@ export function WorkspaceSidebar({
     if (!workspace) return null
     const dndId = sidebarDndId('workspace', workspace.id)
     const editing = edit.editingId === workspace.id
-    const expanded = expandedWorkspaceIds.includes(workspace.id)
-    const active = workspace.id === ctx.workspace.id && (!ctx.uiState.activeAgentSessionId || !expanded)
+    const active = workspace.id === ctx.workspace.id
     const showChatRollup = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
     return (
       <SortableSidebarRow
@@ -822,101 +788,71 @@ export function WorkspaceSidebar({
         active={activeDragId === dndId}
         guideDepths={row.ancestorFolderIds.map((_, index) => index)}
       >
-        <div className="relative mb-1">
-          {expanded && (
-            <span
-              className="pointer-events-none absolute bottom-0 left-[3.5px] top-[22px] border-l border-neutral-800/80"
-              aria-hidden="true"
-            />
-          )}
+        <div className="relative mb-0.5">
           <div className="group flex items-center gap-px text-neutral-400">
-          <button
-            className={
-              '-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300 ' +
-              (expanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')
-            }
-            title={expanded ? 'Collapse chats' : 'Expand chats'}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} chats for ${workspace.name}`}
-            onClick={() => setWorkspaceExpanded(workspace.id, !expanded)}
-          >
-            {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
-          </button>
-          <div className={
-            'relative flex min-w-0 flex-1 items-center rounded px-[3px] transition-colors group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
-            (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
-          }>
-          {editing ? (
-            <input
-              ref={inputRef}
-              value={edit.draft}
-              onChange={(e) => dispatchEdit({ type: 'change', draft: e.target.value })}
-              onBlur={() => void saveRename()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void saveRename()
-                if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
-              }}
-              className="min-w-0 flex-1 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
-              aria-label="Workspace name"
-            />
-          ) : (
-            <Link
-              to="/w/$workspaceId"
-              params={{ workspaceId: workspace.id }}
-              search={{ chat: undefined, tab: undefined }}
-              onDoubleClick={(e) => {
-                e.preventDefault()
-                dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
-              }}
-              className={
-                'min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium'
-              }
-              title={workspace.name}
-            >
-              {workspace.name}
-            </Link>
-          )}
-          {showChatRollup && (
-          <span className="pointer-events-none absolute right-1 flex items-center transition-transform duration-150 group-hover:-translate-x-10">
-              <WorkspaceAgentEnvProvider>
-                <WorkspaceSidebarChatCount workspaceId={workspace.id} readVersion={chatReadVersion} />
-              </WorkspaceAgentEnvProvider>
-          </span>
-          )}
-          <button
-            onClick={() => setNewChatContext({ mode: 'existing', workspace })}
-            className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
-            aria-label={`Create chat in ${workspace.name}`}
-            title="New chat in workspace"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              void closeWorkspace(workspace.id, workspaces)
-            }}
-            className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
-            aria-label={`Close workspace ${workspace.name}`}
-            title="Close workspace"
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+            <span className="h-4 w-1 shrink-0" aria-hidden="true" />
+            <div className={
+              'relative flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 transition-colors group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
+              (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
+            }>
+              {editing ? (
+                <input
+                  ref={inputRef}
+                  value={edit.draft}
+                  onChange={(e) => dispatchEdit({ type: 'change', draft: e.target.value })}
+                  onBlur={() => void saveRename()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void saveRename()
+                    if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
+                  }}
+                  className="min-w-0 flex-1 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
+                  aria-label="Workspace name"
+                />
+              ) : (
+                <Link
+                  to="/w/$workspaceId"
+                  params={{ workspaceId: workspace.id }}
+                  search={{ chat: undefined, tab: undefined }}
+                  onDoubleClick={(e) => {
+                    e.preventDefault()
+                    dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
+                  }}
+                  className="min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium"
+                  title={workspace.name}
+                >
+                  {workspace.name}
+                </Link>
+              )}
+              {showChatRollup && (
+                <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-10">
+                  <WorkspaceAgentEnvProvider>
+                    <WorkspaceSidebarChatCount workspaceId={workspace.id} readVersion={chatReadVersion} />
+                  </WorkspaceAgentEnvProvider>
+                </span>
+              )}
+              <button
+                onClick={() => setNewChatContext({ mode: 'existing', workspace })}
+                className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                aria-label={`Create chat in ${workspace.name}`}
+                title="New chat in workspace"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  void closeWorkspace(workspace.id, workspaces)
+                }}
+                className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                aria-label={`Close workspace ${workspace.name}`}
+                title="Close workspace"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </div>
-        {expanded && ctx.localEnvTarget?.available && ctx.localEnvTarget.token ? (
-          <WorkspaceAgentEnvProvider>
-            <WorkspaceSidebarSessions
-              workspaceId={workspace.id}
-              activeWorkspaceId={ctx.workspace.id}
-              activeSessionId={ctx.uiState.activeAgentSessionId}
-              dispatchWorkspaceState={dispatchWorkspaceState}
-            />
-          </WorkspaceAgentEnvProvider>
-        ) : expanded && active ? (
-          <div className="px-6 py-1.5 text-[11px] text-neutral-600">Agent unavailable</div>
-        ) : null}
-      </div>
       </SortableSidebarRow>
     )
   }
@@ -1282,138 +1218,6 @@ function markWorkspaceChatsRead(workspaceId: string) {
   } catch {
     // ignore disabled/quota storage
   }
-}
-
-function WorkspaceSidebarNewChatButton({
-  workspaceId,
-  onCreated,
-}: {
-  workspaceId: string
-  onCreated: (sessionId: string) => void | Promise<void>
-}) {
-  const queryClient = useQueryClient()
-  const ctx = useWorkspaceContext()
-  const target = ctx.localEnvTarget
-  return (
-    <div className="opacity-0 transition-opacity group-hover:opacity-100">
-      <NewSessionPopover
-        workspaceId={workspaceId}
-        onOpenNewChat={target?.token ? async () => {
-          await openNewAgentChatOverlay({ workspaceId, env: target.env, envToken: target.token! })
-        } : undefined}
-        onCreated={async (sessionId) => {
-          await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId }) })
-          await onCreated(sessionId)
-        }}
-        label="+"
-      />
-    </div>
-  )
-}
-
-function WorkspaceSidebarSessions({
-  workspaceId,
-  activeWorkspaceId,
-  activeSessionId,
-  dispatchWorkspaceState,
-}: {
-  workspaceId: string
-  activeWorkspaceId: string
-  activeSessionId: string | null
-  dispatchWorkspaceState: WorkspaceUiDispatch
-}) {
-  const navigate = useNavigate()
-  const sessions = envTrpc.agent.sessionList.useQuery({ workspaceId }, { refetchInterval: 5_000 })
-  const rows = useMemo(() => {
-    return ((sessions.data ?? []) as SessionSummary[]).filter((session) => session.status !== 'archived')
-  }, [sessions.data])
-  const sessionIds = useMemo(() => rows.map((session) => session.id), [rows])
-  useRetainChatSessions(sessionIds)
-
-  async function selectSession(sessionId: string) {
-    if (workspaceId === activeWorkspaceId) {
-      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
-      await navigate({
-        to: '/w/$workspaceId',
-        params: { workspaceId },
-        search: { chat: sessionId, tab: undefined },
-      })
-      return
-    }
-    await navigate({
-      to: '/w/$workspaceId',
-      params: { workspaceId },
-      search: { chat: sessionId, tab: undefined },
-    })
-  }
-
-  if (sessions.isLoading) {
-    return <div className="px-2 py-1.5 text-[11px] text-neutral-600">Loading chats…</div>
-  }
-
-  return (
-    <div className="mt-1 space-y-0.5 pl-2">
-      {rows.length === 0 ? (
-        <div className="px-2 py-1 text-[11px] text-neutral-600">No chats</div>
-      ) : (
-        rows.map((session) => (
-          <WorkspaceSidebarSessionRow
-            key={session.id}
-            session={session}
-            selected={workspaceId === activeWorkspaceId && session.id === activeSessionId}
-            onSelect={() => void selectSession(session.id)}
-          />
-        ))
-      )}
-    </div>
-  )
-}
-
-function WorkspaceSidebarSessionRow({
-  session,
-  selected,
-  onSelect,
-}: {
-  session: SessionSummary
-  selected: boolean
-  onSelect: () => void
-}) {
-  const chat = useChatSession(session.id)
-  const running = chat.running || Boolean(chat.status?.running)
-  const [wasRunning, setWasRunning] = useState(running)
-  const [unreadFinished, setUnreadFinished] = useState(false)
-  const label = session.title ?? session.id.slice(-6)
-
-  useEffect(() => {
-    if (selected) setUnreadFinished(false)
-  }, [selected])
-
-  useEffect(() => {
-    if (wasRunning && !running && !selected) setUnreadFinished(true)
-    setWasRunning(running)
-  }, [running, selected, wasRunning])
-
-  return (
-    <button
-      onClick={onSelect}
-      className={
-        'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[11px] transition-colors ' +
-        (selected ? 'bg-brand-500/15 text-neutral-100' : 'text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200')
-      }
-      title={`${label} · ${new Date(session.lastActivityAt).toLocaleString()}`}
-    >
-      <span className="flex h-3 w-3 shrink-0 items-center justify-center">
-        {running ? (
-          <span className="h-2.5 w-2.5 animate-spin rounded-full border border-brand-400 border-t-transparent" />
-        ) : unreadFinished ? (
-          <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
-        ) : (
-          <span className="h-1.5 w-1.5 rounded-full bg-neutral-700" />
-        )}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
-  )
 }
 
 function WorkspaceAgentPane({

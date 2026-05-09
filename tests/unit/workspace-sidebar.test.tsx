@@ -169,14 +169,16 @@ describe('WorkspaceSidebar', () => {
     expect(screen.getAllByText('cloud-code-tools').length).toBeGreaterThan(1)
   })
 
-  it('persists workspace chat expansion state', async () => {
+  it('does not expose workspace chat expansion controls', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Expand chats for cloud-code-tools' }))
+    expect(await screen.findByText('cloud-code-tools')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Expand chats for cloud-code-tools' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collapse chats for cloud-code-tools' })).toBeNull()
 
-    expect(JSON.parse(window.localStorage.getItem('cloud-code.workspaceChatExpanded') ?? '[]')).toEqual(['workspace-tools'])
-    expect(await screen.findByText('No chats')).toBeTruthy()
+    expect(window.localStorage.getItem('cloud-code.workspaceChatExpanded')).toBeNull()
+    expect(screen.queryByText('No chats')).toBeNull()
   })
 
   it('renders chat finish notifications with workspace names', async () => {

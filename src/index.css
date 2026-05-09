@@ -83,3 +83,7 @@ body.overlay-layer-document,
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+.lucide {
+  stroke-width: 1.5;
+}
