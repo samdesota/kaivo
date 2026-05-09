@@ -245,6 +245,16 @@ export function WorkspacePage() {
     (tabsStore.isLoading && !tabsStore.data)
 
   if (initiallyLoading) {
+    logWorkspaceLoading('initiallyLoading', workspaceId, {
+      workspaceLoading: workspace.isLoading,
+      workspaceHasData: Boolean(workspace.data),
+      envsLoading: envs.isLoading,
+      envsHasData: Boolean(envs.data),
+      viewStateLoading: viewStateStore.isLoading,
+      viewStateHasData: Boolean(viewStateStore.viewState),
+      tabsLoading: tabsStore.isLoading,
+      tabsHasData: Boolean(tabsStore.data),
+    })
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
@@ -255,6 +265,14 @@ export function WorkspacePage() {
     return <WorkspaceError message="Workspace did not load." />
   }
   if (!viewStateStore.viewState || !tabsStore.data) {
+    logWorkspaceLoading('missingStoreDataAfterInitialLoad', workspaceId, {
+      viewStateLoading: viewStateStore.isLoading,
+      viewStateHasData: Boolean(viewStateStore.viewState),
+      tabsLoading: tabsStore.isLoading,
+      tabsHasData: Boolean(tabsStore.data),
+      workspaceHasData: Boolean(workspace.data),
+      envsHasData: Boolean(envs.data),
+    })
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
 
@@ -280,6 +298,14 @@ export function WorkspacePage() {
       <WorkspaceShell key={workspace.data.id} dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
     </WorkspaceContextProvider>
   )
+}
+
+function logWorkspaceLoading(reason: string, workspaceId: string, state: Record<string, unknown>) {
+  console.info('[workspace] Loading workspace...', {
+    reason,
+    workspaceId,
+    ...state,
+  })
 }
 
 function WorkspaceShell({
