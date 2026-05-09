@@ -1663,6 +1663,7 @@ function WorkspaceTabPane({
 
   useEffect(() => {
     return browserApi.onWindowTabCreated((event) => {
+      if (event.presentation === 'popup') return
       if (!event.openerBrowserTabId) return
       const openedFromThisWorkspace = tabsRef.current.some(
         (tab) => tab.type === 'browser' && tab.browserTabId === event.openerBrowserTabId,

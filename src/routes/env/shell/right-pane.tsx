@@ -41,6 +41,7 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
 
   useEffect(() => {
     return browserApi.onWindowTabCreated((event) => {
+      if (event.presentation === 'popup') return
       if (!event.openerBrowserTabId) return
       const openedFromThisPane = tabsRef.current.some(
         (tab) => tab.content.type === 'browser' && tab.content.browserTabId === event.openerBrowserTabId,

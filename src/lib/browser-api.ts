@@ -14,12 +14,13 @@ export type BrowserTabCreated = {
   openerBrowserTabId: string | null
   url: string
   title: string
+  presentation?: 'embedded' | 'popup'
 }
 
 export type BrowserApi = {
   isAvailable(): boolean
   getWindowId(): Promise<string>
-  listTabs(): Promise<Array<{ browserTabId: string; url?: string }>>
+  listTabs(): Promise<Array<{ browserTabId: string; url?: string; presentation?: 'embedded' | 'popup' }>>
   createTab(input: { paneId: string; url?: string }): Promise<{ browserTabId: string }>
   attachTab(input: { paneId: string; browserTabId: string }): Promise<void>
   focusTab(input: { browserTabId: string }): Promise<void>
@@ -48,7 +49,7 @@ type WebframeGlobal = {
       setSlots: { mutate: (input: unknown) => Promise<unknown> }
     }
     tabs: {
-      list?: { query: (input?: unknown) => Promise<Array<{ id: string; url?: string }>> }
+      list?: { query: (input?: unknown) => Promise<Array<{ id: string; url?: string; presentation?: 'embedded' | 'popup' }>> }
       create: { mutate: (input: unknown) => Promise<{ id: string }> }
       move: { mutate: (input: unknown) => Promise<unknown> }
       setActive: { mutate: (input: unknown) => Promise<unknown> }
@@ -64,7 +65,7 @@ type WebframeGlobal = {
           input: unknown,
           opts: {
             onData?: (data: {
-              tab: { id: string; url: string; title: string }
+              tab: { id: string; url: string; title: string; presentation?: 'embedded' | 'popup' }
               windowId: string | null
               openerTabId: string | null
             }) => void
@@ -130,7 +131,7 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const webframe = getWebframe(win)
       if (!webframe.trpc.tabs.list) return []
       const records = await webframe.trpc.tabs.list.query()
-      return records.map((record) => ({ browserTabId: record.id, url: record.url }))
+      return records.map((record) => ({ browserTabId: record.id, url: record.url, presentation: record.presentation }))
     },
 
     async createTab(input) {
@@ -287,6 +288,7 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
               openerBrowserTabId: data.openerTabId,
               url: data.tab.url,
               title: data.tab.title,
+              presentation: data.tab.presentation,
             })
           },
         })

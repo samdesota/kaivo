@@ -5,7 +5,7 @@ function makeWindow() {
   const calls: Record<string, ReturnType<typeof vi.fn>> = {
     setSlots: vi.fn(async () => ({ ok: true })),
     create: vi.fn(async () => ({ id: 'tab-1' })),
-    list: vi.fn(async () => [{ id: 'tab-1', url: 'https://example.com' }]),
+    list: vi.fn(async () => [{ id: 'tab-1', url: 'https://example.com', presentation: 'embedded' }]),
     move: vi.fn(async () => ({ ok: true })),
     setActive: vi.fn(async () => ({ ok: true })),
     close: vi.fn(async () => ({ ok: true })),
@@ -50,7 +50,11 @@ describe('browser API adapter', () => {
     const api = createBrowserApi(win)
 
     expect(api.isAvailable()).toBe(true)
-    await expect(api.listTabs()).resolves.toEqual([{ browserTabId: 'tab-1', url: 'https://example.com' }])
+    await expect(api.listTabs()).resolves.toEqual([{
+      browserTabId: 'tab-1',
+      url: 'https://example.com',
+      presentation: 'embedded',
+    }])
     await api.setSlot({ paneId: 'pane-1', rect: { x: 1, y: 2, width: 300, height: 200 } })
     expect(calls.setSlots).toHaveBeenLastCalledWith({
       windowId: 'window-1',
