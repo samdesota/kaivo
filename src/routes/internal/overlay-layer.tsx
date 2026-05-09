@@ -103,6 +103,7 @@ export function OverlayLayerApp({
   }, [initialRequest])
 
   function respond(response: OverlayResponse) {
+    setRequest(null)
     if (onResponse) {
       onResponse(response)
       return
@@ -114,7 +115,7 @@ export function OverlayLayerApp({
 
   if (!request) return <div className="min-h-screen bg-transparent" />
 
-  return <OverlayRequestRenderer request={request} respond={respond} />
+  return <OverlayRequestRenderer key={request.requestId} request={request} respond={respond} />
 }
 
 function isOverlayRequest(message: OverlayRequest | OverlayResponse | { type: 'close' }): message is OverlayRequest {
