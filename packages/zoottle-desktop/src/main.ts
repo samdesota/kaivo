@@ -80,7 +80,7 @@ function installAppShortcutMenu(): void {
       ? [{ role: 'appMenu' as const }]
       : []),
     {
-      label: 'Cloud Code',
+      label: 'Zoottle',
       submenu: appShortcuts.map((shortcut) => ({
         label: shortcut.label,
         accelerator: shortcut.accelerator,

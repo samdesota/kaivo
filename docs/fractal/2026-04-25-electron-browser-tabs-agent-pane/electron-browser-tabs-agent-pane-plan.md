@@ -2,10 +2,10 @@
 
 ## Task 1: Publish `webframe` Through GitHub Packages
 
-Prepare `webframe` for scoped package publishing so `cloud-code-tools` can consume it as a normal dependency while keeping the source in its own repo.
+Prepare `webframe` for scoped package publishing so `zoottle` can consume it as a normal dependency while keeping the source in its own repo.
 
 **Steps**
-- Rename or scope the `webframe` package for GitHub Packages, for example `@cloud-code/webframe`.
+- Rename or scope the `webframe` package for GitHub Packages, for example `@zoottle/webframe`.
 - Add GitHub Packages publish configuration and document required `.npmrc` authentication.
 - Add a release/publish workflow or script that runs the `webframe` build before publishing.
 
@@ -23,7 +23,7 @@ Prepare `webframe` for scoped package publishing so `cloud-code-tools` can consu
 Create the test harness before feature work so every later Electron task can be verified by an agent without relying on manual observation.
 
 **Steps**
-- Add a Playwright Electron fixture for launching `cloud-code-desktop` with controlled environment variables and per-run temp state.
+- Add a Playwright Electron fixture for launching `zoottle-desktop` with controlled environment variables and per-run temp state.
 - Capture Electron main logs, chrome renderer console logs, browser-tab renderer console logs, unhandled rejections, uncaught exceptions, crashes, and `render-process-gone` events into a per-test log file.
 - Expose test-only main-process inspection hooks for window ids, `webframe` app state, tab records, slot bounds, active tab ids, and log paths.
 - Add helpers for renderer manipulation through Playwright `Page`, main-process inspection through Electron `app.evaluate`, and log dumping on failure.
@@ -38,18 +38,18 @@ Create the test harness before feature work so every later Electron task can be 
 
 **Status:** done
 
-## Task 3: Add `cloud-code-desktop` Package Skeleton
+## Task 3: Add `zoottle-desktop` Package Skeleton
 
-Create the desktop app package inside `cloud-code-tools` and wire it into the harness without changing browser pane behavior yet.
+Create the desktop app package inside `zoottle` and wire it into the harness without changing browser pane behavior yet.
 
 **Steps**
-- Add `packages/cloud-code-desktop` with `src/main.ts`, `src/preload.ts`, package metadata, TypeScript config, and bundling config.
+- Add `packages/zoottle-desktop` with `src/main.ts`, `src/preload.ts`, package metadata, TypeScript config, and bundling config.
 - Add Electron and `@samdesota/webframe` dependencies in the right package scope.
 - Add root scripts for desktop build, typecheck, development startup, and desktop e2e tests.
 - Point the Electron harness at the built desktop main process.
 
 **Tests**
-- Unit: TypeScript typecheck for `packages/cloud-code-desktop`.
+- Unit: TypeScript typecheck for `packages/zoottle-desktop`.
 - Integration: desktop package build emits main and preload bundles.
 - Integration: desktop harness launches the skeleton app and captures main plus renderer logs.
 
@@ -158,13 +158,13 @@ Make the new desktop workflow repeatable for local development and release candi
 
 **Steps**
 - Document GitHub Packages auth, published install, and linked `../webframe` development setup.
-- Add a local dev command that runs app server, Vite client, `webframe` watch build, and `cloud-code-desktop` together.
+- Add a local dev command that runs app server, Vite client, `webframe` watch build, and `zoottle-desktop` together.
 - Document desktop test harness commands, log locations, failure output, and how to run a single Electron e2e test.
 - Document production build expectations and failure modes for missing GitHub Packages auth or missing linked `webframe` build output.
 
 **Tests**
 - Unit: package scripts referenced by docs exist and run in dry-run form where possible.
-- Integration: clean install with GitHub Packages auth builds `cloud-code-tools`, `cloud-code-desktop`, and runs the desktop harness smoke test.
+- Integration: clean install with GitHub Packages auth builds `zoottle`, `zoottle-desktop`, and runs the desktop harness smoke test.
 - Manual: follow the documented linked `../webframe` workflow and verify a code change in `webframe` reaches the desktop app after rebuild/restart.
 
 **Depends on:** Task 8

@@ -43,7 +43,7 @@ The primary route renders a workspace shell, not an environment shell. The works
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ Workspace: cloud-code-tools              ⌘K  Shells  Previews  Settings   │
+│ Workspace: zoottle                       ⌘K  Shells  Previews  Settings   │
 ├──────────────────────────────────────┬───────────────────────────────────────┤
 │ Agent Chats                          │ Workspace Tabs                        │
 │ ┌────────────┐ ┌────────────┐ ┌───┐  │ ┌────────┐ ┌────────┐ ┌────────┐      │
@@ -53,7 +53,7 @@ The primary route renders a workspace shell, not an environment shell. The works
 │ Active agent chat transcript         │ Active utility tab                    │
 │ Composer / permissions / transcript  │ shell / file / preview / browser      │
 ├──────────────────────────────────────┴───────────────────────────────────────┤
-│ Workspaces: [ cloud-code-tools ] [ app-2 ] [ infra ] [ + ]                   │
+│ Workspaces: [ zoottle ] [ app-2 ] [ infra ] [ + ]                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -103,7 +103,7 @@ navigate /w/:workspaceId
 │                         Start a new agent chat                               │
 │                                                                              │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ Workspaces: [ cloud-code-tools ] [ Untitled workspace▌ ] [ + ]               │
+│ Workspaces: [ zoottle ] [ Untitled workspace▌ ] [ + ]                        │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,14 +124,14 @@ Creating an agent chat starts from the active workspace and produces a workspace
 │  ( ) Open folder                                           │
 │      Recent folders                                        │
 │      ┌──────────────────────────────────────────────────┐  │
-│      │ /Users/sam/d/cloud-code-tools                    │  │
+│      │ /Users/sam/d/zoottle                             │  │
 │      │ /Users/sam/d/notes-app                           │  │
 │      └──────────────────────────────────────────────────┘  │
 │      [ Choose any folder... ]                              │
 │                                                            │
 │  ( ) Repo config                                           │
 │      ┌──────────────────────────────────────────────────┐  │
-│      │ cloud-code-tools                                 │  │
+│      │ zoottle                                          │  │
 │      │ notes-app                                        │  │
 │      └──────────────────────────────────────────────────┘  │
 │                                                            │

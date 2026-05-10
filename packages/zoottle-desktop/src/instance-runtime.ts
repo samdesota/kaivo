@@ -74,7 +74,7 @@ export type ResolveInstanceRuntimeOptions = {
 }
 
 const defaultHost = '127.0.0.1'
-const defaultAppIdentity = 'cloud-code-desktop'
+const defaultAppIdentity = 'zoottle-desktop'
 
 export function resolveInstanceRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -108,7 +108,7 @@ export function resolveInstanceRuntimeConfig(
     },
     portAvailability,
   })
-  const envLabel = env.CC_ENV_LABEL ?? `Cloud Code ${instanceId}`
+  const envLabel = env.CC_ENV_LABEL ?? `Zoottle ${instanceId}`
   const appUrl = env.CC_APP_URL ?? `http://${host}:${portSelections.app.port}`
   const envUrl = env.CC_ENV_URL ?? `http://${host}:${portSelections.env.port}`
   const clientUrl = env.CC_CLIENT_URL ?? env.CC_DESKTOP_DEV_URL ?? `http://${host}:${portSelections.client.port}`

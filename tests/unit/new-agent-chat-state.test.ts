@@ -27,8 +27,8 @@ describe('new agent chat state', () => {
   })
 
   it('derives default workspace names from folder and worktree selections', () => {
-    expect(defaultWorkspaceName({ type: 'folder', path: '/tmp/cloud-code-tools' })).toEqual({
-      name: 'cloud-code-tools',
+    expect(defaultWorkspaceName({ type: 'folder', path: '/tmp/zoottle' })).toEqual({
+      name: 'zoottle',
       source: 'folder_path',
     })
     expect(defaultWorkspaceName({ type: 'worktree', repoId: 'repo-1', path: '/tmp/project/bug-fix', name: 'bug-fix' })).toEqual({
@@ -42,14 +42,14 @@ describe('new agent chat state', () => {
   })
 
   it('uses edited workspace names but restores generated preview when cleared', () => {
-    const selection = { type: 'folder' as const, path: '/tmp/cloud-code-tools' }
+    const selection = { type: 'folder' as const, path: '/tmp/zoottle' }
 
     expect(resolveWorkspaceName(selection, { value: 'Custom Project', edited: true })).toEqual({
       name: 'Custom Project',
       source: 'explicit',
     })
     expect(resolveWorkspaceName(selection, { value: '   ', edited: true })).toEqual({
-      name: 'cloud-code-tools',
+      name: 'zoottle',
       source: 'folder_path',
     })
   })

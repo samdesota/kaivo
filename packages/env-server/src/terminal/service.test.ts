@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type AgentRow = {
@@ -27,6 +30,7 @@ const spawnedCwds: string[] = []
 const spawnedEnvs: Array<NodeJS.ProcessEnv | undefined> = []
 const runOnceSpawnedEnvs: Array<NodeJS.ProcessEnv | undefined> = []
 let loginShellEnv: NodeJS.ProcessEnv = {}
+let tempRoot = ''
 
 function resetState() {
   agentRows.length = 0
@@ -179,17 +183,26 @@ vi.mock('../logger.js', () => ({
 }))
 
 beforeEach(() => {
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'terminal-service-test-'))
   resetState()
   vi.resetModules()
 })
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  if (tempRoot) fs.rmSync(tempRoot, { recursive: true, force: true })
 })
+
+function tempDir(name: string) {
+  const dir = path.join(tempRoot, name)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
 
 describe('terminal service workspace shells', () => {
   it('shell create records workspace, cwd, and owner agent session', async () => {
-    agentRows.push({ id: 'agent-a', workspaceId: 'workspace-a', opencodeSessionId: 'oc-a', workingDir: '/tmp/project-a' })
+    const projectA = tempDir('project-a')
+    agentRows.push({ id: 'agent-a', workspaceId: 'workspace-a', opencodeSessionId: 'oc-a', workingDir: projectA })
     const { terminalService } = await import('./service.js')
 
     const shell = await terminalService.create({
@@ -200,20 +213,21 @@ describe('terminal service workspace shells', () => {
 
     expect(shell).toMatchObject({
       workspaceId: 'workspace-a',
-      cwd: '/tmp/project-a',
+      cwd: projectA,
       ownerAgentSessionId: 'agent-a',
       ownerKind: 'agent',
     })
-    expect(spawnedCwds).toEqual(['/tmp/project-a'])
+    expect(spawnedCwds).toEqual([projectA])
     expect(shellRows[0]).toMatchObject({
       workspaceId: 'workspace-a',
-      cwd: '/tmp/project-a',
+      cwd: projectA,
       ownerAgentSessionId: 'agent-a',
     })
   })
 
   it('infers workspace from opencode session for agent shells', async () => {
-    agentRows.push({ id: 'agent-a', workspaceId: 'workspace-a', opencodeSessionId: 'oc-a', workingDir: '/tmp/project-a' })
+    const projectA = tempDir('project-a')
+    agentRows.push({ id: 'agent-a', workspaceId: 'workspace-a', opencodeSessionId: 'oc-a', workingDir: projectA })
     const { terminalService } = await import('./service.js')
 
     const shell = await terminalService.create({ ownerKind: 'agent', ownerSessionId: 'oc-a' })
@@ -226,11 +240,14 @@ describe('terminal service workspace shells', () => {
   it('shell list filters by workspace and does not mix sessions', async () => {
     const { terminalService } = await import('./service.js')
 
-    await terminalService.create({ workspaceId: 'workspace-a', cwd: '/tmp/a' })
-    await terminalService.create({ workspaceId: 'workspace-b', cwd: '/tmp/b' })
-    await terminalService.create({ cwd: '/tmp/legacy' })
+    const workspaceA = tempDir('a')
+    const workspaceB = tempDir('b')
+    const legacy = tempDir('legacy')
+    await terminalService.create({ workspaceId: 'workspace-a', cwd: workspaceA })
+    await terminalService.create({ workspaceId: 'workspace-b', cwd: workspaceB })
+    await terminalService.create({ cwd: legacy })
 
-    expect(terminalService.list({ workspaceId: 'workspace-a' }).map((s) => s.cwd)).toEqual(['/tmp/a'])
+    expect(terminalService.list({ workspaceId: 'workspace-a' }).map((s) => s.cwd)).toEqual([workspaceA])
     expect(terminalService.list()).toHaveLength(3)
   })
 
@@ -241,7 +258,7 @@ describe('terminal service workspace shells', () => {
     vi.stubEnv('PATH', '/server/bin')
     const { terminalService } = await import('./service.js')
 
-    await terminalService.create({ cwd: '/tmp/project' })
+    await terminalService.create({ cwd: tempDir('project') })
 
     expect(spawnedEnvs[0]).toMatchObject({
       HOME: '/Users/tester',
@@ -261,7 +278,7 @@ describe('terminal service workspace shells', () => {
     vi.stubEnv('PATH', '/server/bin')
     const { terminalService } = await import('./service.js')
 
-    const handle = terminalService.runOnceStream({ cmd: 'echo hi', cwd: '/tmp/project' })
+    const handle = terminalService.runOnceStream({ cmd: 'echo hi', cwd: tempDir('project') })
     await handle.exitPromise
 
     expect(runOnceSpawnedEnvs[0]).toMatchObject({

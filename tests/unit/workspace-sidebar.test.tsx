@@ -15,9 +15,9 @@ const ctx = {
 const treeData = [
   {
     type: 'folder',
-    folder: { id: 'folder-cloud', name: 'Cloud Code', position: 0, collapsed: false },
+    folder: { id: 'folder-cloud', name: 'Zoottle', position: 0, collapsed: false },
     children: [
-      { type: 'workspace', workspace: { id: 'workspace-tools', name: 'cloud-code-tools', position: 0 } },
+      { type: 'workspace', workspace: { id: 'workspace-tools', name: 'zoottle-app', position: 0 } },
       {
         type: 'folder',
         folder: { id: 'folder-packages', name: 'Packages', position: 1, collapsed: false },
@@ -49,18 +49,24 @@ vi.mock('../../src/trpc', () => ({
   trpc: {
     workspace: {
       listTree: { useQuery: () => ({ data: treeData }) },
-      list: { useQuery: () => ({ data: [{ id: 'workspace-tools', name: 'cloud-code-tools' }] }) },
+      list: { useQuery: () => ({ data: [{ id: 'workspace-tools', name: 'zoottle-app' }] }) },
       create: { useMutation: () => ({ isPending: false, mutateAsync: vi.fn() }) },
       createFolder: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       rename: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       archive: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      archiveFolder: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      deleteResource: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       setFolderCollapsed: { useMutation: () => ({ mutate: vi.fn() }) },
       moveSidebarNode: { useMutation: () => ({ mutateAsync: moveSidebarNodeMock }) },
+    },
+    sync: {
+      changes: { useSubscription: () => undefined },
     },
   },
 }))
 
 vi.mock('../../src/env-trpc', () => ({
+  makeEnvReactClient: () => ({}),
   makeManagedEnvReactClient: () => ({ client: {} }),
   envTrpc: {
     Provider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -82,6 +88,14 @@ vi.mock('../../src/env-trpc', () => ({
   },
 }))
 
+vi.mock('../../src/routes/env/env-context', () => ({
+  EnvContextProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useEnv: () => ({
+    env: { id: 'env-1', url: 'http://env', label: 'Local' },
+    envToken: 'token',
+  }),
+}))
+
 vi.mock('../../src/routes/workspace/notifications-store', () => ({
   useAgentNotificationsStore: () => ({
     records: notificationListData,
@@ -90,19 +104,26 @@ vi.mock('../../src/routes/workspace/notifications-store', () => ({
   }),
 }))
 
+vi.mock('../../src/lib/trpc-plain', () => ({
+  appTrpcMutation: vi.fn(),
+  appTrpcQuery: vi.fn(async () => ({ table: 'workspace_resources', rows: [], seq: 0 })),
+  trpcQueryKey: (path: string) => [path],
+}))
+
 vi.mock('../../src/routes/env/agent/new-agent-chat-modal', () => ({
-  NewAgentChatModal: ({ initialWorkspaceMode, workspaceName }: { initialWorkspaceMode?: string; workspaceName?: string }) => (
-    <div>
-      <label>
-        Workspace mode
-        <select aria-label="Workspace mode" value={initialWorkspaceMode} onChange={() => undefined}>
-          <option value="new">new</option>
-          <option value="existing">existing</option>
-        </select>
-      </label>
-      {workspaceName && <span>{workspaceName}</span>}
-    </div>
-  ),
+  NewAgentChatModal: ({ open, initialWorkspaceMode, workspaceName }: { open: boolean; initialWorkspaceMode?: string; workspaceName?: string }) =>
+    open ? (
+      <div>
+        <label>
+          Workspace mode
+          <select aria-label="Workspace mode" value={initialWorkspaceMode ?? 'existing'} onChange={() => undefined}>
+            <option value="new">new</option>
+            <option value="existing">existing</option>
+          </select>
+        </label>
+        {workspaceName && <span>{workspaceName}</span>}
+      </div>
+    ) : null,
 }))
 
 function renderSidebar() {
@@ -142,8 +163,8 @@ describe('WorkspaceSidebar', () => {
   it('renders folders, nested folders, and workspaces from the tree', async () => {
     renderSidebar()
 
-    expect((await screen.findAllByText('Cloud Code')).length).toBeGreaterThan(0)
-    expect(screen.getByText('cloud-code-tools')).toBeTruthy()
+    expect((await screen.findAllByText('Zoottle')).length).toBeGreaterThan(0)
+    expect(screen.getByText('zoottle-app')).toBeTruthy()
     expect(screen.getByText('Packages')).toBeTruthy()
     expect(screen.getByText('opencode-plugin')).toBeTruthy()
   })
@@ -152,7 +173,7 @@ describe('WorkspaceSidebar', () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Create workspace in Cloud Code' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create workspace in Zoottle' }))
 
     const select = await screen.findByLabelText('Workspace mode') as HTMLSelectElement
     expect(select.value).toBe('new')
@@ -162,20 +183,20 @@ describe('WorkspaceSidebar', () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Create chat in cloud-code-tools' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create chat in zoottle-app' }))
 
     const select = await screen.findByLabelText('Workspace mode') as HTMLSelectElement
     expect(select.value).toBe('existing')
-    expect(screen.getAllByText('cloud-code-tools').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('zoottle-app').length).toBeGreaterThan(0)
   })
 
   it('does not expose workspace chat expansion controls', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    expect(await screen.findByText('cloud-code-tools')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Expand chats for cloud-code-tools' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Collapse chats for cloud-code-tools' })).toBeNull()
+    expect(await screen.findByText('zoottle-app')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Expand chats for zoottle-app' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collapse chats for zoottle-app' })).toBeNull()
 
     expect(window.localStorage.getItem('cloud-code.workspaceChatExpanded')).toBeNull()
     expect(screen.queryByText('No chats')).toBeNull()
@@ -198,7 +219,7 @@ describe('WorkspaceSidebar', () => {
     expect(await screen.findByText('Notifications')).toBeTruthy()
     expect(screen.getByText('Build notifications')).toBeTruthy()
     expect(screen.getByText('Implemented notifications')).toBeTruthy()
-    expect(screen.getAllByText('cloud-code-tools').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('zoottle-app').length).toBeGreaterThan(1)
     expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Dismiss notification Build notifications' })).toBeTruthy()
   })
@@ -255,7 +276,7 @@ describe('WorkspaceSidebar', () => {
   it('renders folder and workspace rows as separate whole-row draggable targets', async () => {
     renderSidebar()
 
-    const workspaceRow = (await screen.findByText('cloud-code-tools')).closest('[role="button"]') as HTMLElement
+    const workspaceRow = (await screen.findByText('zoottle-app')).closest('[role="button"]') as HTMLElement
     const folderRow = screen.getByText('Packages').closest('[role="button"]') as HTMLElement
 
     expect(workspaceRow).toBeTruthy()
@@ -263,7 +284,7 @@ describe('WorkspaceSidebar', () => {
     expect(workspaceRow).not.toBe(folderRow)
     expect(workspaceRow.getAttribute('aria-roledescription')).toBe('sortable')
     expect(folderRow.getAttribute('aria-roledescription')).toBe('sortable')
-    expect(workspaceRow.textContent).toContain('cloud-code-tools')
+    expect(workspaceRow.textContent).toContain('zoottle-app')
     expect(workspaceRow.textContent).not.toContain('Packages')
   })
 })

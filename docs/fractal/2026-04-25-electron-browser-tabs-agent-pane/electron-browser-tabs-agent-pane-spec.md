@@ -17,11 +17,11 @@ Bring the `webframe` project into this codebase and use it as the foundation for
 
 ## Spec
 
-The Electron shell is a local desktop runtime for `cloud-code-tools`. It does not replace the deployed web app or the env server model. It wraps the existing Vite/React UI as Electron chrome and delegates real browser-tab rendering to `webframe`.
+The Electron shell is a local desktop runtime for `zoottle`. It does not replace the deployed web app or the env server model. It wraps the existing Vite/React UI as Electron chrome and delegates real browser-tab rendering to `webframe`.
 
 ### Repositories and Dependency Flow
 
-`webframe` stays in its own repository and is consumed as a package by `cloud-code-tools`.
+`webframe` stays in its own repository and is consumed as a package by `zoottle`.
 
 The `webframe` repo publishes to GitHub Packages under a scoped package name. The current package is `@samdesota/webframe`. Its package must keep public exports for the Electron main process and renderer browser API:
 
@@ -38,16 +38,16 @@ The `webframe` repo publishes to GitHub Packages under a scoped package name. Th
 }
 ```
 
-`cloud-code-tools` depends on the published package for normal installs and releases. Local development uses the sibling checkout at `../webframe` through `npm link` or an npm file override, with `webframe` running `npm run build:watch` so Electron restarts pick up package changes.
+`zoottle` depends on the published package for normal installs and releases. Local development uses the sibling checkout at `../webframe` through `npm link` or an npm file override, with `webframe` running `npm run build:watch` so Electron restarts pick up package changes.
 
 Authentication for GitHub Packages lives in developer or deploy environment configuration, not in source. The repo should document the required `.npmrc` scope mapping and `NODE_AUTH_TOKEN`/GitHub token requirements.
 
 ### Electron Package
 
-Add a desktop app package inside `cloud-code-tools`, separate from the web client, env server, and opencode plugin. Name it `cloud-code-desktop`:
+Add a desktop app package inside `zoottle`, separate from the web client, env server, and opencode plugin. Name it `zoottle-desktop`:
 
 ```text
-packages/cloud-code-desktop/
+packages/zoottle-desktop/
   src/main.ts
   src/preload.ts
   package.json
@@ -55,9 +55,9 @@ packages/cloud-code-desktop/
   tsup.config.ts
 ```
 
-The Electron main process owns startup, shutdown, and native browser surfaces. It imports `createApp` from `@samdesota/webframe`, creates a `webframe` app, and opens one chrome window whose `chromeUrl` is the existing `cloud-code-tools` UI.
+The Electron main process owns startup, shutdown, and native browser surfaces. It imports `createApp` from `@samdesota/webframe`, creates a `webframe` app, and opens one chrome window whose `chromeUrl` is the existing `zoottle` UI.
 
-In development, the chrome URL points at the Vite dev server. The normal dev loop runs the app server, Vite client, `webframe` watch build, and Electron main process together. In production, Electron starts or connects to the built `cloud-code-tools` server and loads the served client URL.
+In development, the chrome URL points at the Vite dev server. The normal dev loop runs the app server, Vite client, `webframe` watch build, and Electron main process together. In production, Electron starts or connects to the built `zoottle` server and loads the served client URL.
 
 The desktop app should preserve the default `webframe` chrome preload so the React chrome can call `window.webframe.trpc`. Do not duplicate `webframe`'s tab/window/navigation API in custom main-process IPC unless a concrete missing operation is discovered.
 
@@ -156,7 +156,7 @@ If the app is opened outside Electron, browser panes must not crash the React ap
 
 If GitHub Packages authentication is missing, install should fail with a clear setup instruction rather than silently falling back to an untracked local copy.
 
-If `webframe` is linked locally but not built, `cloud-code-desktop` should fail fast with the missing package output rather than masking the error.
+If `webframe` is linked locally but not built, `zoottle-desktop` should fail fast with the missing package output rather than masking the error.
 
 If a pane is closed while a navigation is in flight, the close wins and later lifecycle events for that `browserTabId` are ignored.
 
@@ -168,6 +168,6 @@ If multiple browser panes exist, each pane owns one named slot and one active `w
 
 `webframe` owns tests for native tab creation, navigation, lifecycle events, slot attachment, and Electron view behavior.
 
-`cloud-code-tools` owns tests for pane state, schema validation, tool input handling, the browser API adapter, and the React-to-webframe integration boundary.
+`zoottle` owns tests for pane state, schema validation, tool input handling, the browser API adapter, and the React-to-webframe integration boundary.
 
 End-to-end verification should cover launching the Electron shell, opening an agent session, calling `cloud_open_pane` with `kind: "browser"`, and observing a real browser tab in the agent side pane.

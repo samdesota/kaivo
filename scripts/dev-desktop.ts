@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import * as runtime from '../packages/cloud-code-desktop/src/instance-runtime.ts'
+import * as runtime from '../packages/zoottle-desktop/src/instance-runtime.ts'
 import { runLocalDevLauncher } from './local-launch'
 
 const runtimeModule = runtime as typeof runtime & { default?: typeof runtime }
@@ -16,14 +16,14 @@ async function main(): Promise<void> {
     mode: 'desktop',
   })
 
-  console.log(`Local Cloud Code desktop runtime started:`)
+  console.log(`Local Zoottle desktop runtime started:`)
   console.log(`  app:      ${result.config.app.url}`)
   console.log(`  env:      ${result.config.env.url}`)
   console.log(`  client:   ${result.config.client.url}`)
   console.log(`  manifest: ${path.join(result.config.rootDir, 'launch.json')}`)
   console.log(`  password: password`)
 
-  const desktopCwd = path.join(cwd, 'packages/cloud-code-desktop')
+  const desktopCwd = path.join(cwd, 'packages/zoottle-desktop')
   run('npm', ['run', 'build'], desktopCwd)
 
   const electron = spawn('node_modules/.bin/electron', ['dist/main.js'], {

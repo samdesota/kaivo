@@ -37,10 +37,10 @@ const schema = z.object({
   // Opencode binary; must be in PATH or an absolute path.
   CC_OPENCODE_BIN: z.string().default('opencode'),
 
-  // `file://` URI or absolute path to the cloud-code opencode plugin. In
+  // `file://` URI or absolute path to the Zoottle opencode plugin. In
   // container mode the Dockerfile bakes it to /opt; in local mode
   // install.sh writes it under the state dir.
-  CC_OPENCODE_PLUGIN_PATH: z.string().default('file:///opt/cloud-code-plugin/index.js'),
+  CC_OPENCODE_PLUGIN_PATH: z.string().default('file:///opt/zoottle-opencode-plugin/index.js'),
 
   // Desktop-managed local envs proxy persistent PTY shells to a sibling
   // terminal daemon over this Unix socket. Container/manual envs leave it unset

@@ -2,7 +2,7 @@
 
 ## Seed
 
-Refactor Cloud Code around a local-first desktop runtime: remove the unused remote sandbox/orchestrator path from the repo for now, while keeping `cc-env` as the separate environment service that future remote environments can reuse.
+Refactor Zoottle around a local-first desktop runtime: remove the unused remote sandbox/orchestrator path from the repo for now, while keeping `cc-env` as the separate environment service that future remote environments can reuse.
 
 The Electron app should run against a local identity/app server by default, auto-pair with its matching `cc-env`, and support multiple simultaneous worktrees/versions on one Mac without port, state, or pairing collisions.
 
@@ -21,7 +21,7 @@ The Electron app should run against a local identity/app server by default, auto
 
 ### Target Architecture
 
-Cloud Code becomes a local desktop product composed of three local processes:
+Zoottle becomes a local desktop product composed of three local processes:
 
 ```text
 Electron main process

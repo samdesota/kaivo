@@ -89,7 +89,7 @@ export function SettingsPage() {
         </div>
         <div className="px-3 py-3">
           <h1 className="text-xs font-medium text-header-3">Settings</h1>
-          <p className="mt-1 text-[11px] leading-4 text-help">Configure Cloud Code.</p>
+          <p className="mt-1 text-[11px] leading-4 text-help">Configure Zoottle.</p>
         </div>
         <nav className="flex-1 px-2 text-xs text-ui-muted">
           <div className="space-y-1">
@@ -240,7 +240,7 @@ function TerminalSection() {
     setStatus(null)
     const confirmed = await openConfirmOverlay({
       title: 'Restart Terminal Daemon?',
-      message: 'This restarts only the local terminal daemon and closes active Cloud Code terminal shells. cc-env is not restarted.',
+      message: 'This restarts only the local terminal daemon and closes active Zoottle terminal shells. cc-env is not restarted.',
       confirmLabel: 'Restart terminal daemon',
       destructive: true,
     })
@@ -264,7 +264,7 @@ function TerminalSection() {
     <SettingsPanel
       id="terminal-daemon"
       title="Terminal daemon"
-      description="Packaged desktop app restarts leave this daemon running so Cloud Code shells survive cc-env and app relaunches."
+      description="Packaged desktop app restarts leave this daemon running so Zoottle shells survive cc-env and app relaunches."
     >
       <div className="space-y-3">
         <Button
