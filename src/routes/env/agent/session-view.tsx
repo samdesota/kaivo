@@ -17,7 +17,7 @@ import { PartRenderer } from './parts'
 import { OpenStateProvider } from './parts/open-state'
 import { SessionTabs } from './session-tabs'
 import { EmptySessionState } from './empty-session-state'
-import { ModelPicker, ReasoningEffortPicker } from './model-picker'
+import { ModelEffortPicker } from './model-picker'
 import { selectActiveWorkspaceSession } from './workspace-session-state'
 import { BottomAnchoredLazyList } from './bottom-anchored-lazy-list'
 import { useChatSession, useChatStateStore, useRetainChatSessions } from './chat-state'
@@ -694,8 +694,7 @@ function SessionPane({
           }}
         />
         <div className="mb-2 flex shrink-0 items-center gap-2 bg-neutral-975 px-2 py-1">
-          <ModelPicker sessionId={sessionId} />
-          <ReasoningEffortPicker sessionId={sessionId} />
+          <ModelEffortPicker sessionId={sessionId} />
           <div className="ml-auto flex items-center gap-1.5">
             {statusData?.contextUsage && (
               <ContextUsageBar used={statusData.contextUsage.used} limit={statusData.contextUsage.limit} />
