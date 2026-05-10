@@ -1711,21 +1711,34 @@ function WorkspaceTabPane({
     label: tab.title,
     title: workspaceTabLabel(tab),
   }))
+  const canUseEnvTabs = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-neutral-975" aria-label="Workspace Tabs">
       <WorkspaceEnvTargetProvider>
         <WorkspaceShellTabTitleSync tabs={ctx.uiState.workspaceTabs} dispatchWorkspaceState={dispatchWorkspaceState} />
       </WorkspaceEnvTargetProvider>
       <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
-        <BorderedTabStrip
-          items={tabItems}
-          activeId={ctx.uiState.activeWorkspaceTabId}
-          onSelect={(tabId) => dispatchWorkspaceState({ type: 'activateTab', tabId })}
-          onClose={(tabId) => {
-            const tab = ctx.uiState.workspaceTabs.find((candidate) => candidate.id === tabId)
-            if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
-          }}
-        />
+        {canUseEnvTabs ? (
+          <WorkspaceEnvTargetProvider>
+            <WorkspaceShellTabStrip
+              items={tabItems}
+              tabs={ctx.uiState.workspaceTabs}
+              activeId={ctx.uiState.activeWorkspaceTabId}
+              workspaceId={ctx.workspace.id}
+              dispatchWorkspaceState={dispatchWorkspaceState}
+            />
+          </WorkspaceEnvTargetProvider>
+        ) : (
+          <BorderedTabStrip
+            items={tabItems}
+            activeId={ctx.uiState.activeWorkspaceTabId}
+            onSelect={(tabId) => dispatchWorkspaceState({ type: 'activateTab', tabId })}
+            onClose={(tabId) => {
+              const tab = ctx.uiState.workspaceTabs.find((candidate) => candidate.id === tabId)
+              if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
+            }}
+          />
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden text-neutral-500">
         {unavailableReason ? (
@@ -1759,6 +1772,76 @@ function WorkspaceTabPane({
         )}
       </div>
     </section>
+  )
+}
+
+function WorkspaceShellTabStrip({
+  items,
+  tabs,
+  activeId,
+  workspaceId,
+  dispatchWorkspaceState,
+}: {
+  items: BorderedTabItem[]
+  tabs: WorkspaceTab[]
+  activeId: string | null
+  workspaceId: string
+  dispatchWorkspaceState: WorkspaceUiDispatch
+}) {
+  const queryClient = useQueryClient()
+  const disposeShell = envTrpc.shell.dispose.useMutation()
+  const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
+  const contextTab = contextMenu ? tabs.find((tab) => tab.id === contextMenu.tabId) : undefined
+
+  return (
+    <div className="relative flex min-w-0 flex-1" onClick={() => setContextMenu(null)}>
+      <BorderedTabStrip
+        items={items}
+        activeId={activeId}
+        onSelect={(tabId) => dispatchWorkspaceState({ type: 'activateTab', tabId })}
+        onClose={(tabId) => {
+          const tab = tabs.find((candidate) => candidate.id === tabId)
+          if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
+        }}
+        onContextMenu={(tabId, event) => {
+          const tab = tabs.find((candidate) => candidate.id === tabId)
+          if (tab?.type !== 'shell') return
+          event.preventDefault()
+          setContextMenu({ tabId, x: event.clientX, y: event.clientY })
+        }}
+      />
+      {contextMenu && contextTab?.type === 'shell' && (
+        <>
+          <button
+            className="fixed inset-0 z-40 cursor-default"
+            aria-label="Close tab menu"
+            onClick={() => setContextMenu(null)}
+          />
+          <div
+            className="fixed z-50 w-44 rounded border border-neutral-800 bg-neutral-975 shadow-lg"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            role="menu"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                void (async () => {
+                  await disposeShell.mutateAsync({ id: contextTab.shellId })
+                  await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', { workspaceId }) })
+                  closeWorkspaceTab(contextTab, dispatchWorkspaceState)
+                  setContextMenu(null)
+                })()
+              }}
+              disabled={disposeShell.isPending}
+              className="block w-full px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-900 disabled:opacity-50"
+              role="menuitem"
+            >
+              Terminate shell
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -1814,7 +1897,7 @@ function WorkspaceTabContent({
     return (
       <div className="h-full min-h-0 w-full">
         <WorkspaceEnvTargetProvider>
-          <ShellTabContent shellId={tab.shellId} workspaceId={ctx.workspace.id} onTerminated={onClose} />
+          <ShellTabContent shellId={tab.shellId} workspaceId={ctx.workspace.id} />
         </WorkspaceEnvTargetProvider>
       </div>
     )

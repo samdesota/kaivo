@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { cn } from '../lib/utils'
 
 export interface BorderedTabItem {
@@ -13,12 +13,14 @@ export function BorderedTabStrip({
   activeId,
   onSelect,
   onClose,
+  onContextMenu,
   className,
 }: {
   items: BorderedTabItem[]
   activeId: string | null
   onSelect: (id: string) => void
   onClose?: (id: string) => void
+  onContextMenu?: (id: string, event: MouseEvent) => void
   className?: string
 }) {
   return (
@@ -36,6 +38,7 @@ export function BorderedTabStrip({
             key={item.id}
             role="tab"
             aria-selected={active}
+            onContextMenu={onContextMenu ? (event) => onContextMenu(item.id, event) : undefined}
             className={cn(
               'group flex min-w-[100px] max-w-[250px] shrink-0 items-stretch border-l border-neutral-800 transition-colors first:border-l-0 last:border-r',
               active ? 'bg-highlight text-neutral-200' : 'text-neutral-400 hover:bg-highlight hover:text-neutral-200',

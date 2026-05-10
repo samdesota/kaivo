@@ -1,8 +1,4 @@
-import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
-import { trpcQueryKey } from '../../../lib/trpc-plain'
-import { extractTrpcMessage } from '../../../lib/utils'
 import { XTermAttached } from '../xterm-attached'
 
 interface ShellRow {
@@ -17,77 +13,21 @@ interface ShellRow {
 
 export function ShellTabContent({
   shellId,
-  onTerminated,
   workspaceId,
 }: {
   shellId: string
-  onTerminated?: () => void
   workspaceId?: string
 }) {
   const shellListInput = workspaceId ? { workspaceId } : undefined
   const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
-  const queryClient = useQueryClient()
-  const dispose = envTrpc.shell.dispose.useMutation()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
 
   const list = (shells.data ?? []) as ShellRow[]
   const info = list.find((s) => s.id === shellId)
   const missing = shells.data && !info
 
-  async function onTerminate() {
-    setErr(null)
-    try {
-      await dispose.mutateAsync({ id: shellId })
-      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', shellListInput) })
-      setMenuOpen(false)
-      onTerminated?.()
-    } catch (e) {
-      setErr(extractTrpcMessage(e))
-    }
-  }
-
   return (
-    <div className="flex h-full min-h-0 flex-col bg-neutral-975">
-      <div className="flex flex-none basis-8 items-center gap-2 border-b border-neutral-800 bg-neutral-975 px-3 text-xs">
-        <span className="font-mono text-neutral-300">{info?.title || `shell ${shellId.slice(-8)}`}</span>
-        {info?.ownerKind === 'agent' && (
-          <span className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-neutral-200">
-            agent
-          </span>
-        )}
-        {info && (
-          <span className="text-[10px] text-neutral-500">
-            {info.cols}×{info.rows} · {info.alive ? 'running' : 'stopped'}
-          </span>
-        )}
-        {missing && (
-          <span className="text-[10px] text-neutral-500">terminated</span>
-        )}
-        <div className="relative ml-auto">
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-300 hover:bg-neutral-800"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-          >
-            ⋯
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded border border-neutral-800 bg-neutral-975 shadow-lg">
-              <button
-                onClick={() => void onTerminate()}
-                disabled={!info || dispose.isPending}
-                className="block w-full px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-900 disabled:opacity-50"
-              >
-                Terminate shell
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-      {err && <div className="border-b border-red-900 bg-red-950 px-3 py-1 text-[10px] text-red-300">{err}</div>}
-      <div className="min-h-0 flex-1 bg-neutral-975">
+    <div className="relative flex h-full min-h-0 flex-col bg-neutral-975 [--shell-pad:0.5rem]">
+      <div className="min-h-0 flex-1 bg-neutral-975 p-[var(--shell-pad)]">
         {missing ? (
           <div className="flex h-full items-center justify-center text-sm text-neutral-500">
             Shell terminated.
