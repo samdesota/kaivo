@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { authedProcedure, router } from '../trpc.js'
-import { ShellError, terminalService } from '../../terminal/service.js'
+import { ShellError, ensureValidCwd, terminalService } from '../../terminal/service.js'
 import { terminalDaemonClient, useTerminalDaemon } from '../../terminal/daemon-client.js'
 
 function toTrpcError(err: unknown): TRPCError {
@@ -35,6 +35,7 @@ export const shellRouter = router({
     )
     .mutation(async ({ input }) => {
       try {
+        if (input?.cwd) ensureValidCwd(input.cwd)
         return await (useTerminalDaemon() ? terminalDaemonClient.create(input ?? {}) : terminalService.create(input ?? {}))
       } catch (err) {
         throw toTrpcError(err)

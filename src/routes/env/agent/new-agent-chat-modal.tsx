@@ -257,6 +257,7 @@ function NewAgentChatOverlayContent({
     return dirs.filter((dir) => dir.name.toLowerCase().includes(filter))
   }, [browsePlan?.filter, pathBrowse.data?.dirs])
   const selectedConfig = selection?.type === 'repoConfig' ? configs.find((config) => config.id === selection.configId) : null
+  const hasChooserResults = pathMode || filteredFolders.length > 0 || filteredWorktrees.length > 0 || filteredConfigs.length > 0
   const chooserRows = useMemo(() => {
     if (pathMode) {
       const rows: ChooserRow[] = []
@@ -377,7 +378,7 @@ function NewAgentChatOverlayContent({
       role="dialog"
       aria-modal="true"
     >
-      <div className="mb-10 flex max-h-[84vh] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+      <div className="mb-10 flex max-h-[min(84vh,1000px)] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
         {step === 'choose' ? (
           <>
             <div className="shrink-0 border-b border-neutral-800 bg-input">
@@ -482,6 +483,7 @@ function NewAgentChatOverlayContent({
                       ))}
                     </ResultSection>
                   )}
+                  {!hasChooserResults && <EmptyList>No folders, work trees, or repo configs match your search.</EmptyList>}
                 </div>
               )}
             </div>
@@ -636,7 +638,7 @@ export function WorkspaceModeControl({
 function NewAgentChatOverlayFallback() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
-      <div className="mb-10 flex max-h-[84vh] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+      <div className="mb-10 flex max-h-[min(84vh,1000px)] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
         <div className="shrink-0 border-b border-neutral-800 bg-input px-4 py-3 text-sm text-placeholder">
           Loading workspace options…
         </div>
@@ -746,8 +748,8 @@ function pathBrowsePlan(value: string, home?: string): BrowsePlan {
 
 function compactChoiceClass(selected: boolean, layout: 'col' | 'row' = 'col'): string {
   return (
-    `flex w-full min-w-0 ${layout === 'col' ? 'items-center' : 'items-start'} px-4 py-2 text-left text-xs hover:bg-highlight ` +
-    (selected ? 'bg-highlight' : '')
+    `flex w-full min-w-0 ${layout === 'col' ? 'items-center' : 'items-start'} px-4 py-2 text-left text-xs ` +
+    (selected ? 'bg-neutral-900 text-header-1' : 'hover:bg-neutral-920 hover:text-header-1')
   )
 }
 

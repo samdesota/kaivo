@@ -37,6 +37,7 @@ export type WorkspaceTabRow = {
   id: string
   type: WorkspaceTab['type']
   title: string
+  titleSource: 'auto' | 'explicit' | null
   position: number
   envId: string | null
   shellId: string | null
@@ -158,6 +159,7 @@ export const workspaceTabs = sqliteTable(
     id: text('id').notNull(),
     type: text('type').$type<WorkspaceTab['type']>().notNull(),
     title: text('title').notNull(),
+    titleSource: text('title_source').$type<'auto' | 'explicit'>(),
     position: integer('position').notNull(),
     envId: text('env_id'),
     shellId: text('shell_id'),

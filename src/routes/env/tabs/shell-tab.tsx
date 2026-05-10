@@ -12,6 +12,7 @@ interface ShellRow {
   rows: number
   cwd: string
   ownerKind?: string
+  title?: string | null
 }
 
 export function ShellTabContent({
@@ -49,7 +50,7 @@ export function ShellTabContent({
   return (
     <div className="flex h-full min-h-0 flex-col bg-neutral-975">
       <div className="flex flex-none basis-8 items-center gap-2 border-b border-neutral-800 bg-neutral-975 px-3 text-xs">
-        <span className="font-mono text-neutral-300">shell {shellId.slice(-8)}</span>
+        <span className="font-mono text-neutral-300">{info?.title || `shell ${shellId.slice(-8)}`}</span>
         {info?.ownerKind === 'agent' && (
           <span className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-neutral-200">
             agent

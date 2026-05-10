@@ -2,7 +2,7 @@ import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { z } from 'zod'
 import { agentShellProcedure, router } from '../trpc.js'
-import { ShellError, terminalService } from '../../terminal/service.js'
+import { ShellError, ensureValidCwd, terminalService } from '../../terminal/service.js'
 import { terminalDaemonClient, useTerminalDaemon } from '../../terminal/daemon-client.js'
 import { logger } from '../../logger.js'
 import { upsertWorkspaceResource } from '../../identity/client.js'
@@ -103,6 +103,7 @@ export const agentShellRouter = router({
     )
     .mutation(async ({ input }) => {
       try {
+        if (input.cwd) ensureValidCwd(input.cwd)
         const info = await (useTerminalDaemon() ? terminalDaemonClient.create({
           workspaceId: input.workspaceId ?? null,
           cwd: input.cwd,

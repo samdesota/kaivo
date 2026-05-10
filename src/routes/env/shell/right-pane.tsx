@@ -21,6 +21,7 @@ interface RightPaneProps {
 
 interface ShellRow {
   id: string
+  title?: string | null
 }
 
 export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
@@ -38,6 +39,17 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
     if (!liveShellIds) return
     dispatch({ type: 'pruneShells', liveShellIds })
   }, [liveShellIds, dispatch])
+
+  useEffect(() => {
+    if (!shells.data) return
+    const shellTitles = new Map((shells.data as ShellRow[]).map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-6)}`]))
+    for (const tab of state.tabs) {
+      if (tab.content.type !== 'shell') continue
+      if (tab.titleSource === 'explicit') continue
+      const title = shellTitles.get(tab.content.shellId)
+      if (title && title !== tab.title) dispatch({ type: 'setAutoTitle', tabId: tab.id, title })
+    }
+  }, [dispatch, shells.data, state.tabs])
 
   useEffect(() => {
     return browserApi.onWindowTabCreated((event) => {

@@ -52,6 +52,7 @@
   --color-placeholder: var(--color-neutral-500);
   --color-highlight: hsl(var(--app-color-hue) 13% 10.78%);
   --color-input: var(--color-neutral-970);
+  --color-running: #61afef;
 }
 
 :root {

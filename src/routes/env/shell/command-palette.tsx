@@ -19,6 +19,7 @@ interface ShellRow {
   id: string
   cwd: string
   ownerKind?: string
+  title?: string | null
 }
 interface PortRow {
   port: number
@@ -156,12 +157,13 @@ export function CommandPalette({
     }
 
     for (const s of (shells.data as ShellRow[] | undefined) ?? []) {
+      const label = s.title || `shell ${s.id.slice(-8)}`
       out.push({
         id: `shell:${s.id}`,
-        label: `shell ${s.id.slice(-8)}`,
+        label,
         detail: `cwd ${s.cwd}${s.ownerKind === 'agent' ? ' · agent' : ''}`,
         kind: 'shell',
-        haystack: `shell ${s.id} ${s.cwd}`,
+        haystack: `shell ${s.id} ${label} ${s.cwd}`,
         run: () => onOpenContent({ type: 'shell', shellId: s.id }),
       })
     }

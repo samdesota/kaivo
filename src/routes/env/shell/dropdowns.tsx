@@ -14,6 +14,7 @@ interface ShellRow {
   rows: number
   cwd: string
   ownerKind?: string
+  title?: string | null
 }
 
 interface PortRow {
@@ -69,7 +70,7 @@ export function ShellsDropdown({ onOpen, align = 'left', side = 'bottom', worksp
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 truncate font-mono text-neutral-200">
-                      <span>shell {s.id.slice(-8)}</span>
+                      <span>{s.title || `shell ${s.id.slice(-8)}`}</span>
                       {s.ownerKind === 'agent' && (
                         <span className="rounded border border-neutral-700 bg-neutral-900 px-1 py-[1px] text-[8px] uppercase tracking-wide text-neutral-200">
                           agent

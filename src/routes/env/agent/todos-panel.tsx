@@ -34,7 +34,7 @@ export function TodosPanel({ todos }: { todos: TodoItem[] }) {
       <button
         onClick={toggle}
         title={`${todos.length} todo${todos.length === 1 ? '' : 's'}`}
-        className="flex shrink-0 items-center gap-2 border-t border-neutral-800 bg-neutral-975 px-3 py-1.5 text-left text-xs text-neutral-500 hover:text-neutral-300"
+        className="mb-1 flex shrink-0 items-center gap-2 border-t border-neutral-800 bg-neutral-975 px-3 py-1.5 text-left text-xs text-neutral-500 hover:text-neutral-300"
       >
         <span className="font-medium uppercase tracking-wide">Todos</span>
         <span className="text-[10px]">{counts.completed}/{todos.length}</span>
@@ -44,7 +44,7 @@ export function TodosPanel({ todos }: { todos: TodoItem[] }) {
   }
 
   return (
-    <section className="flex max-h-40 shrink-0 flex-col border-t border-neutral-800 bg-neutral-975">
+    <section className="mb-1 flex max-h-40 shrink-0 flex-col border-t border-neutral-800 bg-neutral-975">
       <header className="flex items-center justify-between px-3 py-1.5">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-300">Todos</h3>

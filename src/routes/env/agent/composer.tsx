@@ -176,12 +176,12 @@ export function Composer({
     runCommand.isPending
 
   return (
-    <div className="relative border-t border-neutral-800 p-2">
+    <div className="relative border-t border-neutral-800/60 p-2">
       {effectiveRunning && (
         <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-content-default">
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-neutral-400 opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-neutral-400" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-running opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-running" />
           </span>
           <span>Agent is responding</span>
           {onStop && (

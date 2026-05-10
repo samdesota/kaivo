@@ -12,7 +12,7 @@ function readTerminalTheme() {
   const hue = rootStyle.getPropertyValue('--app-color-hue').trim() || '222.86'
   const saturation = rootStyle.getPropertyValue('--app-color-saturation').trim() || '20%'
   return {
-    background: `hsl(${hue} ${saturation} 10.78%)`,
+    background: `hsl(${hue} ${saturation} 8.04%)`,
     foreground: `hsl(${hue} ${saturation} 90.2%)`,
     cursor: `hsl(${hue} ${saturation} 98.04%)`,
   }

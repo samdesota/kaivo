@@ -3,6 +3,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 
 const nowMs = "(unixepoch() * 1000)"
+const realtimeNotifyFunction = 'cc_realtime_notify'
 
 const localSchemaSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -76,6 +77,7 @@ CREATE TABLE IF NOT EXISTS workspace_tabs (
   id TEXT NOT NULL,
   type TEXT NOT NULL,
   title TEXT NOT NULL,
+  title_source TEXT,
   position INTEGER NOT NULL,
   env_id TEXT,
   shell_id TEXT,
@@ -308,6 +310,10 @@ function columnExists(sqlite: Database.Database, table: string, column: string):
   return rows.some((row) => row.name === column)
 }
 
+function installMigrationRealtimeNotifyNoop(sqlite: Database.Database): void {
+  sqlite.function(realtimeNotifyFunction, () => null)
+}
+
 function normalizeLegacyUiState(raw: unknown) {
   const state = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const workspaceTabs = Array.isArray(state.workspaceTabs) ? state.workspaceTabs : []
@@ -341,6 +347,7 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
       id TEXT NOT NULL,
       type TEXT NOT NULL,
       title TEXT NOT NULL,
+      title_source TEXT,
       position INTEGER NOT NULL,
       env_id TEXT,
       shell_id TEXT,
@@ -382,8 +389,8 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
   const deleteTabs = sqlite.prepare('DELETE FROM workspace_tabs WHERE workspace_id = ?')
   const insertTab = sqlite.prepare(`
     INSERT INTO workspace_tabs (
-      workspace_id, id, type, title, position, env_id, shell_id, path, session_id, port, url, browser_tab_id, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      workspace_id, id, type, title, title_source, position, env_id, shell_id, path, session_id, port, url, browser_tab_id, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   for (const row of rows) {
@@ -412,6 +419,7 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
         t.id,
         t.type,
         typeof t.title === 'string' ? t.title : t.id,
+        t.type === 'shell' && t.titleSource === 'explicit' ? 'explicit' : t.type === 'shell' ? 'auto' : null,
         position,
         typeof t.envId === 'string' ? t.envId : null,
         typeof t.shellId === 'string' ? t.shellId : null,
@@ -424,6 +432,14 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
       )
     })
   }
+}
+
+function migrateWorkspaceTabTitleSource(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'workspace_tabs')) migrateWorkspaceUiStateBlob(sqlite)
+  if (!columnExists(sqlite, 'workspace_tabs', 'title_source')) {
+    sqlite.exec('ALTER TABLE workspace_tabs ADD COLUMN title_source TEXT')
+  }
+  sqlite.prepare("UPDATE workspace_tabs SET title_source = 'auto' WHERE type = 'shell' AND title_source IS NULL").run()
 }
 
 function migrateWorkspaceAgentTabs(sqlite: Database.Database) {
@@ -539,6 +555,7 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
   try {
     sqlite.pragma('journal_mode = WAL')
     sqlite.pragma('foreign_keys = ON')
+    installMigrationRealtimeNotifyNoop(sqlite)
     const hasMigrations = tableExists(sqlite, 'schema_migrations')
     const migrationName = '0001_local_app_schema'
     const migrationAlreadyApplied =
@@ -634,6 +651,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
         sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceResourcesMigrationName)
       })()
       applied.push(workspaceResourcesMigrationName)
+    }
+
+    const workspaceTabTitleSourceMigrationName = '0009_workspace_tab_title_source'
+    const workspaceTabTitleSourceMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceTabTitleSourceMigrationName)
+    if (!workspaceTabTitleSourceMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceTabTitleSource(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceTabTitleSourceMigrationName)
+      })()
+      applied.push(workspaceTabTitleSourceMigrationName)
     }
 
     return { sqlitePath, applied }

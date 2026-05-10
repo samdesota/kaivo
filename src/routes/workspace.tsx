@@ -35,7 +35,6 @@ import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-t
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
-import { ShellsDropdown } from './env/shell/dropdowns'
 import { NewSessionPopover } from './env/agent/session-tabs'
 import { NewAgentChatModal } from './env/agent/new-agent-chat-modal'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
@@ -223,6 +222,8 @@ export function WorkspacePage() {
       tabsStore.setTabUrl(action.tabId, action.url)
     } else if (action.type === 'setTabTitle') {
       tabsStore.setTabTitle(action.tabId, action.title)
+    } else if (action.type === 'setTabAutoTitle') {
+      tabsStore.setTabAutoTitle(action.tabId, action.title)
     } else if (action.type === 'setSplitRatio') {
       viewStateStore.setSplitRatio(action.splitRatio)
     } else if (action.type === 'setAgentCollapsed') {
@@ -1144,8 +1145,8 @@ function WorkspaceSidebarChatCount({ workspaceId, readVersion: _readVersion }: {
   return (
     <span className="flex shrink-0 items-center gap-1">
       {row.chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{row.chatCount}</span>}
-      {glyph === '.' && <span className="h-1 w-1 rounded-full bg-neutral-700" aria-label="New chat response" />}
-      {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-neutral-400 border-t-transparent" aria-label="Chat running" />}
+      {glyph === '.' && <span className="h-1 w-1 rounded-full bg-running" aria-label="New chat response" />}
+      {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-running border-t-transparent" aria-label="Chat running" />}
       {glyph === '!' && <span className="w-3 text-center text-[10px] font-semibold text-amber-300" aria-label="Chat needs attention">!</span>}
     </span>
   )
@@ -1207,13 +1208,12 @@ function WorkspaceSidebarNotifications({
       <div className="-mx-2 divide-y divide-neutral-900 border-y border-neutral-900">
         {rows.map((notification) => {
           const workspaceName = workspaceNames.get(notification.workspaceId) ?? null
-          const railClass = notificationRailClass(notification.kind)
           return (
             <div
               key={notification.id}
               className="group relative flex cursor-pointer items-start gap-1 px-2 py-1.5"
             >
-              <span className={`absolute inset-y-0 right-0 w-0.5 ${railClass}`} aria-hidden="true" />
+              <span className="absolute inset-y-0 right-0 w-0.5 bg-running" aria-hidden="true" />
               <button
                 type="button"
                 onClick={() => void openNotification(notification)}
@@ -1242,13 +1242,6 @@ function WorkspaceSidebarNotifications({
       </div>
     </div>
   )
-}
-
-function notificationRailClass(kind: AgentNotificationRecord['kind']): string {
-  if (kind === 'permission') return 'bg-amber-400'
-  if (kind === 'question') return 'bg-violet-400'
-  if (kind === 'error') return 'bg-red-400'
-  return 'bg-neutral-700'
 }
 
 const sidebarAnimateLayoutChanges: AnimateLayoutChanges = (args) =>
@@ -1545,12 +1538,6 @@ function WorkspaceAgentPane({
       {collapseButton}
     </div>
   )
-  const agentFooterTrailing = (
-    <WorkspaceEnvTargetProvider>
-      <ShellsDropdown align="right" side="top" workspaceId={ctx.workspace.id} onOpen={(content) => openPane(content)} />
-    </WorkspaceEnvTargetProvider>
-  )
-
   if (!ctx.localEnvTarget?.available) {
     return (
       <AgentPaneFrame>
@@ -1579,7 +1566,6 @@ function WorkspaceAgentPane({
           onOpenPane={openPane}
           onOpenPaneRefreshHint={refreshWorkspacePanes}
           headerTrailing={agentHeaderTrailing}
-          footerTrailing={agentFooterTrailing}
           onOpenNewChat={() =>
             openNewAgentChatOverlay({
               workspaceId: ctx.workspace.id,
@@ -1727,6 +1713,9 @@ function WorkspaceTabPane({
   }))
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-neutral-975" aria-label="Workspace Tabs">
+      <WorkspaceEnvTargetProvider>
+        <WorkspaceShellTabTitleSync tabs={ctx.uiState.workspaceTabs} dispatchWorkspaceState={dispatchWorkspaceState} />
+      </WorkspaceEnvTargetProvider>
       <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
         <BorderedTabStrip
           items={tabItems}
@@ -1771,6 +1760,29 @@ function WorkspaceTabPane({
       </div>
     </section>
   )
+}
+
+function WorkspaceShellTabTitleSync({
+  tabs,
+  dispatchWorkspaceState,
+}: {
+  tabs: WorkspaceTab[]
+  dispatchWorkspaceState: WorkspaceUiDispatch
+}) {
+  const ctx = useWorkspaceContext()
+  const shells = envTrpc.shell.list.useQuery({ workspaceId: ctx.workspace.id }, { refetchInterval: 5_000 })
+
+  useEffect(() => {
+    if (!shells.data) return
+    const shellTitles = new Map((shells.data as Array<{ id: string; title?: string | null }>).map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-8)}`]))
+    for (const tab of tabs) {
+      if (tab.type !== 'shell' || tab.titleSource === 'explicit') continue
+      const title = shellTitles.get(tab.shellId)
+      if (title && title !== tab.title) dispatchWorkspaceState({ type: 'setTabAutoTitle', tabId: tab.id, title })
+    }
+  }, [dispatchWorkspaceState, shells.data, tabs])
+
+  return null
 }
 
 function workspaceTabLabel(tab: WorkspaceTab): string {

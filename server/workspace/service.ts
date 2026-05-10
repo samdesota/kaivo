@@ -120,6 +120,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
     id: tab.id,
     type: tab.type,
     title: tab.title,
+    titleSource: tab.type === 'shell' ? (tab.titleSource ?? 'auto') : null,
     position,
     envId: 'envId' in tab ? tab.envId : null,
     shellId: tab.type === 'shell' ? tab.shellId : null,
@@ -134,7 +135,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
 
 function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
   if (row.type === 'shell' && row.envId && row.shellId) {
-    return { id: row.id, type: 'shell', envId: row.envId, shellId: row.shellId, title: row.title }
+    return { id: row.id, type: 'shell', envId: row.envId, shellId: row.shellId, title: row.title, titleSource: row.titleSource ?? 'auto' }
   }
   if (row.type === 'file' && row.envId && row.path) {
     return { id: row.id, type: 'file', envId: row.envId, path: row.path, sessionId: row.sessionId ?? undefined, title: row.title }
@@ -464,6 +465,7 @@ export function createWorkspaceService(database: Db = db) {
         set: {
           type: sql`excluded.type`,
           title: sql`excluded.title`,
+          titleSource: sql`excluded.title_source`,
           position: sql`excluded.position`,
           envId: sql`excluded.env_id`,
           shellId: sql`excluded.shell_id`,

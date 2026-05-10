@@ -167,7 +167,7 @@ export function NewSessionPopover({
           title="New agent chat"
           aria-label="New agent chat"
         >
-          {start.isPending ? <span className="h-3 w-3 animate-spin rounded-full border border-neutral-500 border-t-transparent" /> : <Plus className="h-3 w-3" aria-hidden="true" />}
+          {start.isPending ? <span className="h-3 w-3 animate-spin rounded-full border border-running border-t-transparent" /> : <Plus className="h-3 w-3" aria-hidden="true" />}
         </button>
         <NewAgentChatModal
           open={open}
@@ -218,7 +218,7 @@ export function NewSessionPopover({
         title="New agent session"
         aria-label="New session"
       >
-        {start.isPending ? <span className="h-3 w-3 animate-spin rounded-full border border-neutral-500 border-t-transparent" /> : label === '+' ? <Plus className="h-3 w-3" aria-hidden="true" /> : label}
+        {start.isPending ? <span className="h-3 w-3 animate-spin rounded-full border border-running border-t-transparent" /> : label === '+' ? <Plus className="h-3 w-3" aria-hidden="true" /> : label}
       </button>
     )
 
