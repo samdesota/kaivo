@@ -163,6 +163,12 @@ export interface TodoItem {
   priority: string
 }
 
+export interface QueuedFollowUp {
+  id: string
+  text: string
+  createdAt: number
+}
+
 export interface TranscriptEvent {
   seq?: number
   type:
@@ -234,6 +240,7 @@ class AgentService {
   private sessionModels = new Map<string, SessionModelSelection>()
   private contextLimitCache = new Map<string, number>()
   private runningOpencodeSessions = new Set<string>()
+  private queuedFollowUps = new Map<string, QueuedFollowUp[]>()
   private blockingNotificationKeys = new Set<string>()
   private openAIOAuthStatus: OpenAIOAuthStatus = {
     state: 'idle',
@@ -714,16 +721,18 @@ class AgentService {
     }
   }
 
-  async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
+  async sessionSend(input: { sessionId: string; message: string }): Promise<{ queued: boolean; queuedMessage?: QueuedFollowUp }> {
     const { row, client, model, variant, dirOpts } = await this.sessionContext(input.sessionId)
     this.ensureSubscription(row.workingDir ?? '')
-    this.emitTranscriptEvent(row.opencodeSessionId, 'session.busy', { sessionID: row.opencodeSessionId })
-    await client.session.promptAsync({
-      path: { id: row.opencodeSessionId },
-      body: promptBody({ text: input.message, model, variant }),
-      ...dirOpts,
-      throwOnError: true,
-    })
+    const running = await this.isOpencodeSessionRunning(client, row.opencodeSessionId, dirOpts)
+    const queue = this.queuedFollowUps.get(row.opencodeSessionId) ?? []
+    if (running || queue.length > 0) {
+      const queuedMessage = { id: ulid(), text: input.message, createdAt: Date.now() }
+      queue.push(queuedMessage)
+      this.queuedFollowUps.set(row.opencodeSessionId, queue)
+      return { queued: true, queuedMessage }
+    }
+    await this.sendPromptToOpencode({ row, client, model, variant, dirOpts, message: input.message })
     const nextTitle =
       !row.title || /^New session - /.test(row.title) ? truncatePromptForTitle(input.message) : row.title
     db.update(agentSessions)
@@ -733,6 +742,7 @@ class AgentService {
       })
       .where(eq(agentSessions.id, row.id))
       .run()
+    return { queued: false }
   }
 
   async sessionMessages(
@@ -804,6 +814,7 @@ class AgentService {
     todos: TodoItem[]
     running: boolean
     contextUsage: { used: number; limit: number } | null
+    queuedMessages: QueuedFollowUp[]
   }> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
     const pendingMap = this.pending.get(row.opencodeSessionId)
@@ -910,6 +921,7 @@ class AgentService {
       todos,
       running,
       contextUsage,
+      queuedMessages: [...(this.queuedFollowUps.get(row.opencodeSessionId) ?? [])],
     }
   }
 
@@ -982,6 +994,7 @@ class AgentService {
 
   async sessionAbort(input: { sessionId: string }): Promise<void> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
+    this.queuedFollowUps.delete(row.opencodeSessionId)
     await client.session.abort({
       path: { id: row.opencodeSessionId },
       ...dirOpts,
@@ -1276,7 +1289,11 @@ class AgentService {
       if (type === 'message.part.updated') this.runningOpencodeSessions.add(ocSessionId)
       if (type === 'session.idle' || type === 'session.error') {
         const hadRunningRun = this.runningOpencodeSessions.delete(ocSessionId)
-        if (hadRunningRun && type === 'session.idle') void this.createFinishedNotification(ocSessionId)
+        if (hadRunningRun && type === 'session.idle') {
+          const hasQueuedFollowUp = (this.queuedFollowUps.get(ocSessionId)?.length ?? 0) > 0
+          if (hasQueuedFollowUp) setTimeout(() => void this.drainQueuedFollowUps(ocSessionId), 0)
+          else void this.createFinishedNotification(ocSessionId)
+        }
         if (type === 'session.error') {
           const message = String((props as { error?: unknown; message?: unknown }).message ?? (props as { error?: unknown }).error ?? 'The agent hit an error and needs attention.')
           void this.createBlockingNotification(ocSessionId, 'error', 'error', 'Agent error', message)
@@ -1375,6 +1392,72 @@ class AgentService {
       }
     }
     return evt
+  }
+
+  private async sendPromptToOpencode(input: {
+    row: { id: string; opencodeSessionId: string; title: string | null; workingDir: string | null }
+    client: OpencodeClient
+    model: { providerID: string; modelID: string }
+    variant: ReasoningEffortVariant | null
+    dirOpts: ReturnType<typeof directoryOpts>
+    message: string
+  }): Promise<void> {
+    this.emitTranscriptEvent(input.row.opencodeSessionId, 'session.busy', { sessionID: input.row.opencodeSessionId })
+    await input.client.session.promptAsync({
+      path: { id: input.row.opencodeSessionId },
+      body: promptBody({ text: input.message, model: input.model, variant: input.variant }),
+      ...input.dirOpts,
+      throwOnError: true,
+    })
+  }
+
+  private async isOpencodeSessionRunning(client: OpencodeClient, opencodeSessionId: string, dirOpts: ReturnType<typeof directoryOpts>): Promise<boolean> {
+    if (this.runningOpencodeSessions.has(opencodeSessionId)) return true
+    try {
+      const statusRes = await client.session.status({ ...dirOpts, throwOnError: true })
+      const statuses = statusRes.data as Record<string, { type: string }>
+      return statuses[opencodeSessionId]?.type === 'busy'
+    } catch {
+      return false
+    }
+  }
+
+  private async drainQueuedFollowUps(opencodeSessionId: string): Promise<void> {
+    const queue = this.queuedFollowUps.get(opencodeSessionId)
+    const next = queue?.shift()
+    if (!next) return
+    if (!queue) return
+    if (queue.length === 0) this.queuedFollowUps.delete(opencodeSessionId)
+    try {
+      const row = db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+        .limit(1)
+        .all()[0]
+      if (!row) return
+      const client = await this.getClient()
+      const selection = await this.getSessionModel(row.id)
+      const model = selection?.providerID && selection.modelID
+        ? { providerID: selection.providerID, modelID: selection.modelID }
+        : this.getDefaultModel()
+      await this.sendPromptToOpencode({
+        row,
+        client,
+        model,
+        variant: selection?.variant ?? null,
+        dirOpts: directoryOpts(row.workingDir),
+        message: next.text,
+      })
+      db.update(agentSessions)
+        .set({ lastActivityAt: new Date().toISOString() })
+        .where(eq(agentSessions.id, row.id))
+        .run()
+    } catch (err) {
+      queue?.unshift(next)
+      if (queue && queue.length > 0) this.queuedFollowUps.set(opencodeSessionId, queue)
+      logger.warn({ err, opencodeSessionId }, 'failed to send queued follow-up')
+    }
   }
 
   private recordReplayEvent(opencodeSessionId: string, evt: TranscriptEvent): TranscriptEvent {

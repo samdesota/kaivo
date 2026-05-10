@@ -488,6 +488,7 @@ function SessionPane({
 }) {
   const chat = useChatSession(sessionId)
   const chatStore = useChatStateStore()
+  const abort = envTrpc.agent.sessionAbort.useMutation()
   const { state, loading, error, reconnecting, running, status } = chat
   const [optimisticDismissedPermissionIds, setOptimisticDismissedPermissionIds] = useState<Set<string>>(() => new Set())
 
@@ -521,7 +522,29 @@ function SessionPane({
   )
 
   const statusData = status
+  const queuedMessages = statusData?.queuedMessages ?? []
   const pendingFromStatus = useMemo(() => statusData?.pendingApprovals ?? [], [statusData?.pendingApprovals])
+
+  async function stopAgent() {
+    if (!running || abort.isPending) return
+    try {
+      await abort.mutateAsync({ sessionId })
+    } catch {
+      // Status polling/transcript error handling will surface persistent failures.
+    }
+  }
+
+  useEffect(() => {
+    if (!running) return
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      void stopAgent()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, abort.isPending, sessionId])
 
   useEffect(() => {
     if (optimisticDismissedPermissionIds.size === 0) return
@@ -666,6 +689,7 @@ function SessionPane({
             })
           }}
         />
+        {queuedMessages.length > 0 && <QueuedFollowUps messages={queuedMessages} />}
         <Composer
           sessionId={sessionId}
           pendingApprovalReason={
@@ -676,6 +700,8 @@ function SessionPane({
                 : null
           }
           running={running}
+          stopPending={abort.isPending}
+          onStop={() => void stopAgent()}
           onSendStart={(message) => {
             chatDebug('session-pane:onSendStart', { sessionId, messageLength: message.length })
             return chatStore.addOptimisticUserMessage(sessionId, message)
@@ -703,6 +729,25 @@ function SessionPane({
             <AgentConnectivityMenu />
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function QueuedFollowUps({ messages }: { messages: Array<{ id: string; text: string }> }) {
+  return (
+    <div className="mx-2 mb-1 max-h-24 shrink-0 overflow-auto rounded border border-neutral-800 bg-neutral-950/95 px-2 py-1 text-[11px] text-help shadow-lg">
+      <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-medium uppercase tracking-wide text-label">
+        <span>Queued follow-up{messages.length === 1 ? '' : 's'}</span>
+        <span className="font-normal normal-case tracking-normal text-help">will send after response</span>
+      </div>
+      <div className="space-y-1">
+        {messages.map((message) => (
+          <div key={message.id} className="flex min-w-0 items-center gap-2 text-content-default" title={message.text}>
+            <span className="shrink-0 rounded border border-neutral-700 bg-input px-1 py-px text-[9px] uppercase tracking-wide text-help">pending</span>
+            <span className="min-w-0 truncate">{message.text}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
