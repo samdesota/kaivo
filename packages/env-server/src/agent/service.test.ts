@@ -9,6 +9,7 @@ type AgentRow = {
   workingDir: string | null
   selectedProviderId: string | null
   selectedModelId: string | null
+  selectedModelVariant: string | null
   createdAt: string
   lastActivityAt: string
 }
@@ -25,12 +26,19 @@ const agentRows: AgentRow[] = []
 const transcriptRows: TranscriptRow[] = []
 const recentRows: Array<{ path: string; label: string | null; lastOpenedAt: string }> = []
 let opencodeSessionSeq = 0
+const createAgentNotificationMock = vi.hoisted(() => vi.fn())
+const opencodeMessagesData = vi.hoisted(() => [] as Array<{
+  info?: { role?: string }
+  parts?: Array<{ type?: string; text?: string }>
+}>)
 
 function resetState() {
   agentRows.length = 0
   transcriptRows.length = 0
   recentRows.length = 0
+  opencodeMessagesData.length = 0
   opencodeSessionSeq = 0
+  createAgentNotificationMock.mockReset()
 }
 
 vi.mock('drizzle-orm', () => ({
@@ -53,6 +61,7 @@ vi.mock('../db/schema.js', () => ({
     workingDir: { _col: 'workingDir' },
     selectedProviderId: { _col: 'selectedProviderId' },
     selectedModelId: { _col: 'selectedModelId' },
+    selectedModelVariant: { _col: 'selectedModelVariant' },
     createdAt: { _col: 'createdAt' },
     lastActivityAt: { _col: 'lastActivityAt' },
   },
@@ -76,7 +85,10 @@ vi.mock('../db/client.js', () => ({
   db: {
     select: () => ({
       from: (table: { _table: string }) => {
-        const source = () => (table._table === 'agent_transcripts' ? transcriptRows : agentRows)
+        const source = () => {
+          if (table._table === 'agent_transcripts') return transcriptRows
+          return agentRows
+        }
         const ordered = () => {
           const rows = [...source()]
           if (table._table === 'agent_transcripts') {
@@ -148,6 +160,7 @@ vi.mock('@opencode-ai/sdk', () => ({
       create: async ({ body }: { body?: { title?: string } }) => ({
         data: { id: `oc-${++opencodeSessionSeq}`, title: body?.title ?? null },
       }),
+      messages: async () => ({ data: opencodeMessagesData }),
       promptAsync: async () => undefined,
     },
   }),
@@ -167,6 +180,13 @@ vi.mock('./opencode.js', () => ({
 vi.mock('../envmeta/service.js', () => ({
   getMeta: () => ({ defaultProviderId: null, defaultModelId: null }),
   setDefaultModel: () => undefined,
+}))
+
+vi.mock('../identity/client.js', () => ({
+  IdentityAuthError: class IdentityAuthError extends Error {},
+  IdentityUnreachableError: class IdentityUnreachableError extends Error {},
+  resolveProviderKeys: async () => ({}),
+  createAgentNotification: createAgentNotificationMock,
 }))
 
 vi.mock('../logger.js', () => ({
@@ -237,5 +257,139 @@ describe('agent service workspace sessions', () => {
       sessionId: session.opencodeSessionId,
     })
     expect(await agentService.transcriptReplay(session.id, 1)).toEqual([])
+  })
+
+  it('normalizes Anthropic fast-tier session model selections to standard tier', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+
+    await agentService.setSessionModel(session.id, {
+      providerID: 'anthropic',
+      modelID: 'claude-opus-4-6-fast',
+    })
+
+    await expect(agentService.getSessionModel(session.id)).resolves.toMatchObject({
+      providerID: 'anthropic',
+      modelID: 'claude-opus-4-6',
+    })
+    expect(agentRows[0]).toMatchObject({
+      selectedProviderId: 'anthropic',
+      selectedModelId: 'claude-opus-4-6',
+    })
+  })
+
+  it('creates a workspace notification when a running session becomes idle', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a', title: 'Implement notifications' })
+    opencodeMessagesData.push({
+      info: { role: 'assistant' },
+      parts: [{ type: 'text', text: 'Implemented sidebar notifications for finished chats.' }],
+    })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'part-1',
+          type: 'text',
+          text: 'Implemented sidebar notifications for finished chats.',
+          sessionID: session.opencodeSessionId,
+        },
+      },
+    })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'session.idle',
+      properties: { sessionID: session.opencodeSessionId },
+    })
+
+    await vi.waitFor(() => expect(createAgentNotificationMock).toHaveBeenCalledTimes(1))
+    expect(createAgentNotificationMock).toHaveBeenCalledWith({
+      workspaceId: 'workspace-a',
+      sessionId: session.id,
+      kind: 'finished',
+      title: 'Implement notifications',
+      summary: 'Implemented sidebar notifications for finished chats.',
+    })
+  })
+
+  it('uses a brief last-response fallback instead of the chat title when summarization is unavailable', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a', title: 'setup a todo list' })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'assistant-message-1',
+          role: 'assistant',
+          sessionID: session.opencodeSessionId,
+        },
+      },
+    })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'part-1',
+          messageID: 'assistant-message-1',
+          type: 'text',
+          text: 'Created the requested todo list and organized the next implementation steps. Extra details should not appear.',
+          sessionID: session.opencodeSessionId,
+        },
+      },
+    })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'session.idle',
+      properties: { sessionID: session.opencodeSessionId },
+    })
+
+    await vi.waitFor(() => expect(createAgentNotificationMock).toHaveBeenCalledTimes(1))
+    expect(createAgentNotificationMock).toHaveBeenCalledWith({
+      workspaceId: 'workspace-a',
+      sessionId: session.id,
+      kind: 'finished',
+      title: 'setup a todo list',
+      summary: 'Created the requested todo list and organized the next implementation steps.',
+    })
+    expect(createAgentNotificationMock.mock.calls[0]?.[0]?.summary).not.toBe('setup a todo list')
+  })
+
+  it('creates workspace notifications for blocking questions and permission requests', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a', title: 'Blocking task' })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-1',
+        sessionID: session.opencodeSessionId,
+        questions: [{ question: 'Which deployment target should I use?', options: [] }],
+      },
+    })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'permission.updated',
+      properties: {
+        id: 'permission-1',
+        sessionID: session.opencodeSessionId,
+        permission: 'bash',
+        pattern: 'npm test',
+      },
+    })
+
+    await vi.waitFor(() => expect(createAgentNotificationMock).toHaveBeenCalledTimes(2))
+    expect(createAgentNotificationMock).toHaveBeenNthCalledWith(1, {
+      workspaceId: 'workspace-a',
+      sessionId: session.id,
+      kind: 'question',
+      title: 'Blocking task',
+      summary: 'Which deployment target should I use?',
+    })
+    expect(createAgentNotificationMock).toHaveBeenNthCalledWith(2, {
+      workspaceId: 'workspace-a',
+      sessionId: session.id,
+      kind: 'permission',
+      title: 'Blocking task',
+      summary: 'bash: npm test',
+    })
   })
 })

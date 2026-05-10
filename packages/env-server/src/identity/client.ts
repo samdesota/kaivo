@@ -55,10 +55,27 @@ export interface OpenPaneInput {
   content:
     | { type: 'shell'; shellId: string }
     | { type: 'file'; path: string; absolute?: boolean }
-    | { type: 'preview'; port: number }
     | { type: 'browser'; url?: string; browserTabId?: string }
   title?: string
   activate?: boolean
+}
+
+export interface AgentNotificationInput {
+  workspaceId: string
+  sessionId: string
+  kind?: 'finished' | 'question' | 'permission' | 'error'
+  title: string
+  summary: string
+}
+
+export interface WorkspaceResourceInput {
+  workspaceId: string
+  resource: {
+    type: 'browser_tab' | 'worktree' | 'shell' | 'other'
+    resourceKey: string
+    shared?: boolean
+    data?: Record<string, unknown>
+  }
 }
 
 // Superjson wire format matches what the plugin client uses: `{ json: <val> }`.
@@ -189,4 +206,12 @@ export async function getRepoConfig(configId: string): Promise<RepoConfigBundle>
 
 export async function openPane(input: OpenPaneInput): Promise<{ ok: true; tab: unknown }> {
   return mutation<{ ok: true; tab: unknown }>('envApi.openPane', input as unknown as Record<string, unknown>)
+}
+
+export async function createAgentNotification(input: AgentNotificationInput): Promise<unknown> {
+  return mutation<unknown>('envApi.createAgentNotification', input as unknown as Record<string, unknown>)
+}
+
+export async function upsertWorkspaceResource(input: WorkspaceResourceInput): Promise<unknown> {
+  return mutation<unknown>('envApi.upsertWorkspaceResource', input as unknown as Record<string, unknown>)
 }

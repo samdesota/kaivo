@@ -20,10 +20,10 @@ describe('handleAgentUiOpenPaneEvent', () => {
     const onOpenPane = vi.fn()
 
     handleAgentUiOpenPaneEvent(
-      { type: 'open_pane', content: { type: 'preview', port: 5173 }, title: 'preview', activate: false },
+      { type: 'open_pane', content: { type: 'browser', url: 'http://127.0.0.1:5173' }, title: 'preview', activate: false },
       onOpenPane,
     )
 
-    expect(onOpenPane).toHaveBeenCalledWith({ type: 'preview', port: 5173 }, { title: 'preview', activate: false })
+    expect(onOpenPane).toHaveBeenCalledWith({ type: 'browser', url: 'http://127.0.0.1:5173' }, { title: 'preview', activate: false })
   })
 })

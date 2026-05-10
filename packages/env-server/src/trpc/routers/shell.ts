@@ -1,7 +1,8 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { authedProcedure, router } from '../trpc.js'
-import { ShellError, terminalService } from '../../terminal/service.js'
+import { ShellError, ensureValidCwd, terminalService } from '../../terminal/service.js'
+import { terminalDaemonClient, useTerminalDaemon } from '../../terminal/daemon-client.js'
 
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof ShellError) {
@@ -18,7 +19,7 @@ function toTrpcError(err: unknown): TRPCError {
 export const shellRouter = router({
   list: authedProcedure
     .input(z.object({ workspaceId: z.string().min(1).optional() }).optional())
-    .query(({ input }) => terminalService.list(input ?? {})),
+    .query(({ input }) => useTerminalDaemon() ? terminalDaemonClient.list(input ?? {}) : terminalService.list(input ?? {})),
 
   create: authedProcedure
     .input(
@@ -34,7 +35,8 @@ export const shellRouter = router({
     )
     .mutation(async ({ input }) => {
       try {
-        return await terminalService.create(input ?? {})
+        if (input?.cwd) ensureValidCwd(input.cwd)
+        return await (useTerminalDaemon() ? terminalDaemonClient.create(input ?? {}) : terminalService.create(input ?? {}))
       } catch (err) {
         throw toTrpcError(err)
       }
@@ -48,9 +50,11 @@ export const shellRouter = router({
         rows: z.number().int().positive().max(200),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       try {
-        return terminalService.resize(input.id, input.cols, input.rows)
+        return await (useTerminalDaemon()
+          ? terminalDaemonClient.resize(input.id, input.cols, input.rows)
+          : terminalService.resize(input.id, input.cols, input.rows))
       } catch (err) {
         throw toTrpcError(err)
       }
@@ -58,8 +62,9 @@ export const shellRouter = router({
 
   dispose: authedProcedure
     .input(z.object({ id: z.string().min(1) }))
-    .mutation(({ input }) => {
-      terminalService.dispose(input.id)
+    .mutation(async ({ input }) => {
+      if (useTerminalDaemon()) await terminalDaemonClient.dispose(input.id)
+      else terminalService.dispose(input.id)
       return { ok: true as const }
     }),
 })

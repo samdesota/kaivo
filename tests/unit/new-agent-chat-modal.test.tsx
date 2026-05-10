@@ -40,7 +40,7 @@ describe('WorkspaceModeControl', () => {
     expect(screen.getByText('zoottle')).toBeTruthy()
   })
 
-  it('emits mode changes from the New/Existing dropdown', () => {
+  it('emits mode changes from the New/Existing segmented control', () => {
     const onModeChange = vi.fn()
 
     render(
@@ -53,7 +53,37 @@ describe('WorkspaceModeControl', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Workspace mode'), { target: { value: 'new' } })
+    fireEvent.click(screen.getByRole('button', { name: 'New' }))
     expect(onModeChange).toHaveBeenCalledWith('new')
+  })
+
+  it('renders and updates the parent folder picker in new workspace mode', () => {
+    const onParentFolderChange = vi.fn()
+
+    render(
+      <WorkspaceModeControl
+        mode="new"
+        onModeChange={vi.fn()}
+        existingWorkspaceName="cloud-code-tools"
+        workspaceNameValue="sidebar-folders"
+        onWorkspaceNameChange={vi.fn()}
+        parentFolderId="folder-a"
+        workspaceTree={[
+          {
+            type: 'folder',
+            folder: { id: 'folder-a', name: 'Clients' },
+            children: [
+              { type: 'folder', folder: { id: 'folder-b', name: 'Internal' }, children: [] },
+            ],
+          },
+        ]}
+        onParentFolderChange={onParentFolderChange}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Parent folder' }).textContent).toContain('Clients')
+    fireEvent.click(screen.getByRole('button', { name: 'Parent folder' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Internal' }))
+    expect(onParentFolderChange).toHaveBeenCalledWith('folder-b')
   })
 })

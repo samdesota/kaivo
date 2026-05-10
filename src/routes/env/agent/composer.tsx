@@ -14,6 +14,8 @@ export function Composer({
   sessionId,
   pendingApprovalReason,
   running = false,
+  stopPending = false,
+  onStop,
   onSendStart,
   onSendFailed,
   onSent,
@@ -22,6 +24,8 @@ export function Composer({
   sessionId: string
   pendingApprovalReason?: string | null
   running?: boolean
+  stopPending?: boolean
+  onStop?: () => void
   onSendStart?: (message: string) => string | undefined
   onSendFailed?: (optimisticId: string | undefined) => void
   onSent?: () => void
@@ -36,7 +40,6 @@ export function Composer({
   const send = envTrpc.agent.sessionSend.useMutation()
   const rename = envTrpc.agent.sessionRename.useMutation()
   const runCommand = envTrpc.agent.runCommand.useMutation()
-  const abort = envTrpc.agent.sessionAbort.useMutation()
   const commands = envTrpc.agent.listCommands.useQuery(undefined, {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
@@ -126,7 +129,7 @@ export function Composer({
       running: effectiveRunning,
       slash: msg.startsWith('/'),
     })
-    if (!msg || send.isPending || pendingApprovalReason || effectiveRunning) {
+    if (!msg || send.isPending || pendingApprovalReason || (effectiveRunning && msg.startsWith('/'))) {
       chatDebug('composer:onSend:blocked', {
         sessionId,
         empty: !msg,
@@ -144,11 +147,14 @@ export function Composer({
       if (msg.startsWith('/')) {
         await runSlashCommand(msg)
       } else {
-        setLocalSending(true)
-        chatDebug('composer:onSendStart:before', { sessionId, messageLength: msg.length })
-        optimisticId = onSendStart?.(msg)
-        chatDebug('composer:onSendStart:after', { sessionId, optimisticId })
-        await send.mutateAsync({ sessionId, message: msg })
+        if (!effectiveRunning) {
+          setLocalSending(true)
+          chatDebug('composer:onSendStart:before', { sessionId, messageLength: msg.length })
+          optimisticId = onSendStart?.(msg)
+          chatDebug('composer:onSendStart:after', { sessionId, optimisticId })
+        }
+        const result = await send.mutateAsync({ sessionId, message: msg })
+        if (result.queued) return
         await onWorkspaceAutoName?.(msg)
         chatDebug('composer:mutation:resolved', { sessionId, optimisticId })
         onSent?.()
@@ -163,38 +169,33 @@ export function Composer({
     }
   }
 
-  async function onStop() {
-    if (!effectiveRunning || abort.isPending) return
-    setErr(null)
-    try {
-      await abort.mutateAsync({ sessionId })
-    } catch (e) {
-      setErr(extractTrpcMessage(e))
-    }
-  }
-
   const disabled =
     Boolean(pendingApprovalReason) ||
     send.isPending ||
     rename.isPending ||
-    runCommand.isPending ||
-    effectiveRunning
+    runCommand.isPending
 
   return (
-    <div className="relative border-t border-neutral-800 p-2">
+    <div className="relative border-t border-neutral-800/60 p-2">
       {effectiveRunning && (
-        <div className="mb-2 flex items-center gap-2 rounded border border-brand-500/40 bg-brand-500/5 px-2 py-1 text-[11px] text-brand-300">
+        <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-content-default">
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-400" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-running opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-running" />
           </span>
-          <span>Agent is responding…</span>
-          <span className="ml-auto text-[10px] text-neutral-500">esc to stop</span>
-        </div>
-      )}
-      {pendingApprovalReason && (
-        <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-200">
-          {pendingApprovalReason}
+          <span>Agent is responding</span>
+          {onStop && (
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={stopPending}
+              className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-ui-default hover:bg-highlight hover:text-content-strong disabled:opacity-50"
+              title="Stop agent (Esc)"
+            >
+              <kbd className="rounded border border-neutral-700 bg-input px-1 font-mono text-[10px] text-help">Esc</kbd>
+              <span>{stopPending ? 'Stopping...' : 'Stop'}</span>
+            </button>
+          )}
         </div>
       )}
       {err && (
@@ -241,11 +242,6 @@ export function Composer({
                 return
               }
             }
-            if (e.key === 'Escape' && effectiveRunning) {
-              e.preventDefault()
-              void onStop()
-              return
-            }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
               void onSend()
@@ -255,32 +251,21 @@ export function Composer({
             pendingApprovalReason
               ? 'Waiting on permission approval…'
               : effectiveRunning
-                ? 'Agent is responding — esc to stop.'
+                ? 'Follow up...'
                 : 'Message the agent. Enter to send, Shift+Enter for newline. Type / for commands.'
           }
           rows={1}
-          className="min-h-[32px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none disabled:opacity-60"
+          className="min-h-[32px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none disabled:opacity-60"
         />
-        {effectiveRunning ? (
-          <button
-            onClick={() => void onStop()}
-            disabled={abort.isPending}
-            title="Stop the agent (Esc)"
-            className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-50"
-          >
-            {abort.isPending ? 'Stopping…' : 'Stop'}
-          </button>
-        ) : (
-          <button
-            onClick={() => void onSend()}
-            disabled={disabled || !text.trim()}
-            title="Send message (Enter)"
-            aria-label="Send message"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-sm text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-30"
-          >
-            {send.isPending || rename.isPending || runCommand.isPending ? '…' : '↵'}
-          </button>
-        )}
+        <button
+          onClick={() => void onSend()}
+          disabled={disabled || !text.trim()}
+          title={effectiveRunning ? 'Queue follow-up (Enter)' : 'Send message (Enter)'}
+          aria-label={effectiveRunning ? 'Queue follow-up' : 'Send message'}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-sm text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-30"
+        >
+          {send.isPending || rename.isPending || runCommand.isPending ? '…' : '↵'}
+        </button>
       </div>
     </div>
   )

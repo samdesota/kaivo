@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type RecentRow = { path: string; label: string | null; lastOpenedAt: string }
 const recentRows: RecentRow[] = []
+const directoryPaths = new Set<string>()
 
 vi.mock('drizzle-orm', () => ({
   desc: () => ({}),
@@ -40,12 +41,29 @@ vi.mock('../db/client.js', () => ({
         }),
       }),
     }),
-    delete: () => ({ where: () => ({ run: () => undefined }) }),
+    delete: () => ({
+      where: (predicate: (row: RecentRow) => boolean) => ({
+        run: () => {
+          const kept = recentRows.filter((row) => !predicate(row))
+          recentRows.splice(0, recentRows.length, ...kept)
+        },
+      }),
+    }),
+  },
+}))
+
+vi.mock('node:fs/promises', () => ({
+  default: {
+    stat: vi.fn(async (folderPath: string) => {
+      if (!directoryPaths.has(folderPath)) throw new Error('missing')
+      return { isDirectory: () => true }
+    }),
   },
 }))
 
 beforeEach(() => {
   recentRows.length = 0
+  directoryPaths.clear()
   vi.resetModules()
 })
 
@@ -63,5 +81,19 @@ describe('recent folder service', () => {
     expect(new Date(recentRows[0]!.lastOpenedAt).getTime()).toBeGreaterThan(
       Date.now() - 10_000,
     )
+  })
+
+  it('lists only existing directories and prunes missing folders', async () => {
+    const { recentFolderService } = await import('./service.js')
+    directoryPaths.add('/tmp/existing')
+    recentRows.push(
+      { path: '/tmp/missing', label: 'Missing', lastOpenedAt: '2026-01-01T00:00:02.000Z' },
+      { path: '/tmp/existing', label: 'Existing', lastOpenedAt: '2026-01-01T00:00:01.000Z' },
+    )
+
+    const listed = await recentFolderService.list()
+
+    expect(listed.map((folder) => folder.path)).toEqual(['/tmp/existing'])
+    expect(recentRows.map((folder) => folder.path)).toEqual(['/tmp/existing'])
   })
 })

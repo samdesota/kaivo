@@ -1,14 +1,15 @@
-import { StrictMode } from 'react'
+import { StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 import { trpc, makeTrpcClient } from './trpc'
 import { router } from './router'
-import { initFontSize } from './lib/ui-prefs'
+import { initFontSize, initThemeColor } from './lib/ui-prefs'
 import { installClientLogCapture } from './lib/client-logger'
 import './index.css'
 
 initFontSize()
+initThemeColor()
 installClientLogCapture()
 
 const queryClient = new QueryClient({
@@ -32,8 +33,19 @@ createRoot(root).render(
   <StrictMode>
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
+        <Suspense fallback={<AppSuspenseFallback />}>
+          <RouterProvider router={router} />
+        </Suspense>
       </QueryClientProvider>
     </trpc.Provider>
   </StrictMode>,
 )
+
+function AppSuspenseFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-neutral-975 text-help">
+      <div className="window-drag fixed top-0 right-0 left-0 h-10" />
+      Loading…
+    </div>
+  )
+}

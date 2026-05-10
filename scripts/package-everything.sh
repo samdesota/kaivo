@@ -15,6 +15,8 @@ echo "==> building env-server"
 echo "==> staging env-server into $install_dir/app"
 cp "$repo_root/packages/env-server/dist/main.js"     "$install_dir/app/main.js"
 cp "$repo_root/packages/env-server/dist/main.js.map" "$install_dir/app/main.js.map"
+cp "$repo_root/packages/env-server/dist/terminal-daemon.js"     "$install_dir/app/terminal-daemon.js"
+cp "$repo_root/packages/env-server/dist/terminal-daemon.js.map" "$install_dir/app/terminal-daemon.js.map"
 rsync -a --delete "$repo_root/packages/env-server/migrations/" "$install_dir/app/migrations/"
 find "$install_dir/app/node_modules/node-pty/prebuilds" -name spawn-helper -type f -exec chmod 755 {} +
 

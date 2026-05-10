@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, ipcMain, webContents as electronWebContents, type BrowserWindow, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, webContents as electronWebContents, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
 import { desktopBrowserSocketPath } from './instance-runtime'
@@ -18,6 +18,15 @@ let browserAgentBridge: BrowserAgentBridge | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 
+type AppShortcutInput = {
+  key: string
+  code?: string
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+}
+
 function writeLog(kind: DesktopLogKind, level: 'info' | 'error', msg: string, ctx?: Record<string, unknown>): void {
   if (!logPath) return
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
@@ -32,6 +41,20 @@ function trackWindow(win: BrowserWindow): void {
 function trackWebContents(contents: WebContents): void {
   if (trackedWebContentsIds.has(contents.id)) return
   trackedWebContentsIds.add(contents.id)
+  contents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !isAppShortcut(input)) return
+    const chrome = findChromeWebContentsForShortcutSender(contents)
+    if (!chrome) return
+    event.preventDefault()
+    sendAppShortcut(chrome, {
+      key: input.key,
+      code: input.code,
+      metaKey: input.meta,
+      ctrlKey: input.control,
+      altKey: input.alt,
+      shiftKey: input.shift,
+    })
+  })
   contents.on('console-message', (_event, level, message, line, sourceId) => {
     const kind = chromeWebContentsIds.has(contents.id) ? 'chrome-renderer' : 'tab-renderer'
     writeLog(kind, level === 2 ? 'error' : 'info', message, { webContentsId: contents.id, line, sourceId })
@@ -44,6 +67,98 @@ function trackWebContents(contents: WebContents): void {
   })
 }
 
+function installAppShortcutMenu(): void {
+  const appShortcuts: Array<{ label: string; accelerator: string; input: AppShortcutInput }> = [
+    { label: 'Command Palette', accelerator: 'CommandOrControl+K', input: shortcutInput('k', 'KeyK') },
+    { label: 'New Browser Tab', accelerator: 'CommandOrControl+T', input: shortcutInput('t', 'KeyT') },
+    { label: 'Toggle Sidebar', accelerator: 'CommandOrControl+B', input: shortcutInput('b', 'KeyB') },
+    { label: 'Toggle Agent Pane', accelerator: 'CommandOrControl+G', input: shortcutInput('g', 'KeyG') },
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === 'darwin'
+      ? [{ role: 'appMenu' as const }]
+      : []),
+    {
+      label: 'Zoottle',
+      submenu: appShortcuts.map((shortcut) => ({
+        label: shortcut.label,
+        accelerator: shortcut.accelerator,
+        click: () => {
+          sendAppShortcut(findChromeWebContentsForFocusedShortcut(), shortcut.input)
+        },
+      })),
+    },
+    {
+      role: 'editMenu',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ]))
+}
+
+function shortcutInput(key: string, code: string): AppShortcutInput {
+  return {
+    key,
+    code,
+    metaKey: process.platform === 'darwin',
+    ctrlKey: process.platform !== 'darwin',
+    altKey: false,
+    shiftKey: false,
+  }
+}
+
+function sendAppShortcut(chrome: WebContents | null, input: AppShortcutInput): void {
+  if (!chrome || chrome.isDestroyed() || !chromeWebContentsIds.has(chrome.id)) return
+  chrome.send('cloud-code/app-shortcut', input)
+}
+
+function findChromeWebContentsForFocusedShortcut(): WebContents | null {
+  const focusedContents = electronWebContents.getFocusedWebContents()
+  if (focusedContents && !focusedContents.isDestroyed()) {
+    if (chromeWebContentsIds.has(focusedContents.id)) return focusedContents
+    const chrome = findChromeWebContentsForShortcutSender(focusedContents)
+    if (chrome) return chrome
+  }
+
+  const focusedWindowContents = BrowserWindow.getFocusedWindow()?.webContents
+  if (focusedWindowContents && !focusedWindowContents.isDestroyed() && chromeWebContentsIds.has(focusedWindowContents.id)) {
+    return focusedWindowContents
+  }
+
+  return null
+}
+
+function isAppShortcut(input: Electron.Input): boolean {
+  if (!input.meta && !input.control) return false
+  if (input.alt) return false
+  const key = input.key.toLowerCase()
+  return key === 'k' || key === 't' || key === 'b' || key === 'g'
+}
+
+function findChromeWebContentsForShortcutSender(contents: WebContents): WebContents | null {
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
+  } | undefined
+  const caller = bridge?.callerForWebContents?.(contents)
+  if (caller?.kind !== 'tab' || !caller.tabId) return null
+  const tabId = caller.tabId
+
+  const windows = webframeApp?.windows.list() as Array<{ tabIds?: string[]; electronWindow: BrowserWindow }> | undefined
+  const owner = windows?.find((window) => window.tabIds?.includes(tabId))
+  if (!owner || owner.electronWindow.isDestroyed()) return null
+  return owner.electronWindow.webContents.isDestroyed() ? null : owner.electronWindow.webContents
+}
+
 function findTabWebContents(browserTabId: string): WebContents | null {
   const bridge = webframeApp?._debug.bridge as unknown as {
     callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
@@ -54,6 +169,20 @@ function findTabWebContents(browserTabId: string): WebContents | null {
     if (contents.isDestroyed()) continue
     const caller = bridge.callerForWebContents(contents)
     if (caller.kind === 'tab' && caller.tabId === browserTabId) return contents
+  }
+  return null
+}
+
+function findOverlayWebContents(overlayId: string): WebContents | null {
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string; overlayId?: string }
+  } | undefined
+  if (!bridge?.callerForWebContents) return null
+
+  for (const contents of electronWebContents.getAllWebContents()) {
+    if (contents.isDestroyed()) continue
+    const caller = bridge.callerForWebContents(contents)
+    if (caller.kind === 'overlay' && caller.overlayId === overlayId) return contents
   }
   return null
 }
@@ -75,6 +204,21 @@ function installIpcHandlers(): void {
     browserAgentBridge?.disconnectTab(input.browserTabId)
     return { ok: true as const }
   })
+  ipcMain.handle('cloud-code/browser/focus-overlay', (_event, input: { overlayId?: string }) => {
+    const overlayId = input.overlayId
+    if (!overlayId) throw new Error('overlayId is required')
+    const contents = findOverlayWebContents(overlayId)
+    if (!contents) throw new Error(`Overlay ${overlayId} not found`)
+    const owner = (contents as WebContents & { getOwnerBrowserWindow?: () => BrowserWindow | null }).getOwnerBrowserWindow?.()
+    owner?.focus()
+    contents.focus()
+    return { ok: true as const }
+  })
+  ipcMain.handle('cloud-code/services/restart-terminal', async () => {
+    if (!serviceSupervisor) throw new Error('desktop service supervisor unavailable')
+    await serviceSupervisor.restartTerminal()
+    return { ok: true as const }
+  })
 }
 
 process.on('uncaughtException', (error) => {
@@ -87,13 +231,14 @@ process.on('unhandledRejection', (reason) => {
 
 async function main(): Promise<void> {
   await app.whenReady()
+  installAppShortcutMenu()
   installIpcHandlers()
   const config = resolveDesktopConfig({
     ...process.env,
     NODE_ENV: app.isPackaged ? 'production' : process.env.NODE_ENV,
   })
   if (config.manageServices) {
-    serviceSupervisor = await ensureDesktopServices(config.instance)
+    serviceSupervisor = await ensureDesktopServices(config.instance, { preserveTerminalOnStop: app.isPackaged })
   }
 
   app.on('web-contents-created', (_event, contents) => {

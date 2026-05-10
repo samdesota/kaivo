@@ -13,7 +13,7 @@ describe('runLocalAppMigrations', () => {
 
     expect(result).toEqual({
       sqlitePath,
-      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders'],
+      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source'],
     })
     const sqlite = new Database(sqlitePath, { readonly: true })
     try {
@@ -77,7 +77,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT * FROM workspace_view_states').get()).toMatchObject({
@@ -93,6 +93,7 @@ describe('runLocalAppMigrations', () => {
         id: 'tab-1',
         type: 'browser',
         title: 'Example',
+        title_source: null,
         position: 0,
         url: 'https://example.com',
         browser_tab_id: 'browser-1',
@@ -100,6 +101,10 @@ describe('runLocalAppMigrations', () => {
       })
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_agent_tabs'").get()).toBeTruthy()
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()
+      expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_notifications'").get()).toBeTruthy()
+      expect(migrated.prepare('PRAGMA table_info(agent_notifications)').all()).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: 'title' }), expect.objectContaining({ name: 'kind' })]),
+      )
     } finally {
       migrated.close()
     }
@@ -132,7 +137,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()

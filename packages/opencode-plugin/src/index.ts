@@ -51,7 +51,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     return {}
   }
   console.error(
-    `[zoottle-opencode-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane, cloud_browser_* (appUrl=${creds.appUrl})`,
+    `[zoottle-opencode-plugin] registering cloud_bash, cloud_pty, cloud_pty_list, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane, cloud_browser_* (appUrl=${creds.appUrl})`,
   )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
@@ -86,6 +86,14 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
         },
         async execute(args, context) {
           return runCloudPty(client, args, context as unknown as ToolCtxLike)
+        },
+      }),
+      cloud_pty_list: tool({
+        description:
+          'List persistent Zoottle PTY shells in this agent session\'s workspace. Use this before reading or reusing an existing shell. Returns shell ids, cwd, alive/exit state, last activity, and title, which may contain the running command from shell integration.',
+        args: {},
+        async execute(_args, context) {
+          return runCloudPtyList(client, context as unknown as ToolCtxLike)
         },
       }),
       cloud_pty_write: tool({
@@ -132,11 +140,11 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       cloud_open_pane: tool({
         description:
-          'Open or focus a right-side pane tab in the Zoottle UI. Supports file, shell, preview, and browser panes. Use this to show the human relevant context. This tool does not read, write, or execute anything by itself.',
+          'Open or focus a right-side pane tab in the Zoottle UI. Supports file, shell, and browser panes. Use browser panes for web pages and local dev servers. This tool does not read, write, or execute anything by itself.',
         args: {
           kind: z
-            .enum(['file', 'shell', 'preview', 'browser'])
-            .describe('Pane type to open: file, shell, preview, or browser.'),
+            .enum(['file', 'shell', 'browser'])
+            .describe('Pane type to open: file, shell, or browser.'),
           path: z
             .string()
             .optional()
@@ -144,8 +152,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
               'For kind=file: the file to open. A path with NO leading slash (e.g. "src/app.ts") is resolved relative to your current working directory. A path with a leading slash (e.g. "/etc/hosts" or "/Users/sam/notes.md") is treated as an absolute filesystem path.',
             ),
           shellId: z.string().optional().describe('For kind=shell: shell id to open.'),
-          port: z.number().int().optional().describe('For kind=preview: local preview port to open.'),
-          url: z.string().optional().describe('For kind=browser: URL to open.'),
+          url: z.string().optional().describe('For kind=browser: URL to open, including local dev server URLs such as http://127.0.0.1:5173.'),
           title: z.string().optional().describe('Optional short tab title.'),
           activate: z
             .boolean()
@@ -342,10 +349,72 @@ async function runCloudPty(
   }
 }
 
+type CloudPtyInfo = {
+  id: string
+  workspaceId: string | null
+  cwd: string
+  ownerKind: string
+  ownerAgentSessionId: string | null
+  ownerSessionId: string | null
+  exitCode: number | null
+  createdAt: unknown
+  lastActivityAt: unknown
+  alive: boolean
+  title: string | null
+}
+
+async function runCloudPtyList(
+  client: AgentShellClient,
+  ctx: ToolCtxLike,
+): Promise<{ output: string; metadata: Record<string, unknown> }> {
+  try {
+    const shells = await client.query<CloudPtyInfo[]>('agentShell.list', {
+      opencodeSessionId: ctx.sessionID,
+    })
+    return {
+      output: formatPtyList(shells),
+      metadata: {
+        status: 'success',
+        count: shells.length,
+        shell_ids: shells.map((shell) => shell.id),
+      },
+    }
+  } catch (err) {
+    if (err instanceof AppUnreachableError) {
+      return {
+        output: '',
+        metadata: {
+          status: 'error',
+          stderr: 'cloud-code app unreachable',
+          error: err.message,
+        },
+      }
+    }
+    return {
+      output: '',
+      metadata: {
+        status: 'error',
+        stderr: (err as Error).message,
+      },
+    }
+  }
+}
+
+function formatPtyList(shells: CloudPtyInfo[]): string {
+  if (shells.length === 0) return 'No Zoottle PTY shells are open in this workspace.'
+  return shells
+    .map((shell) => {
+      const status = shell.alive ? 'alive' : `exited ${shell.exitCode ?? 'unknown'}`
+      const title = shell.title ? ` title=${JSON.stringify(shell.title)}` : ''
+      return `${shell.id} ${status} cwd=${JSON.stringify(shell.cwd)} owner=${shell.ownerKind} lastActivityAt=${String(shell.lastActivityAt)}${title}`
+    })
+    .join('\n')
+}
+
 async function runCloudPtyWrite(
   client: AgentShellClient,
   args: { shellId: string; input: string; appendNewline?: boolean },
-  _ctx: ToolCtxLike,
+  ctx: ToolCtxLike,
 ): Promise<{ output: string; metadata: Record<string, unknown> }> {
   try {
     const line = args.appendNewline === false ? args.input : `${args.input}\n`
@@ -353,6 +422,7 @@ async function runCloudPtyWrite(
     await client.mutate<{ ok: true }>('agentShell.write', {
       shellId: args.shellId,
       b64,
+      opencodeSessionId: ctx.sessionID,
     })
     return {
       output: `Wrote ${line.length} bytes to shell ${args.shellId}.`,
@@ -366,7 +436,7 @@ async function runCloudPtyWrite(
 async function runCloudPtyRead(
   client: AgentShellClient,
   args: { shellId: string; maxBytes?: number },
-  _ctx: ToolCtxLike,
+  ctx: ToolCtxLike,
 ): Promise<{ output: string; metadata: Record<string, unknown> }> {
   try {
     const res = await client.query<{
@@ -377,6 +447,7 @@ async function runCloudPtyRead(
     }>('agentShell.tail', {
       shellId: args.shellId,
       maxBytes: args.maxBytes ?? 8192,
+      opencodeSessionId: ctx.sessionID,
     })
     const text = Buffer.from(res.b64, 'base64').toString('utf8')
     return {
@@ -396,10 +467,10 @@ async function runCloudPtyRead(
 async function runCloudPtyClose(
   client: AgentShellClient,
   args: { shellId: string },
-  _ctx: ToolCtxLike,
+  ctx: ToolCtxLike,
 ): Promise<{ output: string; metadata: Record<string, unknown> }> {
   try {
-    await client.mutate<{ ok: true }>('agentShell.close', { shellId: args.shellId })
+    await client.mutate<{ ok: true }>('agentShell.close', { shellId: args.shellId, opencodeSessionId: ctx.sessionID })
     return {
       output: `Shell ${args.shellId} closed.`,
       metadata: { cloudcode_shell_id: args.shellId, status: 'closed' },
@@ -434,10 +505,9 @@ function ptyError(shellId: string, err: unknown): { output: string; metadata: Re
 async function runCloudOpenPane(
   client: AgentShellClient,
   args: {
-    kind: 'file' | 'shell' | 'preview' | 'browser'
+    kind: 'file' | 'shell' | 'browser'
     path?: string
     shellId?: string
-    port?: number
     url?: string
     title?: string
     activate?: boolean
@@ -448,7 +518,6 @@ async function runCloudOpenPane(
     let content:
       | { type: 'file'; path: string }
       | { type: 'shell'; shellId: string }
-      | { type: 'preview'; port: number }
       | { type: 'browser'; url?: string }
     if (args.kind === 'file') {
       if (!args.path) throw new Error('path is required for kind=file')
@@ -456,9 +525,6 @@ async function runCloudOpenPane(
     } else if (args.kind === 'shell') {
       if (!args.shellId) throw new Error('shellId is required for kind=shell')
       content = { type: 'shell', shellId: args.shellId }
-    } else if (args.kind === 'preview') {
-      if (!args.port) throw new Error('port is required for kind=preview')
-      content = { type: 'preview', port: args.port }
     } else {
       content = args.url ? { type: 'browser', url: args.url } : { type: 'browser' }
     }
@@ -475,9 +541,7 @@ async function runCloudOpenPane(
         ? content.path
         : content.type === 'shell'
           ? content.shellId
-          : content.type === 'preview'
-            ? `:${content.port}`
-            : (content.url ?? 'browser')
+          : (content.url ?? 'browser')
     ctx.metadata({
       title: `open ${content.type} ${truncateTitle(label)}`,
       metadata: { status: 'success', pane_type: content.type },

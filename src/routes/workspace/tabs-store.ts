@@ -11,6 +11,7 @@ export type WorkspaceTabRecord = {
   id: string
   type: WorkspaceTab['type']
   title: string
+  titleSource: 'auto' | 'explicit' | null
   position: number
   envId: string | null
   shellId: string | null
@@ -64,7 +65,7 @@ function workspaceTabIdFromKey(key: unknown): string {
 
 export function recordToWorkspaceTab(record: WorkspaceTabRecord): WorkspaceTab | null {
   if (record.type === 'shell' && record.envId && record.shellId) {
-    return { id: record.id, type: 'shell', envId: record.envId, shellId: record.shellId, title: record.title }
+    return { id: record.id, type: 'shell', envId: record.envId, shellId: record.shellId, title: record.title, titleSource: record.titleSource ?? 'auto' }
   }
   if (record.type === 'file' && record.envId && record.path) {
     return { id: record.id, type: 'file', envId: record.envId, path: record.path, sessionId: record.sessionId ?? undefined, title: record.title }
@@ -84,6 +85,7 @@ function workspaceTabToRecord(workspaceId: string, tab: WorkspaceTab, position: 
     id: tab.id,
     type: tab.type,
     title: tab.title,
+    titleSource: tab.type === 'shell' ? (tab.titleSource ?? 'auto') : null,
     position,
     envId: 'envId' in tab ? tab.envId : null,
     shellId: tab.type === 'shell' ? tab.shellId : null,
@@ -148,9 +150,13 @@ export function useWorkspaceTabsStore(workspaceId: string) {
     {
       onData(events) {
         const batch = events as WorkspaceTabsChangeEvent[]
+        const deduped = new Map<string, WorkspaceTabsChangeEvent>()
+        for (const event of batch) {
+          if (event.seq <= syncedSeqRef.current) continue
+          deduped.set(event.key, event)
+        }
         collection.utils.writeBatch(() => {
-          for (const event of batch) {
-            if (event.seq <= syncedSeqRef.current) continue
+          for (const event of deduped.values()) {
             if (event.op === 'delete') {
               collection.utils.writeDelete(event.key)
             } else if (event.row) {
@@ -191,11 +197,27 @@ export function useWorkspaceTabsStore(workspaceId: string) {
         draft.browserTabId = browserTabId
       })
     },
+    setTabUrl(tabId: string, url: string) {
+      const record = records.find((tab) => tab.id === tabId)
+      if (!record || record.type !== 'browser' || record.url === url) return
+      collection.update(workspaceTabRecordKey(record), (draft) => {
+        draft.url = url
+      })
+    },
     setTabTitle(tabId: string, title: string) {
       const record = records.find((tab) => tab.id === tabId)
       if (!record) return
       collection.update(workspaceTabRecordKey(record), (draft) => {
         draft.title = title
+        if (draft.type === 'shell') draft.titleSource = 'explicit'
+      })
+    },
+    setTabAutoTitle(tabId: string, title: string) {
+      const record = records.find((tab) => tab.id === tabId)
+      if (!record || record.type !== 'shell' || record.titleSource === 'explicit' || record.title === title) return
+      collection.update(workspaceTabRecordKey(record), (draft) => {
+        draft.title = title
+        draft.titleSource = 'auto'
       })
     },
   }

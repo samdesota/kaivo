@@ -36,10 +36,10 @@ export function Modal({ open, onClose, title, children, widthClass = 'max-w-xl' 
         )}
       >
         <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-          <h2 className="text-sm font-semibold text-neutral-100">{title}</h2>
+          <h2 className="text-sm font-semibold text-header-2">{title}</h2>
           <button
             onClick={onClose}
-            className="rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
+            className="rounded px-2 py-0.5 text-ui-muted hover:bg-highlight hover:text-header-3"
             aria-label="Close"
           >
             ×
@@ -51,11 +51,24 @@ export function Modal({ open, onClose, title, children, widthClass = 'max-w-xl' 
   )
 }
 
-export function Button({ className, ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) {
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
+type ButtonSize = 'sm' | 'md'
+
+export function Button({
+  className,
+  variant = 'primary',
+  size = 'sm',
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: ButtonSize }) {
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex items-center justify-center rounded font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-neutral-600 disabled:cursor-not-allowed disabled:opacity-50',
+        size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm',
+        variant === 'primary' && 'bg-neutral-700 text-header-1 hover:bg-neutral-600',
+        variant === 'secondary' && 'border border-neutral-700 bg-neutral-930 text-header-3 hover:bg-highlight',
+        variant === 'ghost' && 'text-ui-default hover:bg-highlight hover:text-header-3',
+        variant === 'danger' && 'border border-red-900 bg-red-950/50 text-red-300 hover:bg-red-950',
         className,
       )}
       {...rest}
@@ -63,11 +76,16 @@ export function Button({ className, ...rest }: ButtonHTMLAttributes<HTMLButtonEl
   )
 }
 
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+export function Input({
+  className,
+  size = 'sm',
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> & { size?: ButtonSize }) {
   return (
     <input
       className={cn(
-        'w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500',
+        'w-full rounded border border-neutral-800 bg-input text-content-strong placeholder-placeholder focus:border-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-600',
+        size === 'sm' ? 'px-3 py-2 text-xs' : 'px-3 py-2 text-sm',
         className,
       )}
       {...rest}
@@ -77,9 +95,56 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
 
 export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium text-neutral-200">
+    <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium text-header-3">
       {children}
     </label>
+  )
+}
+
+export function Field({ label, children, className }: { label: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <label className={cn('block text-xs text-ui-default', className)}>
+      <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-label">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+export function SegmentedControl<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  className,
+}: {
+  value: T
+  options: Array<{ value: T; label: ReactNode }>
+  onChange: (value: T) => void
+  ariaLabel?: string
+  className?: string
+}) {
+  return (
+    <div className={cn('flex w-full overflow-hidden rounded border border-neutral-800 bg-input', className)} role="group" aria-label={ariaLabel}>
+      {options.map((option) => {
+        const selected = value === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'flex-1 px-2.5 py-1 text-xs transition-colors',
+              selected
+                ? 'bg-highlight text-header-3'
+                : 'text-ui-muted hover:bg-highlight hover:text-content-default',
+            )}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

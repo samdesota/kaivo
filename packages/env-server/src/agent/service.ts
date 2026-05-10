@@ -13,7 +13,7 @@ import {
   opencodeBasicAuthHeader,
   opencodeSupervisor,
 } from './opencode.js'
-import { IdentityAuthError, IdentityUnreachableError, resolveProviderKeys } from '../identity/client.js'
+import { createAgentNotification, IdentityAuthError, IdentityUnreachableError, resolveProviderKeys } from '../identity/client.js'
 
 const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
 const REASONING_EFFORT_VARIANTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
@@ -36,6 +36,7 @@ const CLOUD_TOOL_OVERRIDES = {
   pty: false,
   cloud_bash: true,
   cloud_pty: true,
+  cloud_pty_list: true,
   cloud_pty_write: true,
   cloud_pty_read: true,
   cloud_pty_close: true,
@@ -60,12 +61,27 @@ function promptBody(input: {
   model: { providerID: string; modelID: string }
   variant?: ReasoningEffortVariant | null
 }) {
+  const model = normalizeModel(input.model)
   return {
     parts: [{ type: 'text' as const, text: input.text }],
     tools: CLOUD_TOOL_OVERRIDES,
-    model: input.model,
+    model,
     ...(input.variant ? { variant: input.variant } : {}),
   }
+}
+
+function isAnthropicFastModel(providerID: string, modelID: string): boolean {
+  return providerID === 'anthropic' && modelID.endsWith('-fast')
+}
+
+function normalizeModel(model: { providerID: string; modelID: string }): { providerID: string; modelID: string } {
+  if (!isAnthropicFastModel(model.providerID, model.modelID)) return model
+  return { ...model, modelID: model.modelID.slice(0, -'-fast'.length) }
+}
+
+function normalizeSessionModelSelection(selection: SessionModelSelection): SessionModelSelection {
+  if (!selection.providerID || !selection.modelID) return selection
+  return { ...selection, ...normalizeModel({ providerID: selection.providerID, modelID: selection.modelID }) }
 }
 
 function truncatePromptForTitle(msg: string): string {
@@ -148,6 +164,12 @@ export interface TodoItem {
   priority: string
 }
 
+export interface QueuedFollowUp {
+  id: string
+  text: string
+  createdAt: number
+}
+
 export interface TranscriptEvent {
   seq?: number
   type:
@@ -218,6 +240,9 @@ class AgentService {
   private childrenByParent = new Map<string, string[]>()
   private sessionModels = new Map<string, SessionModelSelection>()
   private contextLimitCache = new Map<string, number>()
+  private runningOpencodeSessions = new Set<string>()
+  private queuedFollowUps = new Map<string, QueuedFollowUp[]>()
+  private blockingNotificationKeys = new Set<string>()
   private openAIOAuthStatus: OpenAIOAuthStatus = {
     state: 'idle',
     message: null,
@@ -522,6 +547,7 @@ class AgentService {
     const models: ModelInfo[] = []
     for (const p of body.providers) {
       for (const m of Object.values(p.models ?? {})) {
+        if (isAnthropicFastModel(p.id, m.id)) continue
         models.push({ providerID: p.id, modelID: m.id, label: `${p.id}/${m.id}` })
       }
     }
@@ -543,7 +569,8 @@ class AgentService {
   }
 
   setDefaultModel(model: { providerID: string; modelID: string }): void {
-    setEnvDefaultModel(model.providerID, model.modelID)
+    const normalized = normalizeModel(model)
+    setEnvDefaultModel(normalized.providerID, normalized.modelID)
   }
 
   async setSessionModel(
@@ -551,16 +578,16 @@ class AgentService {
     model: { providerID: string; modelID: string } | null,
   ): Promise<void> {
     const current = await this.getSessionModel(sessionId)
-    const next: SessionModelSelection = {
+    const next: SessionModelSelection = normalizeSessionModelSelection({
       providerID: model?.providerID ?? null,
       modelID: model?.modelID ?? null,
       variant: current?.variant ?? null,
-    }
+    })
     this.sessionModels.set(sessionId, next)
     db.update(agentSessions)
       .set({
-        selectedProviderId: model?.providerID ?? null,
-        selectedModelId: model?.modelID ?? null,
+        selectedProviderId: next.providerID,
+        selectedModelId: next.modelID,
       })
       .where(eq(agentSessions.id, sessionId))
       .run()
@@ -600,11 +627,11 @@ class AgentService {
       .all()
     const r = rows[0]
     if (!r) return null
-    const hydrated = {
+    const hydrated = normalizeSessionModelSelection({
       providerID: r.providerID ?? null,
       modelID: r.modelID ?? null,
       variant: isReasoningEffortVariant(r.variant) ? r.variant : null,
-    }
+    })
     if (!hydrated.providerID && !hydrated.modelID && !hydrated.variant) return null
     this.sessionModels.set(sessionId, hydrated)
     return hydrated
@@ -695,16 +722,18 @@ class AgentService {
     }
   }
 
-  async sessionSend(input: { sessionId: string; message: string }): Promise<void> {
+  async sessionSend(input: { sessionId: string; message: string }): Promise<{ queued: boolean; queuedMessage?: QueuedFollowUp }> {
     const { row, client, model, variant, dirOpts } = await this.sessionContext(input.sessionId)
     this.ensureSubscription(row.workingDir ?? '')
-    this.emitTranscriptEvent(row.opencodeSessionId, 'session.busy', { sessionID: row.opencodeSessionId })
-    await client.session.promptAsync({
-      path: { id: row.opencodeSessionId },
-      body: promptBody({ text: input.message, model, variant }),
-      ...dirOpts,
-      throwOnError: true,
-    })
+    const running = await this.isOpencodeSessionRunning(client, row.opencodeSessionId, dirOpts)
+    const queue = this.queuedFollowUps.get(row.opencodeSessionId) ?? []
+    if (running || queue.length > 0) {
+      const queuedMessage = { id: ulid(), text: input.message, createdAt: Date.now() }
+      queue.push(queuedMessage)
+      this.queuedFollowUps.set(row.opencodeSessionId, queue)
+      return { queued: true, queuedMessage }
+    }
+    await this.sendPromptToOpencode({ row, client, model, variant, dirOpts, message: input.message })
     const nextTitle =
       !row.title || /^New session - /.test(row.title) ? truncatePromptForTitle(input.message) : row.title
     db.update(agentSessions)
@@ -714,6 +743,7 @@ class AgentService {
       })
       .where(eq(agentSessions.id, row.id))
       .run()
+    return { queued: false }
   }
 
   async sessionMessages(
@@ -785,6 +815,7 @@ class AgentService {
     todos: TodoItem[]
     running: boolean
     contextUsage: { used: number; limit: number } | null
+    queuedMessages: QueuedFollowUp[]
   }> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
     const pendingMap = this.pending.get(row.opencodeSessionId)
@@ -891,6 +922,7 @@ class AgentService {
       todos,
       running,
       contextUsage,
+      queuedMessages: [...(this.queuedFollowUps.get(row.opencodeSessionId) ?? [])],
     }
   }
 
@@ -963,6 +995,7 @@ class AgentService {
 
   async sessionAbort(input: { sessionId: string }): Promise<void> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
+    this.queuedFollowUps.delete(row.opencodeSessionId)
     await client.session.abort({
       path: { id: row.opencodeSessionId },
       ...dirOpts,
@@ -1253,6 +1286,22 @@ class AgentService {
 
     if (!ocSessionId) return
 
+    if (!this.parentByChild.has(ocSessionId)) {
+      if (type === 'message.part.updated') this.runningOpencodeSessions.add(ocSessionId)
+      if (type === 'session.idle' || type === 'session.error') {
+        const hadRunningRun = this.runningOpencodeSessions.delete(ocSessionId)
+        if (hadRunningRun && type === 'session.idle') {
+          const hasQueuedFollowUp = (this.queuedFollowUps.get(ocSessionId)?.length ?? 0) > 0
+          if (hasQueuedFollowUp) setTimeout(() => void this.drainQueuedFollowUps(ocSessionId), 0)
+          else void this.createFinishedNotification(ocSessionId)
+        }
+        if (type === 'session.error') {
+          const message = String((props as { error?: unknown; message?: unknown }).message ?? (props as { error?: unknown }).error ?? 'The agent hit an error and needs attention.')
+          void this.createBlockingNotification(ocSessionId, 'error', 'error', 'Agent error', message)
+        }
+      }
+    }
+
     if (type === 'permission.updated') {
       const p = props as unknown as {
         id: string
@@ -1268,18 +1317,21 @@ class AgentService {
         byPerm = new Map()
         this.pending.set(ocSessionId, byPerm)
       }
+      const title = p.title ?? 'Approval required'
       byPerm.set(p.id, {
         id: p.id,
         sessionId: p.sessionID,
         callID: p.callID ?? (p.metadata as { callID?: string } | undefined)?.callID,
-        title: p.title ?? 'Approval required',
+        title,
         pattern: p.pattern,
         metadata: p.metadata ?? {},
         createdAt: p.time?.created ?? Date.now(),
       })
+      void this.createBlockingNotification(ocSessionId, `permission:${p.id}`, 'permission', 'Approval required', title)
     } else if (type === 'permission.replied') {
       const p = props as { permissionID?: string }
       if (p.permissionID) this.pending.get(ocSessionId)?.delete(p.permissionID)
+      if (p.permissionID) this.blockingNotificationKeys.delete(`${ocSessionId}:permission:${p.permissionID}`)
     } else if (type === 'question.asked') {
       const q = props as unknown as {
         id?: string
@@ -1300,10 +1352,13 @@ class AgentService {
           tool: q.tool,
           createdAt: Date.now(),
         })
+        const question = Array.isArray(q.questions) ? q.questions[0]?.question : undefined
+        void this.createBlockingNotification(ocSessionId, `question:${q.id}`, 'question', 'Question asked', question ?? 'The agent needs an answer to continue.')
       }
     } else if (type === 'question.replied' || type === 'question.rejected') {
       const q = props as { requestID?: string }
       if (q.requestID) this.pendingQuestions.get(ocSessionId)?.delete(q.requestID)
+      if (q.requestID) this.blockingNotificationKeys.delete(`${ocSessionId}:question:${q.requestID}`)
     }
 
     const evt = await this.recordReplayEvent(ocSessionId, {
@@ -1338,6 +1393,72 @@ class AgentService {
       }
     }
     return evt
+  }
+
+  private async sendPromptToOpencode(input: {
+    row: { id: string; opencodeSessionId: string; title: string | null; workingDir: string | null }
+    client: OpencodeClient
+    model: { providerID: string; modelID: string }
+    variant: ReasoningEffortVariant | null
+    dirOpts: ReturnType<typeof directoryOpts>
+    message: string
+  }): Promise<void> {
+    this.emitTranscriptEvent(input.row.opencodeSessionId, 'session.busy', { sessionID: input.row.opencodeSessionId })
+    await input.client.session.promptAsync({
+      path: { id: input.row.opencodeSessionId },
+      body: promptBody({ text: input.message, model: input.model, variant: input.variant }),
+      ...input.dirOpts,
+      throwOnError: true,
+    })
+  }
+
+  private async isOpencodeSessionRunning(client: OpencodeClient, opencodeSessionId: string, dirOpts: ReturnType<typeof directoryOpts>): Promise<boolean> {
+    if (this.runningOpencodeSessions.has(opencodeSessionId)) return true
+    try {
+      const statusRes = await client.session.status({ ...dirOpts, throwOnError: true })
+      const statuses = statusRes.data as Record<string, { type: string }>
+      return statuses[opencodeSessionId]?.type === 'busy'
+    } catch {
+      return false
+    }
+  }
+
+  private async drainQueuedFollowUps(opencodeSessionId: string): Promise<void> {
+    const queue = this.queuedFollowUps.get(opencodeSessionId)
+    const next = queue?.shift()
+    if (!next) return
+    if (!queue) return
+    if (queue.length === 0) this.queuedFollowUps.delete(opencodeSessionId)
+    try {
+      const row = db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+        .limit(1)
+        .all()[0]
+      if (!row) return
+      const client = await this.getClient()
+      const selection = await this.getSessionModel(row.id)
+      const model = selection?.providerID && selection.modelID
+        ? { providerID: selection.providerID, modelID: selection.modelID }
+        : this.getDefaultModel()
+      await this.sendPromptToOpencode({
+        row,
+        client,
+        model,
+        variant: selection?.variant ?? null,
+        dirOpts: directoryOpts(row.workingDir),
+        message: next.text,
+      })
+      db.update(agentSessions)
+        .set({ lastActivityAt: new Date().toISOString() })
+        .where(eq(agentSessions.id, row.id))
+        .run()
+    } catch (err) {
+      queue?.unshift(next)
+      if (queue && queue.length > 0) this.queuedFollowUps.set(opencodeSessionId, queue)
+      logger.warn({ err, opencodeSessionId }, 'failed to send queued follow-up')
+    }
   }
 
   private recordReplayEvent(opencodeSessionId: string, evt: TranscriptEvent): TranscriptEvent {
@@ -1407,6 +1528,107 @@ class AgentService {
     return out
   }
 
+  private async createFinishedNotification(opencodeSessionId: string): Promise<void> {
+    try {
+      const row = db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+        .limit(1)
+        .all()[0]
+      if (!row) return
+      if (!row.workspaceId) return
+      const responseText = await this.lastAgentResponseText(row)
+      const fallback = responseText || 'Chat finished'
+      const summary = await this.summarizeNotification(responseText, fallback)
+      await createAgentNotification({
+        workspaceId: row.workspaceId,
+        sessionId: row.id,
+        kind: 'finished',
+        title: row.title || 'Chat finished',
+        summary,
+      })
+    } catch (err) {
+      logger.warn({ err, opencodeSessionId }, 'failed to create agent notification')
+    }
+  }
+
+  private async createBlockingNotification(opencodeSessionId: string, key: string, kind: 'question' | 'permission' | 'error', fallbackTitle: string, summary: string): Promise<void> {
+    const notificationKey = `${opencodeSessionId}:${key}`
+    if (this.blockingNotificationKeys.has(notificationKey)) return
+    this.blockingNotificationKeys.add(notificationKey)
+    try {
+      const row = db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+        .limit(1)
+        .all()[0]
+      if (!row?.workspaceId) return
+      await createAgentNotification({
+        workspaceId: row.workspaceId,
+        sessionId: row.id,
+        kind,
+        title: row.title || fallbackTitle,
+        summary: truncateNotificationSummary(summary),
+      })
+    } catch (err) {
+      this.blockingNotificationKeys.delete(notificationKey)
+      logger.warn({ err, opencodeSessionId, key }, 'failed to create blocking agent notification')
+    }
+  }
+
+  private async lastAgentResponseText(row: { id: string; opencodeSessionId: string; workingDir: string | null }): Promise<string> {
+    try {
+      const client = await this.getClient()
+      const res = await client.session.messages({
+        path: { id: row.opencodeSessionId },
+        ...directoryOpts(row.workingDir),
+        throwOnError: true,
+      })
+      const msgs = (res.data ?? []) as Array<{
+        info?: { role?: string }
+        parts?: Array<{ type?: string; text?: string }>
+      }>
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        const msg = msgs[i]
+        if (msg?.info?.role !== 'assistant') continue
+        const text = (msg.parts ?? [])
+          .filter((part) => part.type === 'text' && part.text)
+          .map((part) => part.text)
+          .join('\n')
+          .replace(/\s+/g, ' ')
+          .trim()
+        if (text) return text.slice(-8_000)
+      }
+    } catch {
+      // Fall back to replay rows below; opencode may already be restarting.
+    }
+    return this.lastTranscriptText(row.id)
+  }
+
+  private lastTranscriptText(sessionId: string): string {
+    const assistantMessageIds = new Set<string>()
+    let last = ''
+    for (const evt of this.transcriptReplayRows(sessionId, 0)) {
+      if (evt.parentSessionId) continue
+      if (evt.type === 'message.updated') {
+        const info = (evt.payload as { info?: { id?: string; role?: string } }).info
+        if (info?.role === 'assistant' && info.id) assistantMessageIds.add(info.id)
+      }
+      if (evt.type === 'message.part.updated') {
+        const part = (evt.payload as { part?: { type?: string; text?: string; messageID?: string } }).part
+        if (part?.type === 'text' && part.text && (!part.messageID || assistantMessageIds.has(part.messageID))) last = part.text
+      }
+    }
+    return last.replace(/\s+/g, ' ').trim().slice(-8_000)
+  }
+
+  private async summarizeNotification(text: string, fallback: string): Promise<string> {
+    const fallbackSummary = text ? briefResponseSummary(text) : truncateNotificationSummary(fallback)
+    return fallbackSummary
+  }
+
   private async requireSession(id: string) {
     const rows = db
       .select()
@@ -1432,6 +1654,24 @@ class AgentService {
       this.opencodeFetch(pth, init, row.workingDir)
     return { row, client, model, variant, dirOpts, fetch: scopedFetch }
   }
+}
+
+function truncateNotificationSummary(value: string): string {
+  const flat = value.replace(/\s+/g, ' ').replace(/^['"]|['"]$/g, '').trim()
+  if (!flat) return 'Chat finished'
+  return flat.length <= 80 ? flat : `${flat.slice(0, 77).replace(/[\s.,;:!?-]+$/, '')}...`
+}
+
+function briefResponseSummary(value: string): string {
+  const flat = value
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^[\s*-]+/gm, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^['"]|['"]$/g, '')
+    .trim()
+  if (!flat) return 'Chat finished'
+  const sentence = flat.match(/^.{12,}?[.!?](?=\s|$)/)?.[0] ?? flat
+  return truncateNotificationSummary(sentence)
 }
 
 export const agentService = new AgentService()

@@ -19,9 +19,9 @@
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json && (cd packages/opencode-plugin && npm run typecheck) && (cd packages/env-server && npm run typecheck) && npm run typecheck:desktop",
     "typecheck:desktop": "cd packages/zoottle-desktop && npm run typecheck",
-    "dev:desktop": "npm run build:plugin && npm run build:client && cd packages/zoottle-desktop && npm run dev:managed",
+    "dev:desktop": "npm run build:plugin && npm run build:client && tsx --env-file=.env scripts/dev-desktop.ts",
     "dev:desktop:external": "cd packages/zoottle-desktop && npm run dev",
-    "dev:desktop:stack": "concurrently -n server,client,webframe,desktop -c blue,magenta,cyan,green \"npm:dev:server\" \"npm:dev:client\" \"cd ../webframe && npm run build:watch\" \"npm:dev:desktop:external\"",
+    "dev:desktop:stack": "npm run dev:desktop",
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -37,7 +37,7 @@
     "docker:sandbox": "npm run prepare:sandbox-image && docker build -t cloud-code-sandbox:dev -f docker/base-sandbox/Dockerfile docker/base-sandbox",
     "package:everything": "scripts/package-everything.sh",
     "package:desktop": "scripts/package-desktop.sh",
-    "package:desktop:install": "scripts/package-desktop.sh --install"
+    "pdi": "scripts/package-desktop.sh --install"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",

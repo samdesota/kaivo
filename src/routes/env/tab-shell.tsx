@@ -54,6 +54,9 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         void openCommandPalette()
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        openContent({ type: 'browser', url: 'https://www.google.com' })
       }
     }
     window.addEventListener('keydown', onKey)

@@ -10,6 +10,7 @@ import { agentShellRouter } from './routers/agent-shell.js'
 import { agentBrowserRouter } from './routers/agent-browser.js'
 import { agentUiRouter } from './routers/agent-ui.js'
 import { previewRouter } from './routers/preview.js'
+import { syncRouter } from './routers/sync.js'
 
 export const appRouter = router({
   meta: metaRouter,
@@ -23,6 +24,7 @@ export const appRouter = router({
   agentBrowser: agentBrowserRouter,
   agentUi: agentUiRouter,
   preview: previewRouter,
+  sync: syncRouter,
 })
 
 export type AppRouter = typeof appRouter

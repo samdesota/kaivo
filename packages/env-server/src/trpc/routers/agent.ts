@@ -118,8 +118,7 @@ export const agentRouter = router({
     )
     .mutation(async ({ input }) => {
       try {
-        await agentService.sessionSend(input)
-        return { ok: true as const }
+        return { ok: true as const, ...(await agentService.sessionSend(input)) }
       } catch (err) {
         throw toTrpcError(err)
       }

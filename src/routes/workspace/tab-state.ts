@@ -19,7 +19,9 @@ export type WorkspaceUiAction =
   | { type: 'activateTab'; tabId: string }
   | { type: 'closeTab'; tabId: string }
   | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
+  | { type: 'setTabUrl'; tabId: string; url: string }
   | { type: 'setTabTitle'; tabId: string; title: string }
+  | { type: 'setTabAutoTitle'; tabId: string; title: string }
   | { type: 'setActiveAgentSession'; sessionId: string | null }
   | { type: 'setSplitRatio'; splitRatio: number | null }
   | { type: 'setAgentCollapsed'; collapsed: boolean }
@@ -89,11 +91,35 @@ export function workspaceUiReducer(
       ),
     }
   }
+  if (action.type === 'setTabUrl') {
+    return {
+      ...state,
+      workspaceTabs: state.workspaceTabs.map((tab) =>
+        tab.id === action.tabId && tab.type === 'browser'
+          ? { ...tab, url: action.url }
+          : tab,
+      ),
+    }
+  }
   if (action.type === 'setTabTitle') {
     return {
       ...state,
       workspaceTabs: state.workspaceTabs.map((tab) =>
-        tab.id === action.tabId ? { ...tab, title: action.title } : tab,
+        tab.id === action.tabId
+          ? tab.type === 'shell'
+            ? { ...tab, title: action.title, titleSource: 'explicit' }
+            : { ...tab, title: action.title }
+          : tab,
+      ),
+    }
+  }
+  if (action.type === 'setTabAutoTitle') {
+    return {
+      ...state,
+      workspaceTabs: state.workspaceTabs.map((tab) =>
+        tab.id === action.tabId && tab.type === 'shell' && tab.titleSource !== 'explicit'
+          ? { ...tab, title: action.title, titleSource: 'auto' }
+          : tab,
       ),
     }
   }

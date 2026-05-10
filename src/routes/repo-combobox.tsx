@@ -112,7 +112,7 @@ export function RepoCombobox({
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={onKeyDown}
         placeholder={`Search ${repos.length} repos…`}
-        className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 focus:border-brand-500 focus:outline-none"
+        className="w-full rounded border border-neutral-800 bg-input px-2 py-1 text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none"
       />
       {open && filtered.length > 0 && (
         <ul

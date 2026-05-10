@@ -3,8 +3,10 @@ import { ulid } from 'ulid'
 import { workspaceTabFromPaneContent, workspaceTabKey, type PaneContent } from '../../shared/workspace-pane'
 import { db, type Db } from '../db/client.js'
 import {
+  agentNotifications,
   workspaceAgentTabs,
   workspaceFolders,
+  workspaceResources,
   workspaceTabs,
   workspaceUiStates,
   workspaceViewStates,
@@ -12,8 +14,11 @@ import {
   type WorkspaceTab,
   type WorkspaceTabRow,
   type WorkspaceAgentTabRow,
+  type AgentNotificationRow,
   type WorkspaceUiState,
   type WorkspaceViewState,
+  type WorkspaceResourceRow,
+  type WorkspaceResourceType,
 } from '../db/schema.js'
 
 export type Workspace = typeof workspaces.$inferSelect
@@ -67,6 +72,21 @@ export type WorkspaceAgentTabInput = {
   position: number
 }
 
+export type AgentNotificationInput = {
+  workspaceId: string
+  sessionId: string
+  kind?: AgentNotificationRow['kind']
+  title: string
+  summary: string
+}
+
+export type WorkspaceResourceInput = {
+  type: WorkspaceResourceType
+  resourceKey: string
+  shared?: boolean
+  data?: Record<string, unknown>
+}
+
 function emptyWorkspaceViewState(workspaceId: string, updatedAt = new Date()): WorkspaceViewState {
   return {
     workspaceId,
@@ -100,6 +120,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
     id: tab.id,
     type: tab.type,
     title: tab.title,
+    titleSource: tab.type === 'shell' ? (tab.titleSource ?? 'auto') : null,
     position,
     envId: 'envId' in tab ? tab.envId : null,
     shellId: tab.type === 'shell' ? tab.shellId : null,
@@ -114,7 +135,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
 
 function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
   if (row.type === 'shell' && row.envId && row.shellId) {
-    return { id: row.id, type: 'shell', envId: row.envId, shellId: row.shellId, title: row.title }
+    return { id: row.id, type: 'shell', envId: row.envId, shellId: row.shellId, title: row.title, titleSource: row.titleSource ?? 'auto' }
   }
   if (row.type === 'file' && row.envId && row.path) {
     return { id: row.id, type: 'file', envId: row.envId, path: row.path, sessionId: row.sessionId ?? undefined, title: row.title }
@@ -444,6 +465,7 @@ export function createWorkspaceService(database: Db = db) {
         set: {
           type: sql`excluded.type`,
           title: sql`excluded.title`,
+          titleSource: sql`excluded.title_source`,
           position: sql`excluded.position`,
           envId: sql`excluded.env_id`,
           shellId: sql`excluded.shell_id`,
@@ -523,6 +545,72 @@ export function createWorkspaceService(database: Db = db) {
       .where(and(eq(workspaceAgentTabs.workspaceId, workspaceId), eq(workspaceAgentTabs.sessionId, sessionId)))
   }
 
+  async function listResources(workspaceId?: string): Promise<WorkspaceResourceRow[]> {
+    const rows = workspaceId
+      ? await database.select().from(workspaceResources).where(eq(workspaceResources.workspaceId, workspaceId)).orderBy(asc(workspaceResources.createdAt), asc(workspaceResources.id))
+      : await database.select().from(workspaceResources).orderBy(asc(workspaceResources.createdAt), asc(workspaceResources.id))
+    return rows as WorkspaceResourceRow[]
+  }
+
+  async function upsertResource(workspaceId: string, input: WorkspaceResourceInput): Promise<WorkspaceResourceRow> {
+    await get(workspaceId)
+    const resourceKey = input.resourceKey.trim()
+    if (!resourceKey) throw new WorkspaceError('invalid_name', 'workspace resource key is required')
+    const now = new Date()
+    const existing = (await listResources(workspaceId)).find((resource) => resource.type === input.type && resource.resourceKey === resourceKey)
+    if (existing) {
+      const rows = await database
+        .update(workspaceResources)
+        .set({
+          shared: input.shared ?? existing.shared,
+          data: input.data ?? existing.data,
+          updatedAt: now,
+        })
+        .where(eq(workspaceResources.id, existing.id))
+        .returning()
+      return (rows[0] as WorkspaceResourceRow | undefined) ?? { ...existing, shared: input.shared ?? existing.shared, data: input.data ?? existing.data, updatedAt: now }
+    }
+    const row: WorkspaceResourceRow = {
+      id: ulid().toLowerCase(),
+      workspaceId,
+      type: input.type,
+      resourceKey,
+      shared: input.shared ?? false,
+      data: input.data ?? {},
+      createdAt: now,
+      updatedAt: now,
+    }
+    await database.insert(workspaceResources).values(row)
+    return row
+  }
+
+  async function deleteResource(id: string): Promise<void> {
+    await database.delete(workspaceResources).where(eq(workspaceResources.id, id))
+  }
+
+  async function createAgentNotification(input: AgentNotificationInput): Promise<AgentNotificationRow> {
+    await get(input.workspaceId)
+    const row: AgentNotificationRow = {
+      id: ulid().toLowerCase(),
+      workspaceId: input.workspaceId,
+      sessionId: input.sessionId,
+      kind: input.kind ?? 'finished',
+      title: input.title.trim().slice(0, 120) || 'Chat finished',
+      summary: input.summary.trim().slice(0, 120) || 'Chat finished',
+      createdAt: new Date(),
+    }
+    await database.insert(agentNotifications).values(row)
+    return row
+  }
+
+  async function dismissAgentNotification(id: string): Promise<void> {
+    await database.delete(agentNotifications).where(eq(agentNotifications.id, id))
+  }
+
+  async function dismissAgentNotificationsForSession(sessionId: string): Promise<void> {
+    await database.delete(agentNotifications).where(eq(agentNotifications.sessionId, sessionId))
+  }
+
   return {
     async list(): Promise<Workspace[]> {
       const rows = await listActiveWorkspaces()
@@ -571,10 +659,22 @@ export function createWorkspaceService(database: Db = db) {
     async archiveFolder(id: string): Promise<void> {
       await getFolder(id)
       const now = new Date()
-      await database
-        .update(workspaceFolders)
-        .set({ archivedAt: now, updatedAt: now })
-        .where(eq(workspaceFolders.id, id))
+      const folders = await listActiveFolders()
+      const folderIds = new Set([id, ...folderDescendantIds(folders, id)])
+      for (const folderId of folderIds) {
+        await database
+          .update(workspaceFolders)
+          .set({ archivedAt: now, updatedAt: now })
+          .where(eq(workspaceFolders.id, folderId))
+      }
+      const workspaceRows = await listActiveWorkspaces()
+      for (const workspace of workspaceRows) {
+        if (!workspace.folderId || !folderIds.has(workspace.folderId)) continue
+        await database
+          .update(workspaces)
+          .set({ archivedAt: now, updatedAt: now })
+          .where(eq(workspaces.id, workspace.id))
+      }
     },
 
     async setFolderCollapsed(id: string, collapsed: boolean): Promise<WorkspaceFolder> {
@@ -702,6 +802,18 @@ export function createWorkspaceService(database: Db = db) {
     upsertAgentTab,
 
     deleteAgentTab,
+
+    listResources,
+
+    upsertResource,
+
+    deleteResource,
+
+    createAgentNotification,
+
+    dismissAgentNotification,
+
+    dismissAgentNotificationsForSession,
 
     async saveUiState(workspaceId: string, state: WorkspaceUiState): Promise<WorkspaceUiState> {
       await get(workspaceId)

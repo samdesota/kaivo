@@ -84,6 +84,23 @@ function resolveWorkspaceId(
   return null
 }
 
+export function resolveWorkspaceIdForShellOwner(input: {
+  ownerAgentSessionId?: string | null
+  ownerSessionId?: string | null
+}): string | null {
+  return resolveWorkspaceId(null, input.ownerAgentSessionId ?? null, input.ownerSessionId ?? null)
+}
+
+export function ensureValidCwd(cwd: string): void {
+  let stat: fs.Stats
+  try {
+    stat = fs.statSync(cwd)
+  } catch {
+    throw new ShellError('invalid_cwd', `shell working directory does not exist: ${cwd}`)
+  }
+  if (!stat.isDirectory()) throw new ShellError('invalid_cwd', `shell working directory is not a directory: ${cwd}`)
+}
+
 const localRequire = createRequire(import.meta.url)
 const { Terminal: HeadlessTerminal } = localRequire('@xterm/headless') as {
   Terminal: new (
@@ -103,6 +120,7 @@ const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
 const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
 const DEFAULT_LOGIN_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 const ENV_CAPTURE_DELIMITER = '_CLOUD_CODE_SHELL_ENV_DELIMITER_'
+const ZSH_COMMAND_OSC_PREFIX = '\x1b]777;cloud-code-command;'
 
 function ensureNodePtyHelperExecutable(): void {
   if (process.platform !== 'darwin' && process.platform !== 'linux') return
@@ -210,6 +228,7 @@ export interface ShellInfo {
   createdAt: Date
   lastActivityAt: Date
   alive: boolean
+  title: string | null
 }
 
 type Subscriber = (chunk: string) => void
@@ -231,6 +250,8 @@ interface ShellHandle {
   exitCode: number | null
   createdAt: Date
   lastActivityAt: Date
+  title: string | null
+  integrationDir: string | null
   subscribers: Set<Subscriber>
   disposed: boolean
   retentionTimer: NodeJS.Timeout | null
@@ -276,6 +297,7 @@ class TerminalService {
     const ownerAgentSessionId = opts.ownerAgentSessionId ?? null
     const workspaceId = resolveWorkspaceId(opts.workspaceId ?? null, ownerAgentSessionId, ownerSessionId)
     const cwd = resolveCwd(opts.cwd, ownerAgentSessionId, ownerSessionId)
+    ensureValidCwd(cwd)
 
     const term = new HeadlessTerminal({
       cols,
@@ -288,13 +310,14 @@ class TerminalService {
 
     const env = await userShellEnv({ TERM: 'xterm-256color' })
     const shell = env.SHELL ?? '/bin/bash'
+    const shellLaunch = prepareInteractiveShellLaunch(shell, env)
     ensureNodePtyHelperExecutable()
-    const pty = ptySpawn(shell, ['-l'], {
+    const pty = ptySpawn(shellLaunch.shell, shellLaunch.args, {
       name: 'xterm-256color',
       cols,
       rows,
       cwd,
-      env,
+      env: shellLaunch.env,
     })
 
     const now = new Date()
@@ -315,6 +338,8 @@ class TerminalService {
       exitCode: null,
       createdAt: now,
       lastActivityAt: now,
+      title: shellLaunch.integrationDir ? 'zsh' : null,
+      integrationDir: shellLaunch.integrationDir,
       subscribers: new Set(),
       disposed: false,
       retentionTimer: null,
@@ -322,6 +347,7 @@ class TerminalService {
 
     pty.onData((data) => {
       handle.lastActivityAt = new Date()
+      updateZshIntegratedShellTitle(handle, data)
       term.write(data)
       for (const s of handle.subscribers) {
         try {
@@ -453,6 +479,13 @@ class TerminalService {
         // ignore
       }
     }
+    if (h.integrationDir) {
+      try {
+        fs.rmSync(h.integrationDir, { recursive: true, force: true })
+      } catch {
+        // ignore
+      }
+    }
     try {
       h.term.dispose()
     } catch {
@@ -480,6 +513,7 @@ class TerminalService {
     const ownerAgentSessionId = opts.ownerAgentSessionId ?? null
     const workspaceId = resolveWorkspaceId(opts.workspaceId ?? null, ownerAgentSessionId, ownerSessionId)
     const cwd = resolveCwd(opts.cwd, ownerAgentSessionId, ownerSessionId)
+    ensureValidCwd(cwd)
 
     const term = new HeadlessTerminal({
       cols,
@@ -508,6 +542,8 @@ class TerminalService {
       exitCode: null,
       createdAt: now,
       lastActivityAt: now,
+      title: summarizeCommand(opts.cmd),
+      integrationDir: null,
       subscribers: new Set(),
       disposed: false,
       retentionTimer: null,
@@ -639,7 +675,79 @@ function toInfo(h: ShellHandle): ShellInfo {
     createdAt: h.createdAt,
     lastActivityAt: h.lastActivityAt,
     alive: !h.disposed && h.exitCode === null,
+    title: h.title,
   }
+}
+
+function summarizeCommand(command: string): string | null {
+  const stripped = command.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim()
+  if (!stripped) return null
+  return stripped.length > 48 ? `${stripped.slice(0, 47)}…` : stripped
+}
+
+function updateZshIntegratedShellTitle(h: ShellHandle, data: string): void {
+  let start = data.indexOf(ZSH_COMMAND_OSC_PREFIX)
+  while (start >= 0) {
+    const valueStart = start + ZSH_COMMAND_OSC_PREFIX.length
+    const bellEnd = data.indexOf('\x07', valueStart)
+    const stEnd = data.indexOf('\x1b\\', valueStart)
+    const end = bellEnd === -1 ? stEnd : stEnd === -1 ? bellEnd : Math.min(bellEnd, stEnd)
+    if (end === -1) return
+    const title = summarizeCommand(data.slice(valueStart, end))
+    if (title) h.title = title
+    start = data.indexOf(ZSH_COMMAND_OSC_PREFIX, end + 1)
+  }
+}
+
+function prepareInteractiveShellLaunch(shell: string, env: NodeJS.ProcessEnv): {
+  shell: string
+  args: string[]
+  env: NodeJS.ProcessEnv
+  integrationDir: string | null
+} {
+  if (path.basename(shell) !== 'zsh') return { shell, args: ['-l'], env, integrationDir: null }
+
+  const integrationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-code-zsh-'))
+  const originalZdotdir = env.ZDOTDIR || env.HOME || os.userInfo().homedir
+  const nextEnv = {
+    ...env,
+    ZDOTDIR: integrationDir,
+    CLOUD_CODE_ORIGINAL_ZDOTDIR: originalZdotdir,
+  }
+  writeZshIntegrationFiles(integrationDir)
+  return { shell, args: ['-l'], env: nextEnv, integrationDir }
+}
+
+function writeZshIntegrationFiles(dir: string): void {
+  fs.writeFileSync(path.join(dir, '.zshenv'), sourceOriginalZshFile('.zshenv'))
+  fs.writeFileSync(path.join(dir, '.zprofile'), sourceOriginalZshFile('.zprofile'))
+  fs.writeFileSync(path.join(dir, '.zlogin'), sourceOriginalZshFile('.zlogin'))
+  fs.writeFileSync(path.join(dir, '.zlogout'), sourceOriginalZshFile('.zlogout'))
+  fs.writeFileSync(path.join(dir, '.zshrc'), `${sourceOriginalZshFile('.zshrc')}
+autoload -Uz add-zsh-hook 2>/dev/null || true
+_cloud_code_command_preexec() {
+  emulate -L zsh
+  local cmd="$1"
+  cmd=\${cmd//$'\\a'/}
+  cmd=\${cmd//$'\\e'/}
+  print -rn -- $'${ZSH_COMMAND_OSC_PREFIX}' "$cmd" $'\\a'
+}
+_cloud_code_command_precmd() {
+  emulate -L zsh
+  print -rn -- $'${ZSH_COMMAND_OSC_PREFIX}zsh\\a'
+}
+if whence -w add-zsh-hook >/dev/null 2>&1; then
+  add-zsh-hook precmd _cloud_code_command_precmd
+  add-zsh-hook preexec _cloud_code_command_preexec
+fi
+`)
+}
+
+function sourceOriginalZshFile(file: string): string {
+  return `if [[ -n "$CLOUD_CODE_ORIGINAL_ZDOTDIR" && "$CLOUD_CODE_ORIGINAL_ZDOTDIR" != "$ZDOTDIR" && -r "$CLOUD_CODE_ORIGINAL_ZDOTDIR/${file}" ]]; then
+  source "$CLOUD_CODE_ORIGINAL_ZDOTDIR/${file}"
+fi
+`
 }
 
 export const terminalService = new TerminalService()

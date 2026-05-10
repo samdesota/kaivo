@@ -16,15 +16,23 @@ describe('workspaceTabFromPaneContent', () => {
     expect(shell && workspaceTabKey(shell)).toBe('shell:env-a:shell-12345678')
     expect(file && workspaceTabKey(file)).toBe('file:env-a::/tmp/a.ts')
     expect(preview && workspaceTabKey(preview)).toBe('preview:env-a:5173')
-    expect(browser && workspaceTabKey(browser)).toBe('browser:https://example.com')
+    expect(browser && workspaceTabKey(browser)).toBe(browser ? `browser:${browser.id}` : null)
   })
 
-  it('uses stable logical keys for duplicate tabs even when tab ids differ', () => {
+  it('uses stable logical keys for duplicate file tabs even when tab ids differ', () => {
     const first = workspaceTabFromPaneContent({ type: 'file', path: '/tmp/a.ts' }, 'env-a')
     const second = workspaceTabFromPaneContent({ type: 'file', path: '/tmp/a.ts' }, 'env-a')
 
     expect(first?.id).not.toBe(second?.id)
     expect(first && second && workspaceTabKey(first)).toBe(second && workspaceTabKey(second))
+  })
+
+  it('uses distinct identity keys for browser tabs with the same URL', () => {
+    const first = workspaceTabFromPaneContent({ type: 'browser', url: 'https://example.com' }, undefined)
+    const second = workspaceTabFromPaneContent({ type: 'browser', url: 'https://example.com' }, undefined)
+
+    expect(first?.id).not.toBe(second?.id)
+    expect(first && second && workspaceTabKey(first)).not.toBe(second && workspaceTabKey(second))
   })
 
   it('creates preview tabs instead of dropping preview open requests', () => {

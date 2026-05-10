@@ -45,7 +45,7 @@ export function EmptySessionState({
         </div>
         <button
           onClick={() => void startNewChat()}
-          className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600"
+          className="rounded-md bg-neutral-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-neutral-600"
         >
           Start a new agent chat
         </button>
@@ -98,7 +98,7 @@ export function EmptySessionState({
               key={r.id}
               onClick={() => void createIn(r.workspacePath)}
               disabled={start.isPending}
-              className="flex w-full items-center justify-between gap-2 rounded border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-left hover:border-brand-500/60 hover:bg-neutral-900 disabled:opacity-60"
+              className="flex w-full items-center justify-between gap-2 rounded border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-left hover:border-neutral-600 hover:bg-neutral-900 disabled:opacity-60"
             >
               <div className="min-w-0">
                 <div className="truncate text-sm text-neutral-100">{r.slug}</div>
@@ -106,7 +106,7 @@ export function EmptySessionState({
                   {r.workspacePath}
                 </div>
               </div>
-              <span className="shrink-0 rounded bg-brand-500/10 px-2 py-0.5 text-[11px] text-brand-400">
+              <span className="shrink-0 rounded bg-neutral-900 px-2 py-0.5 text-[11px] text-neutral-300">
                 Start →
               </span>
             </button>
@@ -115,7 +115,7 @@ export function EmptySessionState({
             <button
               onClick={() => void chooseFolder()}
               disabled={start.isPending}
-              className="rounded border border-dashed border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-brand-500/60 hover:text-neutral-100 disabled:opacity-60"
+              className="rounded border border-dashed border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-neutral-600 hover:text-neutral-100 disabled:opacity-60"
             >
               Choose folder…
             </button>

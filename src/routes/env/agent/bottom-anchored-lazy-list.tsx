@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from 'react'
 
+const STICK_TO_BOTTOM_THRESHOLD = 80
+
 interface BottomAnchoredLazyListProps<T> {
   items: T[]
   itemKey: (item: T, index: number) => string
@@ -32,6 +34,13 @@ export function BottomAnchoredLazyList<T>({
   const initialBottomDone = useRef(false)
   const previousItemsLength = useRef(items.length)
   const pendingPrependScrollHeight = useRef<number | null>(null)
+  const lastScrollTop = useRef(0)
+  const lastScrollHeight = useRef(0)
+
+  const recordScrollState = useCallback((el: HTMLDivElement) => {
+    lastScrollTop.current = el.scrollTop
+    lastScrollHeight.current = el.scrollHeight
+  }, [])
 
   useLayoutEffect(() => {
     setVisibleCount(Math.min(pageSize, items.length))
@@ -65,7 +74,8 @@ export function BottomAnchoredLazyList<T>({
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [])
+    recordScrollState(el)
+  }, [recordScrollState])
 
   useLayoutEffect(() => {
     const before = pendingPrependScrollHeight.current
@@ -91,8 +101,16 @@ export function BottomAnchoredLazyList<T>({
 
     function onScroll() {
       const target = el!
-      const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 80
-      stickToBottom.current = atBottom
+      const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight < STICK_TO_BOTTOM_THRESHOLD
+      const contentGrew = target.scrollHeight > lastScrollHeight.current
+      const scrolledUp = target.scrollTop < lastScrollTop.current
+
+      if (stickToBottom.current && contentGrew && !scrolledUp) {
+        scrollToBottom()
+      } else {
+        stickToBottom.current = atBottom
+        recordScrollState(target)
+      }
 
       if (target.scrollTop > topLoadThreshold || visibleCount >= items.length) return
       pendingPrependScrollHeight.current = target.scrollHeight
@@ -101,7 +119,7 @@ export function BottomAnchoredLazyList<T>({
 
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
-  }, [items.length, pageSize, topLoadThreshold, visibleCount])
+  }, [items.length, pageSize, recordScrollState, scrollToBottom, topLoadThreshold, visibleCount])
 
   useEffect(() => {
     const el = scrollRef.current

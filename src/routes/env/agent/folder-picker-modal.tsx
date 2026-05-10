@@ -150,7 +150,7 @@ export function FolderPickerModal({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter…"
-          className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 placeholder-neutral-500 focus:border-brand-500 focus:outline-none"
+          className="w-full rounded border border-neutral-800 bg-input px-2 py-1 text-xs text-neutral-100 placeholder:text-placeholder focus:border-neutral-600 focus:outline-none"
         />
 
         <div
@@ -177,8 +177,8 @@ export function FolderPickerModal({
                 className={
                   'flex cursor-pointer items-center gap-2 border-b border-neutral-900 px-3 py-1.5 text-xs last:border-b-0 ' +
                   (active
-                    ? 'bg-brand-500/15 text-neutral-50'
-                    : 'text-neutral-200 hover:bg-neutral-900')
+                    ? 'bg-highlight text-neutral-50'
+                    : 'text-neutral-200 hover:bg-highlight')
                 }
                 title={d.path}
               >
@@ -209,7 +209,7 @@ export function FolderPickerModal({
               type="button"
               onClick={() => data && onSelect(data.path)}
               disabled={!data || busy}
-              className="rounded bg-brand-500 px-3 py-1 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+              className="rounded bg-neutral-700 px-3 py-1 text-xs font-medium text-white hover:bg-neutral-600 disabled:opacity-60"
             >
               {busy ? 'Starting…' : 'Use this folder'}
             </button>

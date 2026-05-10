@@ -36,6 +36,7 @@ export interface ChatSessionStatus {
   }>
   todos: Array<{ id: string; content: string; status: string; priority: string }>
   contextUsage: { used: number; limit: number } | null
+  queuedMessages?: Array<{ id: string; text: string; createdAt: number }>
 }
 
 export interface ChatSnapshot {

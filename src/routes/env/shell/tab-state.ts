@@ -9,6 +9,7 @@ export type PaneContent =
 export interface Tab {
   id: string
   title: string
+  titleSource?: 'auto' | 'explicit'
   content: PaneContent
 }
 
@@ -22,7 +23,9 @@ export type RightPaneAction =
   | { type: 'activate'; tabId: string }
   | { type: 'close'; tabId: string }
   | { type: 'setTitle'; tabId: string; title: string }
+  | { type: 'setAutoTitle'; tabId: string; title: string }
   | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
+  | { type: 'setBrowserUrl'; tabId: string; url: string }
   | { type: 'pruneShells'; liveShellIds: ReadonlySet<string> }
   | { type: 'hydrate'; state: RightPaneState }
 
@@ -85,6 +88,7 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
       const tab: Tab = {
         id: makeTabId(),
         title: action.title ?? defaultTitle(action.content),
+        titleSource: action.content.type === 'shell' ? (action.title ? 'explicit' : 'auto') : undefined,
         content: action.content,
       }
       const activate = action.activate !== false
@@ -113,7 +117,17 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
       return {
         ...state,
         tabs: state.tabs.map((t) =>
-          t.id === action.tabId ? { ...t, title: action.title } : t,
+          t.id === action.tabId ? { ...t, title: action.title, titleSource: t.content.type === 'shell' ? 'explicit' : t.titleSource } : t,
+        ),
+      }
+    }
+    case 'setAutoTitle': {
+      return {
+        ...state,
+        tabs: state.tabs.map((t) =>
+          t.id === action.tabId && t.content.type === 'shell' && t.titleSource !== 'explicit'
+            ? { ...t, title: action.title, titleSource: 'auto' }
+            : t,
         ),
       }
     }
@@ -123,6 +137,16 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
         tabs: state.tabs.map((t) =>
           t.id === action.tabId && t.content.type === 'browser'
             ? { ...t, content: { ...t.content, browserTabId: action.browserTabId } }
+            : t,
+        ),
+      }
+    }
+    case 'setBrowserUrl': {
+      return {
+        ...state,
+        tabs: state.tabs.map((t) =>
+          t.id === action.tabId && t.content.type === 'browser'
+            ? { ...t, content: { ...t.content, url: action.url } }
             : t,
         ),
       }
@@ -166,6 +190,7 @@ function loadStored(envId: string): RightPaneState | null {
       if (!t || typeof t !== 'object') return false
       const tt = t as Tab
       if (typeof tt.id !== 'string' || typeof tt.title !== 'string' || !tt.content) return false
+      if (tt.titleSource !== undefined && tt.titleSource !== 'auto' && tt.titleSource !== 'explicit') return false
       const c = tt.content
       if (c.type === 'shell' && typeof c.shellId === 'string') return true
       if (c.type === 'file' && typeof c.path === 'string') return true

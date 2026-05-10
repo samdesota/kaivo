@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import type React from 'react'
@@ -28,6 +28,17 @@ const treeData = [
 ]
 
 const moveSidebarNodeMock = vi.hoisted(() => vi.fn())
+const notificationDismissMock = vi.hoisted(() => vi.fn())
+const notificationDismissForSessionMock = vi.hoisted(() => vi.fn())
+const notificationListData = vi.hoisted(() => [] as Array<{
+  id: string
+  workspaceId: string
+  sessionId: string
+  kind: 'finished' | 'question' | 'permission' | 'error'
+  title: string
+  summary: string
+  createdAt: Date
+}>)
 
 vi.mock('../../src/routes/workspace/context', () => ({
   useWorkspaceContext: () => ctx,
@@ -43,15 +54,20 @@ vi.mock('../../src/trpc', () => ({
       createFolder: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       rename: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       archive: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      archiveFolder: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      deleteResource: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       setFolderCollapsed: { useMutation: () => ({ mutate: vi.fn() }) },
       moveSidebarNode: { useMutation: () => ({ mutateAsync: moveSidebarNodeMock }) },
+    },
+    sync: {
+      changes: { useSubscription: () => undefined },
     },
   },
 }))
 
 vi.mock('../../src/env-trpc', () => ({
   makeEnvReactClient: () => ({}),
-  makeManagedEnvReactClient: () => ({}),
+  makeManagedEnvReactClient: () => ({ client: {} }),
   envTrpc: {
     Provider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     repo: {
@@ -80,16 +96,33 @@ vi.mock('../../src/routes/env/env-context', () => ({
   }),
 }))
 
+vi.mock('../../src/routes/workspace/notifications-store', () => ({
+  useAgentNotificationsStore: () => ({
+    records: notificationListData,
+    dismiss: notificationDismissMock,
+    dismissForSession: notificationDismissForSessionMock,
+  }),
+}))
+
+vi.mock('../../src/lib/trpc-plain', () => ({
+  appTrpcMutation: vi.fn(),
+  appTrpcQuery: vi.fn(async () => ({ table: 'workspace_resources', rows: [], seq: 0 })),
+  trpcQueryKey: (path: string) => [path],
+}))
+
 vi.mock('../../src/routes/env/agent/new-agent-chat-modal', () => ({
-  NewAgentChatModal: ({ open, initialWorkspaceMode }: { open: boolean; initialWorkspaceMode?: string }) =>
+  NewAgentChatModal: ({ open, initialWorkspaceMode, workspaceName }: { open: boolean; initialWorkspaceMode?: string; workspaceName?: string }) =>
     open ? (
-      <label>
-        Workspace mode
-        <select value={initialWorkspaceMode ?? 'existing'} readOnly>
-          <option value="new">New</option>
-          <option value="existing">Existing</option>
-        </select>
-      </label>
+      <div>
+        <label>
+          Workspace mode
+          <select aria-label="Workspace mode" value={initialWorkspaceMode ?? 'existing'} onChange={() => undefined}>
+            <option value="new">new</option>
+            <option value="existing">existing</option>
+          </select>
+        </label>
+        {workspaceName && <span>{workspaceName}</span>}
+      </div>
     ) : null,
 }))
 
@@ -113,9 +146,13 @@ function renderSidebar() {
 }
 
 beforeEach(() => {
+  ctx.uiState.activeAgentSessionId = null
   ctx.localEnvTarget = null
   moveSidebarNodeMock.mockReset()
   moveSidebarNodeMock.mockResolvedValue([])
+  notificationDismissMock.mockReset()
+  notificationDismissForSessionMock.mockReset()
+  notificationListData.length = 0
   window.localStorage.clear()
   window.scrollTo = vi.fn()
 })
@@ -153,14 +190,87 @@ describe('WorkspaceSidebar', () => {
     expect(screen.getAllByText('zoottle-app').length).toBeGreaterThan(0)
   })
 
-  it('persists workspace chat expansion state', async () => {
+  it('does not expose workspace chat expansion controls', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Expand chats for zoottle-app' }))
+    expect(await screen.findByText('zoottle-app')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Expand chats for zoottle-app' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collapse chats for zoottle-app' })).toBeNull()
 
-    expect(JSON.parse(window.localStorage.getItem('cloud-code.workspaceChatExpanded') ?? '[]')).toEqual(['workspace-tools'])
-    expect(await screen.findByText('No chats')).toBeTruthy()
+    expect(window.localStorage.getItem('cloud-code.workspaceChatExpanded')).toBeNull()
+    expect(screen.queryByText('No chats')).toBeNull()
+  })
+
+  it('renders chat finish notifications with workspace names', async () => {
+    ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
+    notificationListData.push({
+      id: 'notification-1',
+      workspaceId: 'workspace-tools',
+      sessionId: 'session-1',
+      kind: 'finished',
+      title: 'Build notifications',
+      summary: 'Implemented notifications',
+      createdAt: new Date('2026-05-08T12:00:00Z'),
+    })
+
+    renderSidebar()
+
+    expect(await screen.findByText('Notifications')).toBeTruthy()
+    expect(screen.getByText('Build notifications')).toBeTruthy()
+    expect(screen.getByText('Implemented notifications')).toBeTruthy()
+    expect(screen.getAllByText('zoottle-app').length).toBeGreaterThan(1)
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Dismiss notification Build notifications' })).toBeTruthy()
+  })
+
+  it('clears and dismisses notifications from sidebar controls', async () => {
+    notificationListData.push(
+      {
+        id: 'notification-1',
+        workspaceId: 'workspace-tools',
+        sessionId: 'session-1',
+        kind: 'finished',
+        title: 'Build notifications',
+        summary: 'Implemented notifications',
+        createdAt: new Date('2026-05-08T12:00:00Z'),
+      },
+      {
+        id: 'notification-2',
+        workspaceId: 'workspace-tools',
+        sessionId: 'session-2',
+        kind: 'permission',
+        title: 'Fix realtime',
+        summary: 'Realtime updates now appear immediately.',
+        createdAt: new Date('2026-05-08T12:01:00Z'),
+      },
+    )
+
+    renderSidebar()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss notification Build notifications' }))
+    expect(notificationDismissMock).toHaveBeenCalledWith('notification-1')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(notificationDismissMock).toHaveBeenCalledWith('notification-2')
+  })
+
+  it('does not render notifications for the active chat', async () => {
+    ctx.uiState.activeAgentSessionId = 'session-1'
+    notificationListData.push({
+      id: 'notification-1',
+      workspaceId: 'workspace-tools',
+      sessionId: 'session-1',
+      kind: 'finished',
+      title: 'Build notifications',
+      summary: 'Implemented notifications',
+      createdAt: new Date('2026-05-08T12:00:00Z'),
+    })
+
+    renderSidebar()
+
+    expect(screen.queryByText('Implemented notifications')).toBeNull()
+    await waitFor(() => expect(notificationDismissForSessionMock).toHaveBeenCalledWith('session-1'))
   })
 
   it('renders folder and workspace rows as separate whole-row draggable targets', async () => {

@@ -1,8 +1,20 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShellChrome } from '../../src/routes/env/shell/shell-chrome'
 import { SplitPane } from '../../src/routes/env/shell/split-pane'
+
+class TestResizeObserver {
+  observe = vi.fn()
+  disconnect = vi.fn()
+}
+
+beforeEach(() => {
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    configurable: true,
+    value: TestResizeObserver,
+  })
+})
 
 describe('ShellChrome', () => {
   it('renders env header actions after extraction', () => {

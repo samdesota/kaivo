@@ -4,7 +4,7 @@ import { protectedProcedure, router } from '../trpc.js'
 import { WorkspaceError, workspaceService } from '../../workspace/service.js'
 
 const workspaceTabSchema = z.discriminatedUnion('type', [
-  z.object({ id: z.string().min(1), type: z.literal('shell'), envId: z.string().min(1), shellId: z.string().min(1), title: z.string() }),
+  z.object({ id: z.string().min(1), type: z.literal('shell'), envId: z.string().min(1), shellId: z.string().min(1), title: z.string(), titleSource: z.enum(['auto', 'explicit']).optional() }),
   z.object({ id: z.string().min(1), type: z.literal('file'), envId: z.string().min(1), path: z.string().min(1), sessionId: z.string().min(1).optional(), title: z.string() }),
   z.object({ id: z.string().min(1), type: z.literal('preview'), envId: z.string().min(1), port: z.number().int().min(1).max(65535), title: z.string() }),
   z.object({ id: z.string().min(1), type: z.literal('browser'), url: z.string().min(1), browserTabId: z.string().min(1).optional(), title: z.string() }),
@@ -24,6 +24,13 @@ const viewStatePatchSchema = z.object({
   activeWorkspaceTabId: z.string().min(1).nullable().optional(),
   splitRatio: z.number().min(0).max(1).nullable().optional(),
   agentCollapsed: z.boolean().optional(),
+})
+
+const workspaceResourceSchema = z.object({
+  type: z.enum(['browser_tab', 'worktree', 'shell', 'other']),
+  resourceKey: z.string().min(1).max(1_000),
+  shared: z.boolean().optional(),
+  data: z.record(z.unknown()).optional(),
 })
 
 function toTrpcError(err: unknown): TRPCError {
@@ -257,6 +264,51 @@ export const workspaceRouter = router({
       } catch (err) {
         throw toTrpcError(err)
       }
+    }),
+
+  listResources: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1).optional() }).optional())
+    .query(async ({ input }) => {
+      try {
+        return await workspaceService.listResources(input?.workspaceId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  upsertResource: protectedProcedure
+    .input(z.object({ workspaceId: z.string().min(1), resource: workspaceResourceSchema }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.upsertResource(input.workspaceId, input.resource)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  deleteResource: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        await workspaceService.deleteResource(input.id)
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  dismissAgentNotification: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      await workspaceService.dismissAgentNotification(input.id)
+      return { ok: true as const }
+    }),
+
+  dismissAgentNotificationsForSession: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      await workspaceService.dismissAgentNotificationsForSession(input.sessionId)
+      return { ok: true as const }
     }),
 
   saveUiState: protectedProcedure

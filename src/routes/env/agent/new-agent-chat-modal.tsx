@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
-import { openConfirmOverlay, openNewAgentChatOverlayDetailed } from '../../../lib/overlay-layer-controller'
+import { Button, Field, Input, SegmentedControl } from '../../../components/ui'
+import { openNewAgentChatOverlayDetailed } from '../../../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { useEnv } from '../env-context'
-import { FolderPickerModal } from './folder-picker-modal'
+import { WorkspaceTreePicker, type WorkspaceTreePickerNode } from '../../workspace/workspace-tree-picker'
 import {
   defaultWorkspaceName,
   newAgentChatStartInput,
@@ -27,7 +28,12 @@ type RepoWorktree = {
   workingDir: string
   githubFullName?: string | null
 }
-type NewChatTab = 'folder' | 'worktree' | 'clone'
+type WorktreeGroup = { parent: string; worktrees: RepoWorktree[] }
+type BrowsePlan = { dir: string | undefined; filter: string }
+type ChooserRow =
+  | { key: string; kind: 'folder'; selection: NewAgentChatSelection; title: string; detail: string; drillPath?: string }
+  | { key: string; kind: 'worktree'; selection: NewAgentChatSelection; title: string; detail: string }
+  | { key: string; kind: 'repoConfig'; selection: NewAgentChatSelection; title: string; detail: string }
 
 export function NewAgentChatModal({
   open,
@@ -76,6 +82,23 @@ export function NewAgentChatModal({
 }
 
 export function NewAgentChatOverlay({
+  ...props
+}: {
+  workspaceId?: string
+  workspaceName?: string
+  initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  folderId?: string | null
+  onClose: () => void
+  onCreated: (sessionId: string, workspaceId?: string) => void
+}) {
+  return (
+    <Suspense fallback={<NewAgentChatOverlayFallback />}>
+      <NewAgentChatOverlayContent {...props} />
+    </Suspense>
+  )
+}
+
+function NewAgentChatOverlayContent({
   workspaceId,
   workspaceName = 'Current workspace',
   initialWorkspaceMode = 'existing',
@@ -90,25 +113,58 @@ export function NewAgentChatOverlay({
   onClose: () => void
   onCreated: (sessionId: string, workspaceId?: string) => void
 }) {
-  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined)
-  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined)
-  const worktrees = envTrpc.repo.listWorktrees.useQuery(undefined)
+  const [recentFolders] = envTrpc.repo.listRecentFolders.useSuspenseQuery(undefined)
+  const [repoConfigs] = envTrpc.repo.listConfigs.useSuspenseQuery(undefined)
+  const [worktrees] = envTrpc.repo.listWorktrees.useSuspenseQuery(undefined)
+  const [workspaceTree] = trpc.workspace.listTree.useSuspenseQuery(undefined)
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
-  const deleteWorktree = envTrpc.repo.deleteWorktree.useMutation()
   const start = envTrpc.agent.sessionStart.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
+  const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
   const queryClient = useQueryClient()
   const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<NewChatTab>('folder')
-  const [folderFilter, setFolderFilter] = useState('')
+  const [step, setStep] = useState<'choose' | 'details'>('choose')
+  const [search, setSearch] = useState('')
+  const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [workspaceMode, setWorkspaceMode] = useState<NewAgentChatWorkspaceMode>(initialWorkspaceMode)
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | undefined>(workspaceId)
+  const [parentFolderId, setParentFolderId] = useState<string | null>(folderId ?? null)
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
-  const folderSearchRef = useRef<HTMLInputElement | null>(null)
+  const searchRef = useRef<HTMLInputElement | null>(null)
 
-  const busy = start.isPending || cloneConfig.isPending || deleteWorktree.isPending || createWorkspace.isPending
+  const busy = start.isPending || cloneConfig.isPending || createWorkspace.isPending || upsertWorkspaceResource.isPending
   const validation = validateNewAgentChatSelection(selection)
+  const pathMode = isPathSearch(search)
+  const pathNeedsHome = pathMode && !search.trimStart().startsWith('/')
+  const homeProbe = envTrpc.fs.browseHome.useQuery(
+    { path: undefined },
+    { enabled: pathMode, refetchOnWindowFocus: false },
+  )
+  const browsePlan = useMemo(
+    () => pathMode && (!pathNeedsHome || homeProbe.data?.home) ? pathBrowsePlan(search, homeProbe.data?.home) : null,
+    [homeProbe.data?.home, pathMode, pathNeedsHome, search],
+  )
+  const pathBrowse = envTrpc.fs.browseHome.useQuery(
+    { path: browsePlan?.dir },
+    { enabled: pathMode && !!browsePlan, refetchOnWindowFocus: false },
+  )
+
+  envTrpc.sync.changes.useSubscription(
+    { afterSeq: 0, tables: ['repos', 'recent_folders'] },
+    {
+      onData(events) {
+        const rows = events as Array<{ table?: string }>
+        if (rows.some((event) => event.table === 'repos')) {
+          void queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') })
+          void queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.list') })
+        }
+        if (rows.some((event) => event.table === 'recent_folders')) {
+          void queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listRecentFolders') })
+        }
+      },
+    },
+  )
 
   async function createChat() {
     const invalid = validateNewAgentChatSelection(selection)
@@ -119,28 +175,53 @@ export function NewAgentChatOverlay({
     setError(null)
     try {
       let workingDir: string
+      let worktreeRepoId: string | undefined
       if (selection.type === 'folder') {
         workingDir = selection.path
       } else if (selection.type === 'worktree') {
         workingDir = selection.path
+        worktreeRepoId = selection.repoId
       } else {
         const cloned = await cloneConfig.mutateAsync({
           configId: selection.configId,
           worktreeName: selection.worktreeName,
         })
         workingDir = cloned.workingDir
+        worktreeRepoId = cloned.repoId
       }
-      let targetWorkspaceId = workspaceId
+      let targetWorkspaceId = workspaceMode === 'existing' ? selectedWorkspaceId : undefined
       if (workspaceMode === 'new' || !targetWorkspaceId) {
         const resolved = resolveWorkspaceName(selection, workspaceNameDraft)
         const workspace = await createWorkspace.mutateAsync({
           name: resolved.name,
-          folderId: folderId ?? null,
+          folderId: parentFolderId,
           nameSource: resolved.source,
           sourceKind: selection.type === 'folder' ? 'folder' : selection.type === 'worktree' ? 'worktree' : 'repo_config',
           sourcePath: workingDir,
         })
         targetWorkspaceId = workspace.id
+      }
+      const matchingWorktree = existingWorktrees.find((worktree) => isPathWithinWorktree(workingDir, worktree.workingDir))
+      if (targetWorkspaceId && (selection.type === 'worktree' || selection.type === 'repoConfig' || matchingWorktree)) {
+        const resourceRepoId = worktreeRepoId ?? matchingWorktree?.id
+        const resourceName = selection.type === 'worktree'
+          ? selection.name
+          : selection.type === 'repoConfig'
+            ? selection.worktreeName
+            : matchingWorktree?.worktreeName
+        await upsertWorkspaceResource.mutateAsync({
+          workspaceId: targetWorkspaceId,
+          resource: {
+            type: 'worktree',
+            resourceKey: resourceRepoId ? `repo:${resourceRepoId}` : `path:${matchingWorktree?.workingDir ?? workingDir}`,
+            shared: true,
+            data: {
+              repoId: resourceRepoId,
+              workingDir: matchingWorktree?.workingDir ?? workingDir,
+              name: resourceName,
+            },
+          },
+        })
       }
       const session = (await start.mutateAsync(newAgentChatStartInput(targetWorkspaceId, workingDir))) as { id: string }
       await Promise.all([
@@ -157,221 +238,315 @@ export function NewAgentChatOverlay({
     }
   }
 
-  const folders = (recentFolders.data ?? []) as RecentFolder[]
-  const configs = (repoConfigs.data ?? []) as RepoConfig[]
-  const existingWorktrees = (worktrees.data ?? []) as RepoWorktree[]
-  const filteredFolders = useMemo(() => {
-    const q = folderFilter.trim().toLowerCase()
-    if (!q) return folders
-    return folders.filter((folder) => `${folder.label ?? ''} ${folder.path}`.toLowerCase().includes(q))
-  }, [folderFilter, folders])
+  const folders = recentFolders as RecentFolder[]
+  const configs = repoConfigs as RepoConfig[]
+  const existingWorktrees = worktrees as RepoWorktree[]
+  const treeNodes = workspaceTree as WorkspaceTreePickerNode[]
+  const searchableFolders = useMemo(
+    () => folders.filter((folder) => !existingWorktrees.some((worktree) => isPathWithinWorktree(folder.path, worktree.workingDir))),
+    [existingWorktrees, folders],
+  )
+  const filteredFolders = useMemo(() => filterRecentFolders(searchableFolders, search), [search, searchableFolders])
+  const filteredWorktrees = useMemo(() => filterWorktrees(existingWorktrees, search), [existingWorktrees, search])
+  const worktreeGroups = useMemo(() => groupWorktreesByParent(filteredWorktrees), [filteredWorktrees])
+  const filteredConfigs = useMemo(() => filterConfigs(configs, search), [configs, search])
+  const pathDirs = useMemo(() => {
+    const dirs = pathBrowse.data?.dirs ?? []
+    const filter = browsePlan?.filter.trim().toLowerCase() ?? ''
+    if (!filter) return dirs
+    return dirs.filter((dir) => dir.name.toLowerCase().includes(filter))
+  }, [browsePlan?.filter, pathBrowse.data?.dirs])
   const selectedConfig = selection?.type === 'repoConfig' ? configs.find((config) => config.id === selection.configId) : null
+  const hasChooserResults = pathMode || filteredFolders.length > 0 || filteredWorktrees.length > 0 || filteredConfigs.length > 0
+  const chooserRows = useMemo(() => {
+    if (pathMode) {
+      const rows: ChooserRow[] = []
+      if (pathBrowse.data) {
+        rows.push({
+          key: `folder:${pathBrowse.data.path}`,
+          kind: 'folder',
+          selection: { type: 'folder', path: pathBrowse.data.path },
+          title: 'Use this folder',
+          detail: pathBrowse.data.path,
+        })
+      }
+      for (const dir of pathDirs) {
+        rows.push({
+          key: `folder:${dir.path}`,
+          kind: 'folder',
+          selection: { type: 'folder', path: dir.path },
+          title: dir.name,
+          detail: dir.path,
+          drillPath: dir.path,
+        })
+      }
+      return rows
+    }
+    return [
+      ...filteredFolders.map((folder): ChooserRow => ({
+        key: `folder:${folder.path}`,
+        kind: 'folder',
+        selection: { type: 'folder', path: folder.path },
+        title: folder.label ?? folderName(folder.path),
+        detail: folder.path,
+      })),
+      ...filteredWorktrees.map((worktree): ChooserRow => ({
+        key: `worktree:${worktree.id}`,
+        kind: 'worktree',
+        selection: { type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName },
+        title: worktree.worktreeName,
+        detail: worktree.workingDir,
+      })),
+      ...filteredConfigs.map((config): ChooserRow => ({
+        key: `repoConfig:${config.id}`,
+        kind: 'repoConfig',
+        selection: { type: 'repoConfig', configId: config.id, worktreeName: '' },
+        title: config.name,
+        detail: config.githubFullName ?? config.originUrl ?? config.id,
+      })),
+    ]
+  }, [filteredConfigs, filteredFolders, filteredWorktrees, pathDirs, pathBrowse.data, pathMode])
   const clonePreview = selectedConfig && selection?.type === 'repoConfig'
     ? `repos/${slugify(selectedConfig.name)}/${slugify(selection.worktreeName || 'work-tree')}`
     : null
   const generatedWorkspaceName = defaultWorkspaceName(selection).name
   const workspaceNameValue = resolveWorkspaceName(selection, workspaceNameDraft).name
 
-  async function removeWorktree(worktree: RepoWorktree) {
-    const confirmed = await openConfirmOverlay({
-      title: `Delete ${worktree.name}/${worktree.worktreeName}?`,
-      message: worktree.workingDir,
-      confirmLabel: 'Delete',
-      destructive: true,
-    })
-    if (!confirmed) return
+  useEffect(() => {
+    if (step !== 'choose') return
+    const id = requestAnimationFrame(() => searchRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [step])
+
+  useEffect(() => {
+    setHighlightedIndex(0)
+  }, [chooserRows.length, pathMode, search])
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  function choose(next: NewAgentChatSelection) {
+    setSelection(next)
     setError(null)
-    try {
-      await deleteWorktree.mutateAsync({ repoId: worktree.id })
-      if (selection?.type === 'worktree' && selection.repoId === worktree.id) setSelection(null)
-      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') })
-    } catch (err) {
-      setError(extractTrpcMessage(err))
+    setStep('details')
+  }
+
+  function drillIntoPath(path: string) {
+    setSearch(`${path.replace(/\/+$/, '')}/`)
+    requestAnimationFrame(() => searchRef.current?.focus())
+  }
+
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setHighlightedIndex((index) => Math.min(Math.max(chooserRows.length - 1, 0), index + 1))
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setHighlightedIndex((index) => Math.max(0, index - 1))
+      return
+    }
+    if (event.key === 'Enter') {
+      const row = chooserRows[highlightedIndex]
+      if (!row) return
+      event.preventDefault()
+      choose(row.selection)
+      return
+    }
+    if (event.key === 'ArrowRight') {
+      const input = event.currentTarget
+      const atEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length
+      const row = chooserRows[highlightedIndex]
+      if (!pathMode || !atEnd || !row || !('drillPath' in row) || !row.drillPath) return
+      event.preventDefault()
+      drillIntoPath(row.drillPath)
     }
   }
 
-  useEffect(() => {
-    if (activeTab !== 'folder') return
-    const id = requestAnimationFrame(() => folderSearchRef.current?.focus())
-    return () => cancelAnimationFrame(id)
-  }, [activeTab])
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="flex max-h-[84vh] min-h-0 w-full max-w-2xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-neutral-800 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-neutral-100">New agent chat</h2>
-            <p className="mt-1 text-xs text-neutral-500">Choose where the agent should work.</p>
-          </div>
-          <WorkspaceModeControl
-            mode={workspaceMode}
-            onModeChange={setWorkspaceMode}
-            existingWorkspaceName={workspaceName}
-            workspaceNameValue={workspaceNameDraft.edited ? workspaceNameDraft.value : generatedWorkspaceName}
-            resolvedWorkspaceName={workspaceNameValue}
-            onWorkspaceNameChange={(value) => setWorkspaceNameDraft({ value, edited: true })}
-          />
-        </div>
-        <div className="flex shrink-0 border-b border-neutral-800 px-3 pt-3">
-          <TabButton active={activeTab === 'folder'} onClick={() => setActiveTab('folder')}>Folders</TabButton>
-          <TabButton active={activeTab === 'worktree'} onClick={() => setActiveTab('worktree')}>Work trees</TabButton>
-          <TabButton active={activeTab === 'clone'} onClick={() => setActiveTab('clone')}>Clone config</TabButton>
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden p-4">
-          {activeTab === 'folder' && (
-            <section className="flex h-full min-h-0 flex-col gap-3">
-              <div className="flex gap-2">
-                <input
-                  ref={folderSearchRef}
-                  value={folderFilter}
-                  onChange={(event) => setFolderFilter(event.target.value)}
-                  placeholder="Search recent folders…"
-                  className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-brand-500"
-                />
-                <button
-                  onClick={() => setPickerOpen(true)}
-                  className="shrink-0 rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300 hover:border-brand-500/60 hover:bg-neutral-900"
-                >
-                  Browse…
-                </button>
-              </div>
-              {recentFolders.isLoading && <div className="text-xs text-neutral-500">Loading recent folders…</div>}
-              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
-                {filteredFolders.map((folder) => (
-                  <button
-                    key={folder.path}
-                    onClick={() => setSelection({ type: 'folder', path: folder.path })}
-                    className={compactChoiceClass(selection?.type === 'folder' && selection.path === folder.path)}
-                  >
-                    <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                      <span className="shrink-0 truncate text-neutral-100">{folder.label ?? folderName(folder.path)}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-neutral-500" title={folder.path}>{folder.path}</span>
-                    </span>
-                  </button>
-                ))}
-                {folders.length === 0 && !recentFolders.isLoading && <EmptyList>No recent folders yet.</EmptyList>}
-                {folders.length > 0 && filteredFolders.length === 0 && <EmptyList>No folders match “{folderFilter}”.</EmptyList>}
-              </div>
-            </section>
-          )}
-          {activeTab === 'worktree' && (
-            <section className="flex h-full min-h-0 flex-col gap-2">
-              {worktrees.isLoading && <div className="text-xs text-neutral-500">Loading work trees…</div>}
-              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
-                {existingWorktrees.map((worktree) => (
-                  <div
-                    key={worktree.id}
-                    className={compactChoiceClass(selection?.type === 'worktree' && selection.repoId === worktree.id, 'row')}
-                  >
-                    <button
-                      onClick={() => setSelection({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName })}
-                      className="min-w-0 flex-1 text-left"
-                    >
-                      <span className="block truncate text-neutral-100">{worktree.name} / {worktree.worktreeName}</span>
-                      <span className="block truncate font-mono text-[10px] text-neutral-500" title={worktree.workingDir}>{worktree.workingDir}</span>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="mb-10 flex max-h-[min(84vh,1000px)] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+        {step === 'choose' ? (
+          <>
+            <div className="shrink-0 border-b border-neutral-800 bg-input">
+              <input
+                ref={searchRef}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search folders, work trees, repo configs, or type a path…"
+                className="w-full bg-input px-4 py-3 text-sm text-content-strong outline-none placeholder:text-placeholder"
+              />
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto pb-2 pt-2">
+              {pathMode ? (
+                <section>
+                  <SectionLabel label={pathBrowse.data?.path ?? 'Folders'} meta="path" />
+                  {pathBrowse.isLoading && <EmptyList>Loading folders…</EmptyList>}
+                  {pathBrowse.error && <EmptyList>{extractTrpcMessage(pathBrowse.error)}</EmptyList>}
+                  {pathBrowse.data && (
+                    <button onClick={() => choose({ type: 'folder', path: pathBrowse.data.path })} className={compactChoiceClass(highlightedIndex === 0)}>
+                      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                        <span className="shrink-0 truncate text-content-strong">Use this folder</span>
+                        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={pathBrowse.data.path}>{pathBrowse.data.path}</span>
+                      </span>
                     </button>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void removeWorktree(worktree)
-                      }}
-                      disabled={busy}
-                      className="ml-2 shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-50"
-                    >
-                      Delete
+                  )}
+                  {pathBrowse.data?.parent && (
+                    <button onClick={() => setSearch(pathBrowse.data?.parent ?? '')} className={compactChoiceClass(false)}>
+                      <span className="min-w-0 flex-1 text-content-default">..</span>
                     </button>
-                  </div>
-                ))}
-                {existingWorktrees.length === 0 && !worktrees.isLoading && <EmptyList>No cloned work trees yet.</EmptyList>}
-              </div>
-            </section>
-          )}
-          {activeTab === 'clone' && (
-            <section className="flex h-full min-h-0 flex-col gap-3">
-              {repoConfigs.isLoading && <div className="text-xs text-neutral-500">Loading repo configs…</div>}
-              <div className="min-h-0 flex-1 overflow-y-auto rounded border border-neutral-900 bg-neutral-950/40 p-1">
-                {configs.map((config) => (
-                  <button
-                    key={config.id}
-                    onClick={() => setSelection({
-                      type: 'repoConfig',
-                      configId: config.id,
-                      worktreeName: selection?.type === 'repoConfig' ? selection.worktreeName : '',
-                    })}
-                    className={compactChoiceClass(selection?.type === 'repoConfig' && selection.configId === config.id)}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-neutral-100">{config.name}</span>
-                      <span className="block truncate text-[10px] text-neutral-500" title={config.githubFullName ?? config.originUrl ?? config.id}>{config.githubFullName ?? config.originUrl ?? config.id}</span>
-                    </span>
-                  </button>
-                ))}
-                {configs.length === 0 && !repoConfigs.isLoading && <EmptyList>No repo configs yet.</EmptyList>}
-              </div>
-              <label className="block space-y-1 text-xs text-neutral-400">
-                <span>Work tree name</span>
-                <input
-                  value={selection?.type === 'repoConfig' ? selection.worktreeName : ''}
-                  onChange={(event) => {
-                    const fallbackConfigId = configs[0]?.id ?? ''
-                    setSelection({
-                      type: 'repoConfig',
-                      configId: selection?.type === 'repoConfig' ? selection.configId : fallbackConfigId,
-                      worktreeName: event.target.value,
-                    })
-                  }}
-                  placeholder="bug-shell-resize"
-                  className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-100 outline-none focus:border-brand-500"
-                />
-              </label>
-              {clonePreview && (
-                <div className="truncate rounded border border-neutral-800 bg-neutral-900/40 p-2 text-[10px] text-neutral-500" title={clonePreview}>
-                  Will clone to <span className="font-mono text-neutral-300">{clonePreview}</span>
+                  )}
+                  {pathDirs.map((dir, index) => {
+                    const rowIndex = (pathBrowse.data ? 1 : 0) + index
+                    const active = highlightedIndex === rowIndex
+                    return (
+                      <div key={dir.path} className={compactChoiceClass(active)}>
+                        <button onClick={() => choose({ type: 'folder', path: dir.path })} className="flex min-w-0 flex-1 items-baseline gap-2 text-left">
+                          <span className="shrink-0 truncate text-content-strong">{dir.name}</span>
+                          <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={dir.path}>{dir.path}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            drillIntoPath(dir.path)
+                          }}
+                          className="ml-2 shrink-0 rounded px-1 text-ui-muted hover:bg-neutral-800 hover:text-header-3"
+                          aria-label={`Open ${dir.name}`}
+                          title="Open folder"
+                        >
+                          &gt;
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {pathBrowse.data && pathDirs.length === 0 && !pathBrowse.isLoading && <EmptyList>No folders match this path.</EmptyList>}
+                </section>
+              ) : (
+                <div className="space-y-2">
+                  {filteredFolders.length > 0 && (
+                    <ResultSection label="Recent folders">
+                      {filteredFolders.map((folder, index) => (
+                        <button key={folder.path} onClick={() => choose({ type: 'folder', path: folder.path })} className={compactChoiceClass(highlightedIndex === index)}>
+                          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                            <span className="shrink-0 truncate text-content-strong">{folder.label ?? folderName(folder.path)}</span>
+                            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={folder.path}>{folder.path}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </ResultSection>
+                  )}
+                  {filteredWorktrees.length > 0 && (
+                    <ResultSection label="Work trees">
+                      {worktreeGroups.map((group) => (
+                        <div key={group.parent}>
+                          <SectionLabel label={group.parent} />
+                          {group.worktrees.map((worktree) => {
+                            const rowIndex = filteredFolders.length + filteredWorktrees.findIndex((item) => item.id === worktree.id)
+                            return (
+                            <button key={worktree.id} onClick={() => choose({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName })} className={compactChoiceClass(highlightedIndex === rowIndex, 'row')}>
+                              <span className="min-w-0 flex-1 text-left">
+                                <span className="block truncate text-content-strong">{worktree.worktreeName}</span>
+                                <span className="block truncate font-mono text-[10px] text-help" title={worktree.workingDir}>{worktree.workingDir}</span>
+                              </span>
+                            </button>
+                            )
+                          })}
+                        </div>
+                      ))}
+                    </ResultSection>
+                  )}
+                  {filteredConfigs.length > 0 && (
+                    <ResultSection label="Clone from repo config">
+                      {filteredConfigs.map((config, index) => (
+                        <button key={config.id} onClick={() => choose({ type: 'repoConfig', configId: config.id, worktreeName: '' })} className={compactChoiceClass(highlightedIndex === filteredFolders.length + filteredWorktrees.length + index)}>
+                          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                            <span className="shrink-0 truncate text-content-strong">{config.name}</span>
+                            <span className="min-w-0 flex-1 truncate text-[10px] text-help" title={config.githubFullName ?? config.originUrl ?? config.id}>{config.githubFullName ?? config.originUrl ?? config.id}</span>
+                          </span>
+                          <span className="ml-2 text-sm text-ui-muted">+</span>
+                        </button>
+                      ))}
+                    </ResultSection>
+                  )}
+                  {!hasChooserResults && <EmptyList>No folders, work trees, or repo configs match your search.</EmptyList>}
                 </div>
               )}
-            </section>
-          )}
-        </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 px-3 py-2">
+              <button onClick={() => setStep('choose')} className="rounded px-2 py-1 text-sm leading-none text-ui-default hover:bg-highlight hover:text-header-3" aria-label="Back">‹</button>
+              <div className="text-sm font-medium text-header-2">Create chat</div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="px-4 pb-2 pt-3">
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-label">Destination</div>
+                <div className="rounded border border-neutral-800 bg-input px-3 py-2">
+                  <SelectedDestination selection={selection} config={selectedConfig} />
+                </div>
+              </div>
+              {selection?.type === 'repoConfig' && (
+                <div>
+                  <label className="block px-4 pb-2 pt-3 text-xs text-ui-default">
+                    <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-label">Work tree name</span>
+                    <Input
+                      value={selection.worktreeName}
+                      onChange={(event) => setSelection({ ...selection, worktreeName: event.target.value })}
+                      placeholder="bug-shell-resize"
+                    />
+                  </label>
+                  {clonePreview && (
+                    <div className="truncate px-4 pb-2 text-[10px] text-help" title={clonePreview}>
+                      Will clone to <span className="font-mono text-content-default">{clonePreview}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              <WorkspaceModeControl
+                mode={workspaceMode}
+                onModeChange={setWorkspaceMode}
+                existingWorkspaceName={workspaceName}
+                selectedWorkspaceId={selectedWorkspaceId}
+                workspaceTree={treeNodes}
+                workspaceNameValue={workspaceNameDraft.edited ? workspaceNameDraft.value : generatedWorkspaceName}
+                resolvedWorkspaceName={workspaceNameValue}
+                parentFolderId={parentFolderId}
+                foldersLoading={false}
+                workspacesLoading={false}
+                onWorkspaceChange={setSelectedWorkspaceId}
+                onParentFolderChange={setParentFolderId}
+                onWorkspaceNameChange={(value) => setWorkspaceNameDraft({ value, edited: true })}
+              />
+              <Button
+                variant="secondary"
+                onClick={() => void createChat()}
+                disabled={busy || !!validation}
+                className="mx-4 mb-4 mt-5"
+              >
+                {busy ? 'Creating…' : selection?.type === 'repoConfig' ? 'Clone and create chat' : 'Create chat'}
+              </Button>
+            </div>
+          </>
+        )}
         {error && <div className="mx-4 shrink-0 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>}
-        <div className="flex shrink-0 justify-end gap-2 border-t border-neutral-800 px-4 py-3">
-          <button onClick={onClose} className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900">Cancel</button>
-          <button
-            onClick={() => void createChat()}
-            disabled={busy || !!validation}
-            className="rounded bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-          >
-            {busy ? 'Creating…' : 'Create chat'}
-          </button>
-        </div>
       </div>
-      <FolderPickerModal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        busy={busy}
-        onSelect={(path) => {
-          setSelection({ type: 'folder', path })
-          setPickerOpen(false)
-        }}
-      />
     </div>
-  )
-}
-
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        'border-b px-3 py-2 text-xs font-medium ' +
-        (active
-          ? 'border-brand-500 text-neutral-100'
-          : 'border-transparent text-neutral-500 hover:text-neutral-300')
-      }
-    >
-      {children}
-    </button>
   )
 }
 
@@ -379,59 +554,213 @@ export function WorkspaceModeControl({
   mode,
   onModeChange,
   existingWorkspaceName,
+  selectedWorkspaceId,
+  workspaceTree = [],
   workspaceNameValue,
   resolvedWorkspaceName,
+  parentFolderId = null,
+  foldersLoading = false,
+  workspacesLoading = false,
+  onWorkspaceChange,
+  onParentFolderChange,
   onWorkspaceNameChange,
 }: {
   mode: NewAgentChatWorkspaceMode
   onModeChange: (mode: NewAgentChatWorkspaceMode) => void
   existingWorkspaceName: string
+  selectedWorkspaceId?: string
+  workspaceTree?: WorkspaceTreePickerNode[]
   workspaceNameValue: string
   resolvedWorkspaceName?: string
+  parentFolderId?: string | null
+  foldersLoading?: boolean
+  workspacesLoading?: boolean
+  onWorkspaceChange?: (workspaceId: string) => void
+  onParentFolderChange?: (folderId: string | null) => void
   onWorkspaceNameChange: (value: string) => void
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-2 text-xs text-neutral-500">
-      <span>Workspace</span>
-      <select
-        aria-label="Workspace mode"
-        value={mode}
-        onChange={(event) => onModeChange(event.target.value as NewAgentChatWorkspaceMode)}
-        className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-brand-500"
-      >
-        <option value="new">New</option>
-        <option value="existing">Existing</option>
-      </select>
-      {mode === 'new' ? (
-        <input
-          aria-label="Workspace name"
-          value={workspaceNameValue}
-          onChange={(event) => onWorkspaceNameChange(event.target.value)}
-          title={resolvedWorkspaceName ?? workspaceNameValue}
-          className="w-36 rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-brand-500"
+    <div className="shrink-0 px-4 pb-3 pt-3 text-xs text-help">
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-label">Workspace</div>
+      <div className="space-y-3">
+        <SegmentedControl
+          value={mode}
+          options={[
+            { value: 'existing', label: 'Existing' },
+            { value: 'new', label: 'New' },
+          ]}
+          onChange={onModeChange}
+          ariaLabel="Workspace mode"
+          className="bg-input [&_[aria-pressed='true']]:bg-neutral-800"
         />
-      ) : (
-        <span className="max-w-44 truncate rounded border border-neutral-900 bg-neutral-900/40 px-2 py-1 text-neutral-300" title={existingWorkspaceName}>
-          {existingWorkspaceName}
-        </span>
-      )}
+        {mode === 'new' ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="New workspace">
+              <Input
+                aria-label="Workspace name"
+                value={workspaceNameValue}
+                onChange={(event) => onWorkspaceNameChange(event.target.value)}
+                title={resolvedWorkspaceName ?? workspaceNameValue}
+              />
+            </Field>
+            <Field label="Parent folder">
+              <WorkspaceTreePicker
+                mode="folders"
+                tree={workspaceTree}
+                selectedId={parentFolderId}
+                ariaLabel="Parent folder"
+                disabled={foldersLoading}
+                searchPlaceholder="Search folders..."
+                fallbackLabel="No folder"
+                onSelect={onParentFolderChange ?? (() => undefined)}
+              />
+            </Field>
+          </div>
+        ) : (
+          <Field label="Existing workspace">
+            <WorkspaceTreePicker
+              mode="workspaces"
+              tree={workspaceTree}
+              selectedId={selectedWorkspaceId}
+              ariaLabel="Existing workspace"
+              disabled={workspacesLoading}
+              searchPlaceholder="Search workspaces..."
+              fallbackLabel={existingWorkspaceName}
+              onSelect={(value) => value && onWorkspaceChange?.(value)}
+            />
+          </Field>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function NewAgentChatOverlayFallback() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+      <div className="mb-10 flex max-h-[min(84vh,1000px)] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+        <div className="shrink-0 border-b border-neutral-800 bg-input px-4 py-3 text-sm text-placeholder">
+          Loading workspace options…
+        </div>
+        <div className="p-4 text-xs text-help">Preparing recent folders, work trees, and repo configs.</div>
+      </div>
     </div>
   )
 }
 
 function EmptyList({ children }: { children: ReactNode }) {
-  return <div className="p-4 text-center text-xs text-neutral-500">{children}</div>
+  return <div className="p-4 text-center text-xs text-help">{children}</div>
+}
+
+function ResultSection({
+  label,
+  children,
+}: {
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <section>
+      <SectionLabel label={label} />
+      {children}
+    </section>
+  )
+}
+
+function SectionLabel({ label, meta }: { label: string; meta?: string }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wide text-label first:pt-2">
+      <span className="min-w-0 truncate">{label}</span>
+      {meta && <span className="shrink-0 text-ui-muted">{meta}</span>}
+    </div>
+  )
+}
+
+function SelectedDestination({ selection, config }: { selection: NewAgentChatSelection | null; config?: RepoConfig | null }) {
+  if (!selection) return <div className="text-xs text-help">No destination selected</div>
+  if (selection.type === 'folder') {
+    return <DestinationText title={folderName(selection.path)} detail={selection.path} />
+  }
+  if (selection.type === 'worktree') {
+    return <DestinationText title={selection.name ?? folderName(selection.path)} detail={selection.path} />
+  }
+  return <DestinationText title={config?.name ?? 'Repo config'} detail={config?.githubFullName ?? config?.originUrl ?? selection.configId} />
+}
+
+function DestinationText({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="min-w-0 text-xs">
+      <div className="truncate font-medium text-content-strong">{title}</div>
+      <div className="truncate font-mono text-[10px] text-help" title={detail}>{detail}</div>
+    </div>
+  )
+}
+
+function groupWorktreesByParent(worktrees: RepoWorktree[]): WorktreeGroup[] {
+  const groups = new Map<string, RepoWorktree[]>()
+  for (const worktree of worktrees) {
+    const parent = worktree.name || worktree.githubFullName || 'Other work trees'
+    const group = groups.get(parent) ?? []
+    group.push(worktree)
+    groups.set(parent, group)
+  }
+  return Array.from(groups, ([parent, items]) => ({ parent, worktrees: items }))
+}
+
+function filterRecentFolders(folders: RecentFolder[], search: string): RecentFolder[] {
+  const q = search.trim().toLowerCase()
+  if (!q) return folders
+  return folders.filter((folder) => `${folder.label ?? ''} ${folder.path}`.toLowerCase().includes(q))
+}
+
+function filterWorktrees(worktrees: RepoWorktree[], search: string): RepoWorktree[] {
+  const q = search.trim().toLowerCase()
+  if (!q) return worktrees
+  return worktrees.filter((worktree) => `${worktree.name} ${worktree.worktreeName} ${worktree.workingDir} ${worktree.githubFullName ?? ''}`.toLowerCase().includes(q))
+}
+
+function filterConfigs(configs: RepoConfig[], search: string): RepoConfig[] {
+  const q = search.trim().toLowerCase()
+  if (!q) return configs
+  return configs.filter((config) => `${config.name} ${config.githubFullName ?? ''} ${config.originUrl ?? ''}`.toLowerCase().includes(q))
+}
+
+function isPathSearch(value: string): boolean {
+  const trimmed = value.trimStart()
+  return trimmed.startsWith('/') || trimmed.startsWith('~') || trimmed.includes('/')
+}
+
+function pathBrowsePlan(value: string, home?: string): BrowsePlan {
+  const trimmed = value.trim()
+  const expanded = trimmed.startsWith('~') && home
+    ? `${home}${trimmed.slice(1)}`
+    : trimmed.startsWith('/')
+      ? trimmed
+      : home
+        ? `${home}/${trimmed}`
+        : trimmed
+  if (!expanded || expanded === '~') return { dir: home, filter: '' }
+  if (expanded.endsWith('/')) return { dir: expanded, filter: '' }
+  const slash = expanded.lastIndexOf('/')
+  if (slash <= 0) return { dir: '/', filter: expanded.replace(/^\/+/, '') }
+  return { dir: expanded.slice(0, slash), filter: expanded.slice(slash + 1) }
 }
 
 function compactChoiceClass(selected: boolean, layout: 'col' | 'row' = 'col'): string {
   return (
-    `flex w-full min-w-0 ${layout === 'col' ? 'items-center' : 'items-start'} rounded border px-2.5 py-2 text-left text-xs hover:border-brand-500/60 hover:bg-neutral-900 ` +
-    (selected ? 'border-brand-500 bg-brand-500/10' : 'border-neutral-800 bg-neutral-900/40')
+    `flex w-full min-w-0 ${layout === 'col' ? 'items-center' : 'items-start'} px-4 py-2 text-left text-xs ` +
+    (selected ? 'bg-neutral-900 text-header-1' : 'hover:bg-neutral-920 hover:text-header-1')
   )
 }
 
 function folderName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path
+}
+
+function isPathWithinWorktree(pathname: string, worktreePath: string): boolean {
+  const path = pathname.replace(/\/+$/, '')
+  const root = worktreePath.replace(/\/+$/, '')
+  return path === root || path.startsWith(`${root}/`)
 }
 
 function slugify(name: string): string {

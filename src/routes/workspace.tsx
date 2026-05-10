@@ -29,16 +29,14 @@ import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
-import { openCommandPaletteOverlay, openNewAgentChatOverlay, openTextInputOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
+import { openCommandPaletteOverlay, openConfirmOverlay, openNewAgentChatOverlay, openTextInputOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
-import { ShellsDropdown } from './env/shell/dropdowns'
 import { NewSessionPopover } from './env/agent/session-tabs'
 import { NewAgentChatModal } from './env/agent/new-agent-chat-modal'
-import { useChatSession, useRetainChatSessions } from './env/agent/chat-state'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -62,9 +60,12 @@ import {
   updateFileEditorStateForTab,
 } from './workspace/tab-state'
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
+import { useWorkspaceResourcesStore, type WorkspaceResourceRecord } from './workspace/resources-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
+import { useAgentNotificationsStore, type AgentNotificationRecord } from './workspace/notifications-store'
+import { createWorkspaceResourceCleanupRegistry, type CleanupResourceRow } from './workspace/resource-cleanup'
 import {
   projectSidebarDropFromRows,
   flattenSidebarTree,
@@ -100,19 +101,9 @@ type WorkspaceSidebarNode =
   | { type: 'folder'; folder: WorkspaceFolderSummary; children: WorkspaceSidebarNode[] }
   | { type: 'workspace'; workspace: WorkspaceSummary }
 
-type SessionSummary = {
-  id: string
-  workspaceId?: string | null
-  title: string | null
-  status: string
-  createdAt: Date | string
-  lastActivityAt: Date | string
-}
-
 const WORKSPACE_SIDEBAR_WIDTH_KEY = 'cloud-code.workspaceSidebarWidth'
 const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
-const WORKSPACE_CHAT_EXPANDED_KEY = 'cloud-code.workspaceChatExpanded'
 const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
 
 type WorkspaceEnvResources = {
@@ -146,9 +137,11 @@ export function WorkspacePage() {
   const markOpened = trpc.workspace.markOpened.useMutation({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
   })
+  const upsertResource = trpc.workspace.upsertResource.useMutation()
   const viewStateStore = useWorkspaceViewStateStore(workspaceId)
   const tabsStore = useWorkspaceTabsStore(workspaceId)
   const appliedSearchWorkspaceId = useRef<string | null>(null)
+  const lastReadyWorkspaceRef = useRef<ReactNode | null>(null)
 
   useEffect(() => {
     if (workspace.data?.id) markOpened.mutate({ id: workspace.data.id })
@@ -213,14 +206,30 @@ export function WorkspacePage() {
       tabsStore.closeTab(action.tabId)
     } else if (action.type === 'setBrowserTabId') {
       tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
+      const tab = tabsStore.tabs.find((candidate) => candidate.id === action.tabId)
+      if (tab?.type === 'browser') {
+        upsertResource.mutate({
+          workspaceId,
+          resource: {
+            type: 'browser_tab',
+            resourceKey: action.browserTabId,
+            shared: false,
+            data: { browserTabId: action.browserTabId, tabId: action.tabId, url: tab.url, title: tab.title },
+          },
+        })
+      }
+    } else if (action.type === 'setTabUrl') {
+      tabsStore.setTabUrl(action.tabId, action.url)
     } else if (action.type === 'setTabTitle') {
       tabsStore.setTabTitle(action.tabId, action.title)
+    } else if (action.type === 'setTabAutoTitle') {
+      tabsStore.setTabAutoTitle(action.tabId, action.title)
     } else if (action.type === 'setSplitRatio') {
       viewStateStore.setSplitRatio(action.splitRatio)
     } else if (action.type === 'setAgentCollapsed') {
       viewStateStore.setAgentCollapsed(action.collapsed)
     }
-  }, [tabsStore, viewStateStore])
+  }, [tabsStore, upsertResource, viewStateStore, workspaceId])
 
   const envTargets = useMemo(() => {
     return ((envs.data ?? []) as WorkspaceEnvRow[]).map(resolveWorkspaceEnvTarget)
@@ -231,7 +240,24 @@ export function WorkspacePage() {
     [envTargets],
   )
 
-  if (workspace.isLoading || envs.isLoading || viewStateStore.isLoading || tabsStore.isLoading) {
+  const initiallyLoading =
+    (workspace.isLoading && !workspace.data) ||
+    (envs.isLoading && !envs.data) ||
+    (viewStateStore.isLoading && !viewStateStore.viewState) ||
+    (tabsStore.isLoading && !tabsStore.data)
+
+  if (initiallyLoading) {
+    logWorkspaceLoading('initiallyLoading', workspaceId, {
+      workspaceLoading: workspace.isLoading,
+      workspaceHasData: Boolean(workspace.data),
+      envsLoading: envs.isLoading,
+      envsHasData: Boolean(envs.data),
+      viewStateLoading: viewStateStore.isLoading,
+      viewStateHasData: Boolean(viewStateStore.viewState),
+      tabsLoading: tabsStore.isLoading,
+      tabsHasData: Boolean(tabsStore.data),
+    })
+    if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
@@ -242,6 +268,15 @@ export function WorkspacePage() {
     return <WorkspaceError message="Workspace did not load." />
   }
   if (!viewStateStore.viewState || !tabsStore.data) {
+    logWorkspaceLoading('missingStoreDataAfterInitialLoad', workspaceId, {
+      viewStateLoading: viewStateStore.isLoading,
+      viewStateHasData: Boolean(viewStateStore.viewState),
+      tabsLoading: tabsStore.isLoading,
+      tabsHasData: Boolean(tabsStore.data),
+      workspaceHasData: Boolean(workspace.data),
+      envsHasData: Boolean(envs.data),
+    })
+    if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
 
@@ -254,7 +289,7 @@ export function WorkspacePage() {
     tabOrder: tabsStore.tabs.map((tab) => tab.id),
   }
 
-  return (
+  const readyWorkspace = (
     <WorkspaceContextProvider
       value={{
         workspace: workspace.data,
@@ -267,6 +302,16 @@ export function WorkspacePage() {
       <WorkspaceShell key={workspace.data.id} dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
     </WorkspaceContextProvider>
   )
+  lastReadyWorkspaceRef.current = readyWorkspace
+  return readyWorkspace
+}
+
+function logWorkspaceLoading(reason: string, workspaceId: string, state: Record<string, unknown>) {
+  console.info('[workspace] Loading workspace...', {
+    reason,
+    workspaceId,
+    ...state,
+  })
 }
 
 function WorkspaceShell({
@@ -321,6 +366,9 @@ function WorkspaceShell({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         void openCommandPalette()
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        openPane({ type: 'browser', url: 'https://www.google.com' })
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
@@ -331,7 +379,7 @@ function WorkspaceShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [agentCollapsed, openCommandPalette, setAgentCollapsed])
+  }, [agentCollapsed, openCommandPalette, openPane, setAgentCollapsed])
 
   return (
     <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
@@ -402,6 +450,7 @@ export function WorkspaceSidebar({
   const queryClient = useQueryClient()
   const tree = trpc.workspace.listTree.useQuery(undefined, { refetchInterval: 15_000 })
   const list = trpc.workspace.list.useQuery(undefined, { refetchInterval: 15_000 })
+  const resourcesStore = useWorkspaceResourcesStore()
   const createFolder = trpc.workspace.createFolder.useMutation({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
   })
@@ -417,7 +466,11 @@ export function WorkspaceSidebar({
       queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
     },
   })
+  const deleteResource = trpc.workspace.deleteResource.useMutation()
   const setFolderCollapsed = trpc.workspace.setFolderCollapsed.useMutation({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
+  })
+  const archiveFolder = trpc.workspace.archiveFolder.useMutation({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
   })
   const moveSidebarNode = trpc.workspace.moveSidebarNode.useMutation({
@@ -426,19 +479,13 @@ export function WorkspaceSidebar({
   })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
   const [newChatContext, setNewChatContext] = useState<null | { mode: 'new'; folderId?: string | null } | { mode: 'existing'; workspace: WorkspaceSummary }>(null)
+  const [cleanupWorkspace, setCleanupWorkspace] = useState<WorkspaceSummary | null>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [dragPlacement, setDragPlacement] = useState<DropPlacement>('after')
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
   const [localTree, setLocalTree] = useState<WorkspaceSidebarNode[] | null>(null)
   const [sidebarWidth, setSidebarWidth] = useState(() => readWorkspaceSidebarWidth())
-  const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<string[]>(() => {
-    try {
-      const raw = window.localStorage.getItem(WORKSPACE_CHAT_EXPANDED_KEY)
-      return raw ? (JSON.parse(raw) as string[]) : []
-    } catch {
-      return []
-    }
-  })
+  const [chatReadVersion, setChatReadVersion] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
   const dragPointerOffsetRef = useRef<{ x: number; y: number } | null>(null)
@@ -452,6 +499,12 @@ export function WorkspaceSidebar({
     }
   }, [edit.editingId])
 
+  useEffect(() => {
+    if (!ctx.uiState.activeAgentSessionId) return
+    markWorkspaceChatsRead(ctx.workspace.id)
+    setChatReadVersion((version) => version + 1)
+  }, [ctx.uiState.activeAgentSessionId, ctx.workspace.id])
+
   async function saveRename() {
     if (!edit.editingId) return
     const nextName = nextRenameValue(edit)
@@ -462,7 +515,6 @@ export function WorkspaceSidebar({
   }
 
   async function closeWorkspace(workspaceId: string, workspaces: WorkspaceSummary[]) {
-    await archive.mutateAsync({ id: workspaceId })
     const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId)
     const next = remaining[0]
     if (workspaceId === ctx.workspace.id) {
@@ -471,14 +523,22 @@ export function WorkspaceSidebar({
           to: '/w/$workspaceId',
           params: { workspaceId: next.id },
           search: { chat: undefined, tab: undefined },
+          replace: true,
         })
+      } else {
+        await navigate({ to: '/', replace: true })
       }
+    }
+    await archive.mutateAsync({ id: workspaceId })
+    for (const resource of resourcesStore.records.filter((record) => record.workspaceId === workspaceId)) {
+      await deleteResource.mutateAsync({ id: resource.id }).catch(() => undefined)
     }
   }
 
   const workspaces = (list.data ?? []) as WorkspaceSummary[]
   const nodes = (tree.data ?? []) as WorkspaceSidebarNode[]
   const displayNodes = localTree ?? nodes
+  const workspaceNames = useMemo(() => new Map(workspaces.map((workspace) => [workspace.id, workspace.name])), [workspaces])
   const dndNodes = displayNodes as unknown as SidebarTreeNode[]
   const flatRows = flattenSidebarTree(dndNodes)
   const sortableIds = flatRows.map((row) => sidebarDndId(row.kind, row.id))
@@ -489,21 +549,6 @@ export function WorkspaceSidebar({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  function setWorkspaceExpanded(workspaceId: string, expanded: boolean) {
-    if (expanded) markWorkspaceChatsRead(workspaceId)
-    setExpandedWorkspaceIds((current) => {
-      const next = expanded
-        ? Array.from(new Set([...current, workspaceId]))
-        : current.filter((id) => id !== workspaceId)
-      try {
-        window.localStorage.setItem(WORKSPACE_CHAT_EXPANDED_KEY, JSON.stringify(next))
-      } catch {
-        // ignore disabled/quota storage
-      }
-      return next
-    })
-  }
-
   async function openFolderCreate(parentId: string | null) {
     const name = await openTextInputOverlay({
       title: 'New workspace folder',
@@ -513,6 +558,21 @@ export function WorkspaceSidebar({
     })
     if (!name) return
     await createFolder.mutateAsync({ name, parentId })
+  }
+
+  async function deleteFolder(folder: WorkspaceFolderSummary) {
+    const node = findSidebarFolderNode(displayNodes, folder.id)
+    const workspaceCount = node ? countWorkspacesInSidebarNodes(node.children) : 0
+    if (workspaceCount > 0) {
+      const confirmed = await openConfirmOverlay({
+        title: 'Delete workspace folder?',
+        message: `${folder.name} contains ${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}. Deleting it will also delete all child workspaces and folders.`,
+        confirmLabel: 'Delete folder',
+        destructive: true,
+      })
+      if (!confirmed) return
+    }
+    await archiveFolder.mutateAsync({ id: folder.id })
   }
 
   async function selectCreatedChat(sessionId: string, workspaceId?: string) {
@@ -649,7 +709,7 @@ export function WorkspaceSidebar({
     >
       <div
         onPointerDown={startSidebarResize}
-        className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-brand-500/40"
+        className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-neutral-800"
         aria-hidden="true"
       />
       <div className="window-drag flex flex-none basis-8 items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-3">
@@ -694,11 +754,17 @@ export function WorkspaceSidebar({
             {activeDragId ? <SidebarDragPreview activeId={activeDragId} nodes={displayNodes} /> : null}
           </DragOverlay>
         </DndContext>
+        <WorkspaceSidebarNotifications
+          workspaceNames={workspaceNames}
+          activeWorkspaceId={ctx.workspace.id}
+          activeSessionId={ctx.uiState.activeAgentSessionId}
+          dispatchWorkspaceState={dispatchWorkspaceState}
+        />
       </div>
       <div className="flex-none border-t border-neutral-900 px-2 py-2">
         <Link
           to="/settings"
-          className="flex items-center gap-2 rounded px-[3px] py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-900 hover:text-neutral-200"
+          className="flex items-center gap-2 rounded px-[3px] py-1 text-xs text-neutral-500 transition-colors hover:bg-highlight hover:text-neutral-200"
         >
           <Settings className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate font-medium">Settings</span>
@@ -714,6 +780,20 @@ export function WorkspaceSidebar({
             folderId={newChatContext.mode === 'new' ? newChatContext.folderId : undefined}
             onClose={() => setNewChatContext(null)}
             onCreated={(sessionId, workspaceId) => void selectCreatedChat(sessionId, workspaceId)}
+          />
+        </WorkspaceAgentEnvProvider>
+      )}
+      {cleanupWorkspace && (
+        <WorkspaceAgentEnvProvider>
+          <WorkspaceCleanupModal
+            workspace={cleanupWorkspace}
+            allWorkspaces={workspaces}
+            resources={resourcesStore.records}
+            onCancel={() => setCleanupWorkspace(null)}
+            onArchive={async () => {
+              await closeWorkspace(cleanupWorkspace.id, workspaces)
+              setCleanupWorkspace(null)
+            }}
           />
         </WorkspaceAgentEnvProvider>
       )}
@@ -735,7 +815,7 @@ export function WorkspaceSidebar({
           active={activeDragId === dndId}
           guideDepths={row.ancestorFolderIds.map((_, index) => index)}
         >
-          <div className="relative mb-1">
+          <div className="relative mb-0.5">
             {folderHasVisibleChildren && (
               <span
                 className="pointer-events-none absolute bottom-[-5px] left-[3.5px] top-[20px] border-l border-neutral-800/80"
@@ -745,21 +825,22 @@ export function WorkspaceSidebar({
             <div className="group flex items-center gap-px py-px text-xs text-neutral-400 transition-all duration-150">
               <button
                 onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}
-                className={
-                  '-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300 ' +
-                  (folder.collapsed ? 'opacity-0 group-hover:opacity-100' : 'opacity-100')
-                }
+                className="-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300"
                 aria-label={`${folder.collapsed ? 'Expand' : 'Collapse'} folder ${folder.name}`}
               >
                 {folder.collapsed ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
               </button>
               <div className={
-                'flex min-w-0 flex-1 items-center rounded px-[3px] group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
-                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-brand-500/10 text-neutral-100 ring-1 ring-brand-400/60 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
-              }>
+                'flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 group-hover:bg-highlight group-hover:text-neutral-200 ' +
+                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-highlight text-neutral-100 ring-1 ring-neutral-600 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
+              }
+              onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}>
                 <span className="min-w-0 flex-1 truncate px-0.5 font-medium" title={folder.name}>{folder.name}</span>
                 <button
-                  onClick={() => setNewChatContext({ mode: 'new', folderId: folder.id })}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setNewChatContext({ mode: 'new', folderId: folder.id })
+                  }}
                   className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
                   aria-label={`Create workspace in ${folder.name}`}
                   title="New workspace from chat"
@@ -767,13 +848,28 @@ export function WorkspaceSidebar({
                   <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
                 <button
-                  onClick={() => void openFolderCreate(folder.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void openFolderCreate(folder.id)
+                  }}
                   disabled={createFolder.isPending}
                   className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
                   aria-label={`Create folder in ${folder.name}`}
                   title="New folder"
                 >
                   <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void deleteFolder(folder)
+                  }}
+                  disabled={archiveFolder.isPending}
+                  className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
+                  aria-label={`Delete folder ${folder.name}`}
+                  title="Delete folder"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -785,8 +881,8 @@ export function WorkspaceSidebar({
     if (!workspace) return null
     const dndId = sidebarDndId('workspace', workspace.id)
     const editing = edit.editingId === workspace.id
-    const expanded = expandedWorkspaceIds.includes(workspace.id)
-    const active = workspace.id === ctx.workspace.id && (!ctx.uiState.activeAgentSessionId || !expanded)
+    const active = workspace.id === ctx.workspace.id
+    const showChatRollup = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
     return (
       <SortableSidebarRow
         key={dndId}
@@ -795,105 +891,247 @@ export function WorkspaceSidebar({
         active={activeDragId === dndId}
         guideDepths={row.ancestorFolderIds.map((_, index) => index)}
       >
-        <div className="relative mb-1">
-          {expanded && (
-            <span
-              className="pointer-events-none absolute bottom-0 left-[3.5px] top-[22px] border-l border-neutral-800/80"
-              aria-hidden="true"
-            />
-          )}
+        <div className="relative mb-0.5">
           <div className="group flex items-center gap-px text-neutral-400">
-          <button
-            className={
-              '-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300 ' +
-              (expanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')
-            }
-            title={expanded ? 'Collapse chats' : 'Expand chats'}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} chats for ${workspace.name}`}
-            onClick={() => setWorkspaceExpanded(workspace.id, !expanded)}
-          >
-            {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
-          </button>
-          <div className={
-            'flex min-w-0 flex-1 items-center rounded px-[3px] transition-colors group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
-            (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
-          }>
-          {editing ? (
-            <input
-              ref={inputRef}
-              value={edit.draft}
-              onChange={(e) => dispatchEdit({ type: 'change', draft: e.target.value })}
-              onBlur={() => void saveRename()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void saveRename()
-                if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
-              }}
-              className="min-w-0 flex-1 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
-              aria-label="Workspace name"
-            />
-          ) : (
-            <Link
-              to="/w/$workspaceId"
-              params={{ workspaceId: workspace.id }}
-              search={{ chat: undefined, tab: undefined }}
-              onDoubleClick={(e) => {
-                e.preventDefault()
-                dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
-              }}
-              className={
-                'min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium'
-              }
-              title={workspace.name}
-            >
-              {workspace.name}
-            </Link>
-          )}
-          {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && (
-            <WorkspaceAgentEnvProvider>
-              <WorkspaceSidebarChatCount workspaceId={workspace.id} />
-            </WorkspaceAgentEnvProvider>
-          )}
-          <button
-            onClick={() => setNewChatContext({ mode: 'existing', workspace })}
-            className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
-            aria-label={`Create chat in ${workspace.name}`}
-            title="New chat in workspace"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              void closeWorkspace(workspace.id, workspaces)
-            }}
-            className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
-            aria-label={`Close workspace ${workspace.name}`}
-            title="Close workspace"
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+            <span className="h-4 w-1 shrink-0" aria-hidden="true" />
+            <div className={
+              'relative flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 transition-colors group-hover:bg-highlight group-hover:text-neutral-200 ' +
+              (active ? 'bg-highlight text-neutral-100' : 'text-neutral-400')
+            }>
+              {editing ? (
+                <input
+                  ref={inputRef}
+                  value={edit.draft}
+                  onChange={(e) => dispatchEdit({ type: 'change', draft: e.target.value })}
+                  onBlur={() => void saveRename()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void saveRename()
+                    if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
+                  }}
+                  className="min-w-0 flex-1 rounded border border-neutral-600 bg-input px-2 py-1 text-xs text-neutral-100 outline-none"
+                  aria-label="Workspace name"
+                />
+              ) : (
+                <Link
+                  to="/w/$workspaceId"
+                  params={{ workspaceId: workspace.id }}
+                  search={{ chat: undefined, tab: undefined }}
+                  onDoubleClick={(e) => {
+                    e.preventDefault()
+                    dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
+                  }}
+                  className="min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium"
+                  title={workspace.name}
+                >
+                  {workspace.name}
+                </Link>
+              )}
+              {showChatRollup && (
+                <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-10">
+                  <WorkspaceAgentEnvProvider>
+                    <WorkspaceSidebarChatCount workspaceId={workspace.id} readVersion={chatReadVersion} />
+                  </WorkspaceAgentEnvProvider>
+                </span>
+              )}
+              <button
+                onClick={() => setNewChatContext({ mode: 'existing', workspace })}
+                className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                aria-label={`Create chat in ${workspace.name}`}
+                title="New chat in workspace"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setCleanupWorkspace(workspace)
+                }}
+                className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                aria-label={`Close workspace ${workspace.name}`}
+                title="Close workspace"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </div>
-        {expanded && ctx.localEnvTarget?.available && ctx.localEnvTarget.token ? (
-          <WorkspaceAgentEnvProvider>
-            <WorkspaceSidebarSessions
-              workspaceId={workspace.id}
-              activeWorkspaceId={ctx.workspace.id}
-              activeSessionId={ctx.uiState.activeAgentSessionId}
-              dispatchWorkspaceState={dispatchWorkspaceState}
-            />
-          </WorkspaceAgentEnvProvider>
-        ) : expanded && active ? (
-          <div className="px-6 py-1.5 text-[11px] text-neutral-600">Agent unavailable</div>
-        ) : null}
-      </div>
       </SortableSidebarRow>
     )
   }
 }
 
-function WorkspaceSidebarChatCount({ workspaceId }: { workspaceId: string }) {
+function WorkspaceCleanupModal({
+  workspace,
+  allWorkspaces,
+  resources,
+  onCancel,
+  onArchive,
+}: {
+  workspace: WorkspaceSummary
+  allWorkspaces: WorkspaceSummary[]
+  resources: WorkspaceResourceRecord[]
+  onCancel: () => void
+  onArchive: () => Promise<void>
+}) {
+  const envUtils = envTrpc.useUtils()
+  const { mutateAsync: disposeShellAsync } = envTrpc.shell.dispose.useMutation()
+  const { mutateAsync: deleteWorktreeAsync } = envTrpc.repo.deleteWorktree.useMutation()
+  const [cleanupRows, setCleanupRows] = useState<CleanupResourceRow[]>([])
+  const [loadingResources, setLoadingResources] = useState(true)
+  const [selectedCleanupIds, setSelectedCleanupIds] = useState<Set<string>>(() => new Set())
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const resourcesRef = useRef(resources)
+  const envUtilsRef = useRef(envUtils)
+  const disposeShellAsyncRef = useRef(disposeShellAsync)
+  const deleteWorktreeAsyncRef = useRef(deleteWorktreeAsync)
+  resourcesRef.current = resources
+  envUtilsRef.current = envUtils
+  disposeShellAsyncRef.current = disposeShellAsync
+  deleteWorktreeAsyncRef.current = deleteWorktreeAsync
+  const workspaceResources = useMemo(() => resources.filter((resource) => resource.workspaceId === workspace.id), [resources, workspace.id])
+  const workspaceResourceSignature = workspaceResources.map((resource) => `${resource.id}:${resource.type}:${resource.resourceKey}:${resource.shared}:${JSON.stringify(resource.data)}`).join('\0')
+  const listShells = useCallback(() => envUtilsRef.current.shell.list.fetch({ workspaceId: workspace.id }) as Promise<Array<{ id: string }>>, [workspace.id])
+  const cleanupShell = useCallback((id: string) => disposeShellAsyncRef.current({ id }), [])
+  const listWorktrees = useCallback(() => envUtilsRef.current.repo.listWorktrees.fetch() as Promise<Array<{ id: string; workingDir: string }>>, [])
+  const cleanupWorktree = useCallback((repoId: string) => deleteWorktreeAsyncRef.current({ repoId }), [])
+  const makeCleanupRegistry = useCallback(() => createWorkspaceResourceCleanupRegistry({
+    workspaceId: workspace.id,
+    resources: resourcesRef.current,
+    listShells,
+    disposeShell: cleanupShell,
+    listWorktrees,
+    deleteWorktree: cleanupWorktree,
+  }), [cleanupShell, cleanupWorktree, listShells, listWorktrees, workspace.id])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadRows() {
+      setLoadingResources(true)
+      try {
+        const next: CleanupResourceRow[] = []
+        const seen = new Set<string>()
+        const registry = makeCleanupRegistry()
+        const currentWorkspaceResources = resourcesRef.current.filter((resource) => resource.workspaceId === workspace.id)
+        for (const resource of currentWorkspaceResources) {
+          const handler = registry.handlerFor(resource.type)
+          if (!await handler.exists(resource)) continue
+          const row = handler.row(resource)
+          if (seen.has(row.id)) continue
+          seen.add(row.id)
+          next.push(row)
+        }
+        if (!cancelled) setCleanupRows(next)
+      } finally {
+        if (!cancelled) setLoadingResources(false)
+      }
+    }
+    void loadRows()
+    return () => {
+      cancelled = true
+    }
+  }, [makeCleanupRegistry, workspace.id, workspaceResourceSignature])
+
+  const cleanupableIds = cleanupRows.filter((row) => row.canCleanup).map((row) => row.id)
+
+  useEffect(() => {
+    setSelectedCleanupIds((current) => current.size === 0 ? new Set(cleanupableIds) : current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleanupableIds.join('\0')])
+
+  function toggleCleanup(resourceId: string) {
+    setSelectedCleanupIds((current) => {
+      const next = new Set(current)
+      if (next.has(resourceId)) next.delete(resourceId)
+      else next.add(resourceId)
+      return next
+    })
+  }
+
+  async function cleanResources(resourceIds: Set<string>) {
+    const registry = makeCleanupRegistry()
+    const currentWorkspaceResources = resourcesRef.current.filter((resource) => resource.workspaceId === workspace.id)
+    await Promise.all(currentWorkspaceResources.map(async (resource) => {
+      if (!resourceIds.has(resource.id)) return
+      const handler = registry.handlerFor(resource.type)
+      if (!await handler.exists(resource)) return
+      const row = handler.row(resource)
+      if (!row.canCleanup) return
+      await handler.cleanup(resource)
+    }))
+  }
+
+  async function archiveWithCleanup() {
+    setErr(null)
+    setBusy(true)
+    try {
+      await cleanResources(selectedCleanupIds)
+      await onArchive()
+    } catch (error) {
+      setErr(extractTrpcMessage(error))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-lg rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+        <div className="border-b border-neutral-800 px-4 py-3">
+          <div className="text-sm font-medium text-neutral-100">Archive workspace?</div>
+          <div className="mt-1 text-xs text-neutral-500">{workspace.name}</div>
+        </div>
+        <div className="space-y-3 px-4 py-3 text-xs text-neutral-300">
+          <p>Select resources to clean up before archiving.</p>
+          <div>
+            <div className="flex items-center justify-between border-b border-neutral-850 px-2 py-1.5 text-[11px] text-neutral-500">
+              <span>{cleanupRows.length} resource{cleanupRows.length === 1 ? '' : 's'}</span>
+              <span>{selectedCleanupIds.size} selected</span>
+            </div>
+            <div className="max-h-64 divide-y divide-neutral-900 overflow-y-auto">
+              {cleanupRows.length === 0 ? (
+                <div className="px-3 py-6 text-center text-neutral-600">No tracked resources.</div>
+              ) : cleanupRows.map((row) => (
+                <label key={row.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-neutral-900/60">
+                  <input
+                    type="checkbox"
+                    checked={selectedCleanupIds.has(row.id)}
+                    disabled={!row.canCleanup || busy}
+                    onChange={() => toggleCleanup(row.id)}
+                    className="h-3 w-3 shrink-0 accent-neutral-500 disabled:opacity-40"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="shrink-0 rounded bg-neutral-900 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500">{row.type}</span>
+                      <span className="truncate font-mono text-[11px] text-neutral-200">{row.label}</span>
+                    </div>
+                    {row.detail && <div className="truncate text-[10px] text-neutral-600">{row.detail}</div>}
+                  </div>
+                  {row.shared && <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-amber-200">shared</span>}
+                  {row.shared && (
+                    <span className={(row.orphan ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-neutral-700 bg-neutral-900 text-neutral-500') + ' shrink-0 rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide'}>
+                      {row.orphan ? 'orphan' : 'in use'}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+          {allWorkspaces.length <= 1 && <div className="text-neutral-500">This is the last active workspace.</div>}
+          {err && <div className="rounded border border-red-900 bg-red-950/50 px-2 py-1 text-red-300">{err}</div>}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-neutral-800 px-4 py-3">
+          <button type="button" onClick={onCancel} disabled={busy} className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-60">Cancel</button>
+          <button type="button" onClick={() => void archiveWithCleanup()} disabled={busy || loadingResources} className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
+            {busy ? 'Archiving…' : 'Archive and cleanup'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceSidebarChatCount({ workspaceId, readVersion: _readVersion }: { workspaceId: string; readVersion: number }) {
   const summary = envTrpc.agent.workspaceChatSummary.useQuery({ workspaceIds: [workspaceId] }, { refetchInterval: 5_000 })
   const row = (summary.data ?? [])[0]
   if (!row) return null
@@ -910,10 +1148,102 @@ function WorkspaceSidebarChatCount({ workspaceId }: { workspaceId: string }) {
   return (
     <span className="flex shrink-0 items-center gap-1">
       {row.chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{row.chatCount}</span>}
-      {glyph === '.' && <span className="h-1.5 w-1.5 rounded-full bg-brand-400" aria-label="New chat response" />}
-      {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-brand-400 border-t-transparent" aria-label="Chat running" />}
+      {glyph === '.' && <span className="h-1 w-1 rounded-full bg-running" aria-label="New chat response" />}
+      {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-running border-t-transparent" aria-label="Chat running" />}
       {glyph === '!' && <span className="w-3 text-center text-[10px] font-semibold text-amber-300" aria-label="Chat needs attention">!</span>}
     </span>
+  )
+}
+
+function WorkspaceSidebarNotifications({
+  workspaceNames,
+  activeWorkspaceId,
+  activeSessionId,
+  dispatchWorkspaceState,
+}: {
+  workspaceNames: Map<string, string>
+  activeWorkspaceId: string
+  activeSessionId: string | null
+  dispatchWorkspaceState: WorkspaceUiDispatch
+}) {
+  const navigate = useNavigate()
+  const notifications = useAgentNotificationsStore()
+  const activeNotificationIds = notifications.records
+    .filter((notification) => notification.sessionId === activeSessionId)
+    .map((notification) => notification.id)
+    .join('\0')
+  const rows = notifications.records.filter((notification) => notification.sessionId !== activeSessionId)
+
+  useEffect(() => {
+    if (activeSessionId && activeNotificationIds) void notifications.dismissForSession(activeSessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, activeNotificationIds])
+
+  async function openNotification(notification: AgentNotificationRecord) {
+    notifications.dismiss(notification.id)
+    if (notification.workspaceId === activeWorkspaceId) {
+      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: notification.sessionId })
+    }
+    await navigate({
+      to: '/w/$workspaceId',
+      params: { workspaceId: notification.workspaceId },
+      search: { chat: notification.sessionId, tab: undefined },
+    })
+  }
+
+  function clearNotifications() {
+    for (const notification of rows) notifications.dismiss(notification.id)
+  }
+
+  if (rows.length === 0) return null
+  return (
+    <div className="mt-3 pt-2">
+      <div className="flex items-center justify-between gap-2 px-1.5 pb-1">
+        <div className="text-[0.64em] font-medium uppercase tracking-wide text-neutral-600">Notifications</div>
+        <button
+          type="button"
+          onClick={clearNotifications}
+          className="rounded px-1 py-0.5 text-[0.64em] text-neutral-600 hover:bg-neutral-900 hover:text-neutral-300"
+        >
+          Clear
+        </button>
+      </div>
+      <div className="-mx-2 divide-y divide-neutral-900 border-y border-neutral-900">
+        {rows.map((notification) => {
+          const workspaceName = workspaceNames.get(notification.workspaceId) ?? null
+          return (
+            <div
+              key={notification.id}
+              className="group relative flex cursor-pointer items-start gap-1 px-2 py-1.5"
+            >
+              <span className="absolute inset-y-0 right-0 w-0.5 bg-running" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={() => void openNotification(notification)}
+                className="min-w-0 flex-1 px-1.5 text-left"
+                title={`${workspaceName ?? 'Unknown workspace'} · ${notification.title} · ${new Date(notification.createdAt).toLocaleString()}`}
+              >
+                <div className="flex min-w-0 items-baseline gap-1.5 text-[0.74em] leading-snug">
+                  <span className="truncate font-medium text-neutral-400">{workspaceName ?? 'Unknown workspace'}</span>
+                  <span className="shrink-0 text-neutral-700">·</span>
+                  <span className="truncate text-neutral-400/75">{notification.title}</span>
+                </div>
+                <div className="mt-1.5 line-clamp-2 text-[0.64em] leading-snug text-neutral-500">{notification.summary}</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => notifications.dismiss(notification.id)}
+                className="mt-0.5 rounded p-0.5 text-neutral-700 opacity-0 hover:bg-neutral-900 hover:text-neutral-300 group-hover:opacity-100"
+                aria-label={`Dismiss notification ${notification.title}`}
+                title="Dismiss notification"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -1005,6 +1335,25 @@ function findSidebarFolder(nodes: WorkspaceSidebarNode[], id: string): Workspace
     if (child) return child
   }
   return null
+}
+
+function findSidebarFolderNode(nodes: WorkspaceSidebarNode[], id: string): Extract<WorkspaceSidebarNode, { type: 'folder' }> | null {
+  for (const node of nodes) {
+    if (node.type !== 'folder') continue
+    if (node.folder.id === id) return node
+    const child = findSidebarFolderNode(node.children, id)
+    if (child) return child
+  }
+  return null
+}
+
+function countWorkspacesInSidebarNodes(nodes: WorkspaceSidebarNode[]): number {
+  let count = 0
+  for (const node of nodes) {
+    if (node.type === 'workspace') count++
+    else count += countWorkspacesInSidebarNodes(node.children)
+  }
+  return count
 }
 
 function findSidebarWorkspace(nodes: WorkspaceSidebarNode[], id: string): WorkspaceSummary | null {
@@ -1155,138 +1504,6 @@ function markWorkspaceChatsRead(workspaceId: string) {
   }
 }
 
-function WorkspaceSidebarNewChatButton({
-  workspaceId,
-  onCreated,
-}: {
-  workspaceId: string
-  onCreated: (sessionId: string) => void | Promise<void>
-}) {
-  const queryClient = useQueryClient()
-  const ctx = useWorkspaceContext()
-  const target = ctx.localEnvTarget
-  return (
-    <div className="opacity-0 transition-opacity group-hover:opacity-100">
-      <NewSessionPopover
-        workspaceId={workspaceId}
-        onOpenNewChat={target?.token ? async () => {
-          await openNewAgentChatOverlay({ workspaceId, env: target.env, envToken: target.token! })
-        } : undefined}
-        onCreated={async (sessionId) => {
-          await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId }) })
-          await onCreated(sessionId)
-        }}
-        label="+"
-      />
-    </div>
-  )
-}
-
-function WorkspaceSidebarSessions({
-  workspaceId,
-  activeWorkspaceId,
-  activeSessionId,
-  dispatchWorkspaceState,
-}: {
-  workspaceId: string
-  activeWorkspaceId: string
-  activeSessionId: string | null
-  dispatchWorkspaceState: WorkspaceUiDispatch
-}) {
-  const navigate = useNavigate()
-  const sessions = envTrpc.agent.sessionList.useQuery({ workspaceId }, { refetchInterval: 5_000 })
-  const rows = useMemo(() => {
-    return ((sessions.data ?? []) as SessionSummary[]).filter((session) => session.status !== 'archived')
-  }, [sessions.data])
-  const sessionIds = useMemo(() => rows.map((session) => session.id), [rows])
-  useRetainChatSessions(sessionIds)
-
-  async function selectSession(sessionId: string) {
-    if (workspaceId === activeWorkspaceId) {
-      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
-      await navigate({
-        to: '/w/$workspaceId',
-        params: { workspaceId },
-        search: { chat: sessionId, tab: undefined },
-      })
-      return
-    }
-    await navigate({
-      to: '/w/$workspaceId',
-      params: { workspaceId },
-      search: { chat: sessionId, tab: undefined },
-    })
-  }
-
-  if (sessions.isLoading) {
-    return <div className="px-2 py-1.5 text-[11px] text-neutral-600">Loading chats…</div>
-  }
-
-  return (
-    <div className="mt-1 space-y-0.5 pl-2">
-      {rows.length === 0 ? (
-        <div className="px-2 py-1 text-[11px] text-neutral-600">No chats</div>
-      ) : (
-        rows.map((session) => (
-          <WorkspaceSidebarSessionRow
-            key={session.id}
-            session={session}
-            selected={workspaceId === activeWorkspaceId && session.id === activeSessionId}
-            onSelect={() => void selectSession(session.id)}
-          />
-        ))
-      )}
-    </div>
-  )
-}
-
-function WorkspaceSidebarSessionRow({
-  session,
-  selected,
-  onSelect,
-}: {
-  session: SessionSummary
-  selected: boolean
-  onSelect: () => void
-}) {
-  const chat = useChatSession(session.id)
-  const running = chat.running || Boolean(chat.status?.running)
-  const [wasRunning, setWasRunning] = useState(running)
-  const [unreadFinished, setUnreadFinished] = useState(false)
-  const label = session.title ?? session.id.slice(-6)
-
-  useEffect(() => {
-    if (selected) setUnreadFinished(false)
-  }, [selected])
-
-  useEffect(() => {
-    if (wasRunning && !running && !selected) setUnreadFinished(true)
-    setWasRunning(running)
-  }, [running, selected, wasRunning])
-
-  return (
-    <button
-      onClick={onSelect}
-      className={
-        'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[11px] transition-colors ' +
-        (selected ? 'bg-brand-500/15 text-neutral-100' : 'text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200')
-      }
-      title={`${label} · ${new Date(session.lastActivityAt).toLocaleString()}`}
-    >
-      <span className="flex h-3 w-3 shrink-0 items-center justify-center">
-        {running ? (
-          <span className="h-2.5 w-2.5 animate-spin rounded-full border border-brand-400 border-t-transparent" />
-        ) : unreadFinished ? (
-          <span className="h-2 w-2 rounded-full bg-brand-400" />
-        ) : (
-          <span className="h-1.5 w-1.5 rounded-full bg-neutral-700" />
-        )}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
-  )
-}
-
 function WorkspaceAgentPane({
   collapsed,
   onToggleCollapsed,
@@ -1324,12 +1541,6 @@ function WorkspaceAgentPane({
       {collapseButton}
     </div>
   )
-  const agentFooterTrailing = (
-    <WorkspaceEnvTargetProvider>
-      <ShellsDropdown align="right" side="top" workspaceId={ctx.workspace.id} onOpen={(content) => openPane(content)} />
-    </WorkspaceEnvTargetProvider>
-  )
-
   if (!ctx.localEnvTarget?.available) {
     return (
       <AgentPaneFrame>
@@ -1358,7 +1569,6 @@ function WorkspaceAgentPane({
           onOpenPane={openPane}
           onOpenPaneRefreshHint={refreshWorkspacePanes}
           headerTrailing={agentHeaderTrailing}
-          footerTrailing={agentFooterTrailing}
           onOpenNewChat={() =>
             openNewAgentChatOverlay({
               workspaceId: ctx.workspace.id,
@@ -1473,6 +1683,7 @@ function WorkspaceTabPane({
 
   useEffect(() => {
     return browserApi.onWindowTabCreated((event) => {
+      if (event.presentation === 'popup') return
       if (!event.openerBrowserTabId) return
       const openedFromThisWorkspace = tabsRef.current.some(
         (tab) => tab.type === 'browser' && tab.browserTabId === event.openerBrowserTabId,
@@ -1503,18 +1714,34 @@ function WorkspaceTabPane({
     label: tab.title,
     title: workspaceTabLabel(tab),
   }))
+  const canUseEnvTabs = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-neutral-975" aria-label="Workspace Tabs">
+      <WorkspaceEnvTargetProvider>
+        <WorkspaceShellTabTitleSync tabs={ctx.uiState.workspaceTabs} dispatchWorkspaceState={dispatchWorkspaceState} />
+      </WorkspaceEnvTargetProvider>
       <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
-        <BorderedTabStrip
-          items={tabItems}
-          activeId={ctx.uiState.activeWorkspaceTabId}
-          onSelect={(tabId) => dispatchWorkspaceState({ type: 'activateTab', tabId })}
-          onClose={(tabId) => {
-            const tab = ctx.uiState.workspaceTabs.find((candidate) => candidate.id === tabId)
-            if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
-          }}
-        />
+        {canUseEnvTabs ? (
+          <WorkspaceEnvTargetProvider>
+            <WorkspaceShellTabStrip
+              items={tabItems}
+              tabs={ctx.uiState.workspaceTabs}
+              activeId={ctx.uiState.activeWorkspaceTabId}
+              workspaceId={ctx.workspace.id}
+              dispatchWorkspaceState={dispatchWorkspaceState}
+            />
+          </WorkspaceEnvTargetProvider>
+        ) : (
+          <BorderedTabStrip
+            items={tabItems}
+            activeId={ctx.uiState.activeWorkspaceTabId}
+            onSelect={(tabId) => dispatchWorkspaceState({ type: 'activateTab', tabId })}
+            onClose={(tabId) => {
+              const tab = ctx.uiState.workspaceTabs.find((candidate) => candidate.id === tabId)
+              if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
+            }}
+          />
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden text-neutral-500">
         {unavailableReason ? (
@@ -1536,6 +1763,9 @@ function WorkspaceTabPane({
             onBrowserTabId={(browserTabId) =>
               dispatchWorkspaceState({ type: 'setBrowserTabId', tabId: activeTab.id, browserTabId })
             }
+            onUrlChange={(url) =>
+              dispatchWorkspaceState({ type: 'setTabUrl', tabId: activeTab.id, url })
+            }
             onTitleChange={(title) =>
               dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
             }
@@ -1546,6 +1776,99 @@ function WorkspaceTabPane({
       </div>
     </section>
   )
+}
+
+function WorkspaceShellTabStrip({
+  items,
+  tabs,
+  activeId,
+  workspaceId,
+  dispatchWorkspaceState,
+}: {
+  items: BorderedTabItem[]
+  tabs: WorkspaceTab[]
+  activeId: string | null
+  workspaceId: string
+  dispatchWorkspaceState: WorkspaceUiDispatch
+}) {
+  const queryClient = useQueryClient()
+  const disposeShell = envTrpc.shell.dispose.useMutation()
+  const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
+  const contextTab = contextMenu ? tabs.find((tab) => tab.id === contextMenu.tabId) : undefined
+
+  return (
+    <div className="relative flex min-w-0 flex-1" onClick={() => setContextMenu(null)}>
+      <BorderedTabStrip
+        items={items}
+        activeId={activeId}
+        onSelect={(tabId) => dispatchWorkspaceState({ type: 'activateTab', tabId })}
+        onClose={(tabId) => {
+          const tab = tabs.find((candidate) => candidate.id === tabId)
+          if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
+        }}
+        onContextMenu={(tabId, event) => {
+          const tab = tabs.find((candidate) => candidate.id === tabId)
+          if (tab?.type !== 'shell') return
+          event.preventDefault()
+          setContextMenu({ tabId, x: event.clientX, y: event.clientY })
+        }}
+      />
+      {contextMenu && contextTab?.type === 'shell' && (
+        <>
+          <button
+            className="fixed inset-0 z-40 cursor-default"
+            aria-label="Close tab menu"
+            onClick={() => setContextMenu(null)}
+          />
+          <div
+            className="fixed z-50 w-44 rounded border border-neutral-800 bg-neutral-975 shadow-lg"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            role="menu"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                void (async () => {
+                  await disposeShell.mutateAsync({ id: contextTab.shellId })
+                  await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', { workspaceId }) })
+                  closeWorkspaceTab(contextTab, dispatchWorkspaceState)
+                  setContextMenu(null)
+                })()
+              }}
+              disabled={disposeShell.isPending}
+              className="block w-full px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-900 disabled:opacity-50"
+              role="menuitem"
+            >
+              Terminate shell
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function WorkspaceShellTabTitleSync({
+  tabs,
+  dispatchWorkspaceState,
+}: {
+  tabs: WorkspaceTab[]
+  dispatchWorkspaceState: WorkspaceUiDispatch
+}) {
+  const ctx = useWorkspaceContext()
+  const shells = envTrpc.shell.list.useQuery({ workspaceId: ctx.workspace.id }, { refetchInterval: 5_000 })
+
+  useEffect(() => {
+    if (!shells.data) return
+    const shellTitles = new Map((shells.data as Array<{ id: string; title?: string | null }>).map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-8)}`]))
+    for (const tab of tabs) {
+      if (tab.type !== 'shell' || tab.titleSource === 'explicit') continue
+      const title = shellTitles.get(tab.shellId)
+      if (title && title !== tab.title) dispatchWorkspaceState({ type: 'setTabAutoTitle', tabId: tab.id, title })
+    }
+  }, [dispatchWorkspaceState, shells.data, tabs])
+
+  return null
 }
 
 function workspaceTabLabel(tab: WorkspaceTab): string {
@@ -1561,6 +1884,7 @@ function WorkspaceTabContent({
   fileEditorState,
   onFileEditorStateChange,
   onBrowserTabId,
+  onUrlChange,
   onTitleChange,
 }: {
   tab: WorkspaceTab
@@ -1568,6 +1892,7 @@ function WorkspaceTabContent({
   fileEditorState?: FileEditorState
   onFileEditorStateChange?: (editorState: FileEditorState) => void
   onBrowserTabId: (browserTabId: string) => void
+  onUrlChange: (url: string) => void
   onTitleChange: (title: string) => void
 }) {
   const ctx = useWorkspaceContext()
@@ -1575,7 +1900,7 @@ function WorkspaceTabContent({
     return (
       <div className="h-full min-h-0 w-full">
         <WorkspaceEnvTargetProvider>
-          <ShellTabContent shellId={tab.shellId} workspaceId={ctx.workspace.id} onTerminated={onClose} />
+          <ShellTabContent shellId={tab.shellId} workspaceId={ctx.workspace.id} />
         </WorkspaceEnvTargetProvider>
       </div>
     )
@@ -1603,6 +1928,7 @@ function WorkspaceTabContent({
           browserTabId={tab.browserTabId}
           active
           onBrowserTabId={onBrowserTabId}
+          onUrlChange={onUrlChange}
           onTitleChange={onTitleChange}
           closeOnUnmount={false}
         />
@@ -1636,7 +1962,7 @@ function WorkspaceError({ message }: { message: string }) {
     <div className="min-h-screen bg-neutral-950 p-8 text-neutral-100">
       <div className="text-red-400">{message}</div>
       <div className="mt-4">
-        <Link to="/" className="text-brand-500 hover:underline">
+        <Link to="/" className="text-neutral-200 hover:underline">
           Back to workspace
         </Link>
       </div>

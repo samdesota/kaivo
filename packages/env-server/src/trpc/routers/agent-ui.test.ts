@@ -88,13 +88,13 @@ describe('agentUi.openPane', () => {
 
     await expect(caller.openPane({
       opencodeSessionId: 'oc-1',
-      content: { type: 'preview', port: 5173 },
+      content: { type: 'browser', url: 'http://127.0.0.1:5173' },
     })).resolves.toEqual({ ok: true })
 
     expect(openPaneMock).toHaveBeenCalledWith({
       workspaceId: 'workspace-1',
       envId: 'local-default',
-      content: { type: 'preview', port: 5173 },
+      content: { type: 'browser', url: 'http://127.0.0.1:5173' },
       title: undefined,
       activate: undefined,
     })
@@ -124,7 +124,7 @@ describe('agentUi.openPane', () => {
 
     await expect(caller.openPane({
       opencodeSessionId: 'oc-1',
-      content: { type: 'preview', port: 5173 },
+      content: { type: 'browser', url: 'http://127.0.0.1:5173' },
     })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     expect(openPaneMock).not.toHaveBeenCalled()
   })

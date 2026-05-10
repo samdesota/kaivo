@@ -35,6 +35,7 @@ let rect = { x: 10, y: 20, width: 300, height: 200 }
 describe('BrowserPane', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    api.onTabChange.mockReturnValue(() => undefined)
     api.isAvailable.mockReturnValue(true)
     api.getAgentConnections.mockResolvedValue({ browserTabIds: [] })
     rect = { x: 10, y: 20, width: 300, height: 200 }
@@ -155,6 +156,59 @@ describe('BrowserPane', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(api.attachTab).toHaveBeenCalledTimes(1)
     expect(api.focusTab).toHaveBeenCalledTimes(1)
+    expect(api.navigate).not.toHaveBeenCalled()
+    expect(api.reload).not.toHaveBeenCalled()
+  })
+
+  it('reports native URL changes without navigating on prop sync', async () => {
+    let onChange: ((event: { browserTabId: string; patch: Record<string, unknown> }) => void) | undefined
+    api.onTabChange.mockImplementation((handler) => {
+      onChange = handler
+      return () => undefined
+    })
+    const onUrlChange = vi.fn()
+    const onTitleChange = vi.fn()
+    const view = render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        onUrlChange={onUrlChange}
+        onTitleChange={onTitleChange}
+      />,
+    )
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalledWith({
+      paneId: 'pane-1',
+      browserTabId: 'native-tab-1',
+    }))
+
+    act(() => {
+      onChange?.({
+        browserTabId: 'native-tab-1',
+        patch: { url: 'https://example.org/docs', title: 'Docs' },
+      })
+    })
+
+    expect(onUrlChange).toHaveBeenCalledWith('https://example.org/docs')
+    expect(onTitleChange).toHaveBeenCalledWith('Docs')
+    expect((view.getByLabelText('URL') as HTMLInputElement).value).toBe('https://example.org/docs')
+
+    view.rerender(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.org/docs"
+        active={true}
+        onUrlChange={onUrlChange}
+        onTitleChange={onTitleChange}
+      />,
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(api.navigate).not.toHaveBeenCalled()
+    expect(api.reload).not.toHaveBeenCalled()
   })
 
   it('replaces a persisted native tab id when the desktop app restarted without that tab', async () => {

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
+import { trpc } from '../../../trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { type PaneContent } from './tab-state'
@@ -18,6 +19,7 @@ interface ShellRow {
   id: string
   cwd: string
   ownerKind?: string
+  title?: string | null
 }
 interface PortRow {
   port: number
@@ -60,7 +62,24 @@ export function CommandPalette({
     if (open) {
       setQuery('')
       setActive(0)
-      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+  }, [open])
+
+  useLayoutEffect(() => {
+    if (!open) return
+
+    const focusInput = () => {
+      window.focus()
+      inputRef.current?.focus()
+    }
+    focusInput()
+    const frame = requestAnimationFrame(focusInput)
+    const shortRetry = window.setTimeout(focusInput, 25)
+    const attachRetry = window.setTimeout(focusInput, 100)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(shortRetry)
+      window.clearTimeout(attachRetry)
     }
   }, [open])
 
@@ -75,6 +94,7 @@ export function CommandPalette({
   })
   const queryClient = useQueryClient()
   const createShell = envTrpc.shell.create.useMutation()
+  const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
   const createShellAsync = createShell.mutateAsync
   const sessions = envTrpc.agent.sessionList.useQuery(workspaceInput, {
     enabled: open,
@@ -100,6 +120,17 @@ export function CommandPalette({
           const info = (await createShellAsync(
             { ...workspaceInput, ...(activeCwd ? { cwd: activeCwd } : {}) },
           )) as ShellCreateResult
+          if (workspaceId) {
+            await upsertWorkspaceResource.mutateAsync({
+              workspaceId,
+              resource: {
+                type: 'shell',
+                resourceKey: info.id,
+                shared: false,
+                data: { shellId: info.id, cwd: activeCwd, ownerKind: 'human' },
+              },
+            })
+          }
           await queryClient.invalidateQueries({ queryKey: trpcQueryKey('shell.list', workspaceInput) })
           onOpenContent({ type: 'shell', shellId: info.id })
         } catch (e) {
@@ -126,12 +157,13 @@ export function CommandPalette({
     }
 
     for (const s of (shells.data as ShellRow[] | undefined) ?? []) {
+      const label = s.title || `shell ${s.id.slice(-8)}`
       out.push({
         id: `shell:${s.id}`,
-        label: `shell ${s.id.slice(-8)}`,
+        label,
         detail: `cwd ${s.cwd}${s.ownerKind === 'agent' ? ' · agent' : ''}`,
         kind: 'shell',
-        haystack: `shell ${s.id} ${s.cwd}`,
+        haystack: `shell ${s.id} ${label} ${s.cwd}`,
         run: () => onOpenContent({ type: 'shell', shellId: s.id }),
       })
     }
@@ -190,6 +222,7 @@ export function CommandPalette({
       >
         <input
           ref={inputRef}
+          autoFocus
           type="text"
           value={query}
           onChange={(e) => {
@@ -212,7 +245,7 @@ export function CommandPalette({
             }
           }}
           placeholder="Search shells, previews, actions…"
-          className="w-full border-b border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none"
+          className="w-full border-b border-neutral-800 bg-input px-4 py-3 text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none"
         />
         <ul className="max-h-[50vh] overflow-y-auto py-1">
           {filtered.length === 0 ? (
@@ -258,7 +291,7 @@ function KindBadge({ kind }: { kind: PaletteItem['kind'] }) {
       ? 'border-emerald-700 text-emerald-400'
       : kind === 'preview'
         ? 'border-sky-700 text-sky-400'
-        : 'border-brand-500/40 text-brand-400'
+        : 'border-neutral-700 text-neutral-300'
   return (
     <span
       className={`inline-block rounded border px-1 py-[1px] text-[9px] uppercase tracking-wide ${cls}`}

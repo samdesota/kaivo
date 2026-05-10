@@ -3,6 +3,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 
 const nowMs = "(unixepoch() * 1000)"
+const realtimeNotifyFunction = 'cc_realtime_notify'
 
 const localSchemaSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -76,6 +77,7 @@ CREATE TABLE IF NOT EXISTS workspace_tabs (
   id TEXT NOT NULL,
   type TEXT NOT NULL,
   title TEXT NOT NULL,
+  title_source TEXT,
   position INTEGER NOT NULL,
   env_id TEXT,
   shell_id TEXT,
@@ -95,6 +97,35 @@ CREATE TABLE IF NOT EXISTS workspace_agent_tabs (
   updated_at INTEGER NOT NULL DEFAULT ${nowMs},
   PRIMARY KEY (workspace_id, session_id)
 );
+
+CREATE TABLE IF NOT EXISTS workspace_resources (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  resource_key TEXT NOT NULL,
+  shared INTEGER NOT NULL DEFAULT 0,
+  data TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT ${nowMs},
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+);
+
+CREATE INDEX IF NOT EXISTS workspace_resources_workspace_idx
+  ON workspace_resources(workspace_id);
+CREATE INDEX IF NOT EXISTS workspace_resources_resource_idx
+  ON workspace_resources(type, resource_key);
+
+CREATE TABLE IF NOT EXISTS agent_notifications (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'finished',
+  title TEXT NOT NULL DEFAULT 'Chat finished',
+  summary TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT ${nowMs}
+);
+
+CREATE INDEX IF NOT EXISTS agent_notifications_workspace_created_idx
+  ON agent_notifications(workspace_id, created_at);
 
 CREATE TABLE IF NOT EXISTS sandboxes (
   id TEXT PRIMARY KEY,
@@ -279,6 +310,10 @@ function columnExists(sqlite: Database.Database, table: string, column: string):
   return rows.some((row) => row.name === column)
 }
 
+function installMigrationRealtimeNotifyNoop(sqlite: Database.Database): void {
+  sqlite.function(realtimeNotifyFunction, () => null)
+}
+
 function normalizeLegacyUiState(raw: unknown) {
   const state = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const workspaceTabs = Array.isArray(state.workspaceTabs) ? state.workspaceTabs : []
@@ -312,6 +347,7 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
       id TEXT NOT NULL,
       type TEXT NOT NULL,
       title TEXT NOT NULL,
+      title_source TEXT,
       position INTEGER NOT NULL,
       env_id TEXT,
       shell_id TEXT,
@@ -353,8 +389,8 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
   const deleteTabs = sqlite.prepare('DELETE FROM workspace_tabs WHERE workspace_id = ?')
   const insertTab = sqlite.prepare(`
     INSERT INTO workspace_tabs (
-      workspace_id, id, type, title, position, env_id, shell_id, path, session_id, port, url, browser_tab_id, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      workspace_id, id, type, title, title_source, position, env_id, shell_id, path, session_id, port, url, browser_tab_id, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   for (const row of rows) {
@@ -383,6 +419,7 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
         t.id,
         t.type,
         typeof t.title === 'string' ? t.title : t.id,
+        t.type === 'shell' && t.titleSource === 'explicit' ? 'explicit' : t.type === 'shell' ? 'auto' : null,
         position,
         typeof t.envId === 'string' ? t.envId : null,
         typeof t.shellId === 'string' ? t.shellId : null,
@@ -397,6 +434,14 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
   }
 }
 
+function migrateWorkspaceTabTitleSource(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'workspace_tabs')) migrateWorkspaceUiStateBlob(sqlite)
+  if (!columnExists(sqlite, 'workspace_tabs', 'title_source')) {
+    sqlite.exec('ALTER TABLE workspace_tabs ADD COLUMN title_source TEXT')
+  }
+  sqlite.prepare("UPDATE workspace_tabs SET title_source = 'auto' WHERE type = 'shell' AND title_source IS NULL").run()
+}
+
 function migrateWorkspaceAgentTabs(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS workspace_agent_tabs (
@@ -406,6 +451,61 @@ function migrateWorkspaceAgentTabs(sqlite: Database.Database) {
       updated_at INTEGER NOT NULL DEFAULT ${nowMs},
       PRIMARY KEY (workspace_id, session_id)
     );
+  `)
+}
+
+function migrateAgentNotifications(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS agent_notifications (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'finished',
+      title TEXT NOT NULL DEFAULT 'Chat finished',
+      summary TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+    CREATE INDEX IF NOT EXISTS agent_notifications_workspace_created_idx
+      ON agent_notifications(workspace_id, created_at);
+  `)
+  if (!columnExists(sqlite, 'agent_notifications', 'title')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN title TEXT NOT NULL DEFAULT 'Chat finished'")
+  }
+  if (!columnExists(sqlite, 'agent_notifications', 'kind')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'finished'")
+  }
+}
+
+function migrateAgentNotificationTitles(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'agent_notifications')) migrateAgentNotifications(sqlite)
+  if (!columnExists(sqlite, 'agent_notifications', 'title')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN title TEXT NOT NULL DEFAULT 'Chat finished'")
+  }
+}
+
+function migrateAgentNotificationKinds(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'agent_notifications')) migrateAgentNotifications(sqlite)
+  if (!columnExists(sqlite, 'agent_notifications', 'kind')) {
+    sqlite.exec("ALTER TABLE agent_notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'finished'")
+  }
+}
+
+function migrateWorkspaceResources(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_resources (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      resource_key TEXT NOT NULL,
+      shared INTEGER NOT NULL DEFAULT 0,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT ${nowMs},
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+    CREATE INDEX IF NOT EXISTS workspace_resources_workspace_idx
+      ON workspace_resources(workspace_id);
+    CREATE INDEX IF NOT EXISTS workspace_resources_resource_idx
+      ON workspace_resources(type, resource_key);
   `)
 }
 
@@ -455,6 +555,7 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
   try {
     sqlite.pragma('journal_mode = WAL')
     sqlite.pragma('foreign_keys = ON')
+    installMigrationRealtimeNotifyNoop(sqlite)
     const hasMigrations = tableExists(sqlite, 'schema_migrations')
     const migrationName = '0001_local_app_schema'
     const migrationAlreadyApplied =
@@ -504,6 +605,66 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(workspaceFoldersMigrationName)
     }
 
+    const agentNotificationsMigrationName = '0005_agent_notifications'
+    const agentNotificationsMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(agentNotificationsMigrationName)
+    if (!agentNotificationsMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateAgentNotifications(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationsMigrationName)
+      })()
+      applied.push(agentNotificationsMigrationName)
+    }
+
+    const agentNotificationTitlesMigrationName = '0006_agent_notification_titles'
+    const agentNotificationTitlesMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(agentNotificationTitlesMigrationName)
+    if (!agentNotificationTitlesMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateAgentNotificationTitles(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationTitlesMigrationName)
+      })()
+      applied.push(agentNotificationTitlesMigrationName)
+    }
+
+    const agentNotificationKindsMigrationName = '0007_agent_notification_kinds'
+    const agentNotificationKindsMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(agentNotificationKindsMigrationName)
+    if (!agentNotificationKindsMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateAgentNotificationKinds(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationKindsMigrationName)
+      })()
+      applied.push(agentNotificationKindsMigrationName)
+    }
+
+    const workspaceResourcesMigrationName = '0008_workspace_resources'
+    const workspaceResourcesMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceResourcesMigrationName)
+    if (!workspaceResourcesMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceResources(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceResourcesMigrationName)
+      })()
+      applied.push(workspaceResourcesMigrationName)
+    }
+
+    const workspaceTabTitleSourceMigrationName = '0009_workspace_tab_title_source'
+    const workspaceTabTitleSourceMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceTabTitleSourceMigrationName)
+    if (!workspaceTabTitleSourceMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceTabTitleSource(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceTabTitleSourceMigrationName)
+      })()
+      applied.push(workspaceTabTitleSourceMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -520,6 +681,8 @@ export const localAppTables = [
   'workspace_view_states',
   'workspace_tabs',
   'workspace_agent_tabs',
+  'workspace_resources',
+  'agent_notifications',
   'sandboxes',
   'github_install',
   'github_token_cache',

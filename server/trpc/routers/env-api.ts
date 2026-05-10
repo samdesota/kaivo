@@ -54,6 +54,40 @@ export const envApiRouter = router({
       }
     }),
 
+  createAgentNotification: identityProcedure
+    .input(z.object({
+      workspaceId: z.string().min(1),
+      sessionId: z.string().min(1),
+      kind: z.enum(['finished', 'question', 'permission', 'error']).optional(),
+      title: z.string().min(1).max(120),
+      summary: z.string().min(1).max(120),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.createAgentNotification(input)
+      } catch (err) {
+        throw toWorkspaceTrpcError(err)
+      }
+    }),
+
+  upsertWorkspaceResource: identityProcedure
+    .input(z.object({
+      workspaceId: z.string().min(1),
+      resource: z.object({
+        type: z.enum(['browser_tab', 'worktree', 'shell', 'other']),
+        resourceKey: z.string().min(1).max(1_000),
+        shared: z.boolean().optional(),
+        data: z.record(z.unknown()).optional(),
+      }),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workspaceService.upsertResource(input.workspaceId, input.resource)
+      } catch (err) {
+        throw toWorkspaceTrpcError(err)
+      }
+    }),
+
   listRepoConfigs: identityProcedure.query(async () => {
     return repoConfigService.list()
   }),

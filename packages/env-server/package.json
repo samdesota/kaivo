@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/main.js",
   "bin": {
-    "cc-env": "dist/main.js"
+    "cc-env": "dist/main.js",
+    "cc-terminal-daemon": "dist/terminal-daemon.js"
   },
   "scripts": {
     "build": "tsup",

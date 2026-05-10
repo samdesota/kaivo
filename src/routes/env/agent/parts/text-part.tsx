@@ -18,14 +18,14 @@ export function TextPart({
 
   if (!isAssistant) {
     return (
-      <div className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-300">
+      <div className="whitespace-pre-wrap text-sm leading-relaxed text-content-default">
         {text}
       </div>
     )
   }
 
   return (
-    <div className="prose-agent text-sm leading-relaxed text-neutral-100">
+    <div className="prose-agent text-sm leading-relaxed text-content-strong">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={createMarkdownComponents(onOpenBrowserPane)}>
         {text}
       </ReactMarkdown>
@@ -67,19 +67,19 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
       <p className="my-1.5 first:mt-0 last:mb-0">{p.children}</p>
     ),
     h1: (p: { children?: ReactNode }) => (
-      <h1 className="mt-3 mb-1.5 text-base font-semibold text-neutral-100">{p.children}</h1>
+      <h1 className="mt-3 mb-1.5 text-base font-semibold text-header-1">{p.children}</h1>
     ),
     h2: (p: { children?: ReactNode }) => (
-      <h2 className="mt-3 mb-1.5 text-sm font-semibold text-neutral-100">{p.children}</h2>
+      <h2 className="mt-3 mb-1.5 text-sm font-semibold text-header-2">{p.children}</h2>
     ),
     h3: (p: { children?: ReactNode }) => (
-      <h3 className="mt-2 mb-1 text-sm font-semibold text-neutral-200">{p.children}</h3>
+      <h3 className="mt-2 mb-1 text-sm font-semibold text-header-3">{p.children}</h3>
     ),
     ul: (p: { children?: ReactNode }) => (
-      <ul className="my-1.5 ml-5 list-disc space-y-0.5 marker:text-neutral-500">{p.children}</ul>
+      <ul className="my-1.5 ml-5 list-disc space-y-0.5 marker:text-ui-muted">{p.children}</ul>
     ),
     ol: (p: { children?: ReactNode }) => (
-      <ol className="my-1.5 ml-5 list-decimal space-y-0.5 marker:text-neutral-500">{p.children}</ol>
+      <ol className="my-1.5 ml-5 list-decimal space-y-0.5 marker:text-ui-muted">{p.children}</ol>
     ),
     li: (p: { children?: ReactNode }) => <li className="leading-snug">{p.children}</li>,
     a: (p: { href?: string; children?: ReactNode }) => {
@@ -95,7 +95,7 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
             event.preventDefault()
             onOpenBrowserPane(toBrowserPaneUrl(href))
           }}
-          className="text-brand-400 underline hover:text-brand-300"
+          className="text-content-default underline hover:text-content-default"
           title={opensInPane ? 'Open in browser pane' : undefined}
         >
           {p.children}
@@ -103,14 +103,14 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
       )
     },
     blockquote: (p: { children?: ReactNode }) => (
-      <blockquote className="my-1.5 border-l-2 border-neutral-700 pl-3 text-neutral-300">
+      <blockquote className="my-1.5 border-l-2 border-neutral-700 pl-3 text-content-default">
         {p.children}
       </blockquote>
     ),
     code: (p: { className?: string; children?: ReactNode; inline?: boolean }) => {
       if (!p.className) {
         return (
-          <code className="rounded bg-neutral-800/80 px-1 py-0.5 font-mono text-[12px] text-neutral-100">
+          <code className="rounded bg-neutral-800/80 px-1 py-0.5 font-mono text-[12px] text-content-strong">
             {p.children}
           </code>
         )
@@ -118,7 +118,7 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
       return <code className={p.className}>{p.children}</code>
     },
     pre: (p: { children?: ReactNode }) => (
-      <pre className="my-2 overflow-x-auto rounded border border-neutral-800 bg-neutral-950 p-2 text-[12px] leading-snug text-neutral-200">
+      <pre className="my-2 overflow-x-auto rounded border border-neutral-800 bg-neutral-950 p-2 text-[12px] leading-snug text-header-3">
         {p.children}
       </pre>
     ),
@@ -128,16 +128,16 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
       </div>
     ),
     th: (p: { children?: ReactNode }) => (
-      <th className="border border-neutral-800 px-2 py-1 text-left font-medium text-neutral-200">
+      <th className="border border-neutral-800 px-2 py-1 text-left font-medium text-header-3">
         {p.children}
       </th>
     ),
     td: (p: { children?: ReactNode }) => (
-      <td className="border border-neutral-800 px-2 py-1 text-neutral-300">{p.children}</td>
+      <td className="border border-neutral-800 px-2 py-1 text-content-default">{p.children}</td>
     ),
     hr: () => <hr className="my-3 border-neutral-800" />,
     strong: (p: { children?: ReactNode }) => (
-      <strong className="font-semibold text-neutral-50">{p.children}</strong>
+      <strong className="font-semibold text-header-1">{p.children}</strong>
     ),
     em: (p: { children?: ReactNode }) => <em className="italic">{p.children}</em>,
   }

@@ -38,7 +38,10 @@ vi.mock('../../src/env-trpc', () => ({
 }))
 
 vi.mock('../../src/routes/env/agent/new-agent-chat-modal', () => ({
-  NewAgentChatOverlay: () => <div>new agent chat</div>,
+  NewAgentChatOverlay: ({ initialWorkspaceMode = 'existing', onClose }: { initialWorkspaceMode?: string; onClose: () => void }) => {
+    const [mode] = React.useState(initialWorkspaceMode)
+    return <button onClick={onClose}>new agent chat {mode}</button>
+  },
 }))
 
 vi.mock('../../src/routes/env/agent/folder-picker-modal', () => ({
@@ -71,5 +74,39 @@ describe('OverlayLayerApp', () => {
     })
 
     expect(document.body.textContent).not.toContain('new agent chat')
+  })
+
+  it('clears request-scoped modal state after an overlay response', async () => {
+    render(<OverlayLayerApp />)
+    const sender = new BroadcastChannel(OVERLAY_CHANNEL)
+
+    await act(async () => {
+      sender.postMessage({
+        requestId: 'overlay-one',
+        type: 'new-agent-chat',
+        initialWorkspaceMode: 'new',
+        env: { id: 'env', kind: 'local', url: 'http://env.test', label: 'Env' },
+        envToken: 'token',
+      })
+    })
+    expect(document.body.textContent).toContain('new agent chat new')
+
+    await act(async () => {
+      document.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(document.body.textContent).not.toContain('new agent chat')
+
+    await act(async () => {
+      sender.postMessage({
+        requestId: 'overlay-two',
+        type: 'new-agent-chat',
+        initialWorkspaceMode: 'existing',
+        workspaceId: 'workspace-1',
+        env: { id: 'env', kind: 'local', url: 'http://env.test', label: 'Env' },
+        envToken: 'token',
+      })
+    })
+
+    expect(document.body.textContent).toContain('new agent chat existing')
   })
 })

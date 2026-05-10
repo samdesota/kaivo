@@ -39,7 +39,7 @@ export function ShellChrome({
         <header className="window-drag flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
           <div className="flex min-w-0 items-center gap-3">
             {backTo && (
-              <Link to={backTo} className="text-brand-500 hover:underline" title="Back to dashboard">
+              <Link to={backTo} className="text-neutral-200 hover:underline" title="Back to dashboard">
                 ←
               </Link>
             )}

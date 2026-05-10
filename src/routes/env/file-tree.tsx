@@ -145,7 +145,7 @@ function EntryRow({
     return (
       <>
         <button
-          className="flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-sm text-neutral-200 hover:bg-neutral-900"
+          className="flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-sm text-neutral-200 hover:bg-highlight"
           style={indent}
           onClick={() =>
             setExpanded((prev) => {
@@ -176,8 +176,8 @@ function EntryRow({
   return (
     <button
       className={
-        'flex w-full items-center gap-2 rounded px-2 py-0.5 text-left text-sm hover:bg-neutral-900 ' +
-        (isActive ? 'bg-neutral-900 text-brand-500' : 'text-neutral-300')
+        'flex w-full items-center gap-2 rounded px-2 py-0.5 text-left text-sm hover:bg-highlight ' +
+        (isActive ? 'bg-highlight text-neutral-200' : 'text-neutral-300')
       }
       style={indent}
       onClick={() => onOpen(entry.path)}
