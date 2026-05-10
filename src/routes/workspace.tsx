@@ -654,7 +654,7 @@ export function WorkspaceSidebar({
       />
       <div className="window-drag flex flex-none basis-8 items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-3">
         <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-neutral-300">cloud code</div>
+          <div className="truncate text-xs font-medium text-neutral-300">zoottle</div>
         </div>
         <div className="flex items-center">
           <button

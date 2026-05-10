@@ -57,7 +57,7 @@ test('fixture Electron launch exposes page control, main inspection, and logs', 
 })
 
 test('harness fails when an unhandled error is emitted', async () => {
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-code-desktop-unhandled-'))
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zoottle-desktop-unhandled-'))
   const logPath = path.join(stateDir, 'desktop.log')
   const app = await launchDesktopFixture({ desktopLogPath: logPath, desktopStateDir: stateDir })
   try {

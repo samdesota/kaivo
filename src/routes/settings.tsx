@@ -82,7 +82,7 @@ export function SettingsPage() {
         </div>
         <div className="px-3 py-3">
           <h1 className="text-xs font-medium text-neutral-300">Settings</h1>
-          <p className="mt-1 text-[11px] leading-4 text-neutral-600">Configure Cloud Code.</p>
+          <p className="mt-1 text-[11px] leading-4 text-neutral-600">Configure Zoottle.</p>
         </div>
         <nav className="flex-1 px-2 text-xs text-neutral-500">
           <div className="space-y-1">

@@ -34,8 +34,8 @@ Workspace Folder
 Default:
 
 ```text
-Cloud Code                         +  +folder
-  > cloud-code-tools        4   *
+Zoottle                            +  +folder
+  > zoottle                 4   *
   > opencode-plugin         1
 
 Starch                             +  +folder
@@ -49,8 +49,8 @@ Unfiled                            +
 Expanded workspace:
 
 ```text
-Cloud Code
-  v cloud-code-tools        4   *
+Zoottle
+  v zoottle                 4   *
       Fix sidebar           *
       Add tests
       Release polish        .
@@ -74,12 +74,12 @@ Sidebar order is database-backed, scoped by parent, and unaffected by reloads or
 
 ```text
 parent = null
-  001 Cloud Code folder
+  001 Zoottle folder
   002 Starch folder
   003 scratch workspace
 
-parent = Cloud Code
-  001 cloud-code-tools workspace
+parent = Zoottle
+  001 zoottle workspace
   002 opencode-plugin workspace
   003 Packages folder
 ```
@@ -91,7 +91,7 @@ New folders and workspaces append to the end of their parent list. Migration ass
 New workspace mode:
 
 ```text
-New Agent Chat                              Workspace [ New v ] [ cloud-code-tools ]
+New Agent Chat                              Workspace [ New v ] [ zoottle ]
 
 [Folders] [Worktrees] [Clone]
 
@@ -108,7 +108,7 @@ The existing modal body stays intact. The only layout change is the workspace co
 Existing workspace mode:
 
 ```text
-New Agent Chat                              Workspace [ Existing v ] cloud-code-tools
+New Agent Chat                              Workspace [ Existing v ] zoottle
 
 [Folders] [Worktrees] [Clone]
 

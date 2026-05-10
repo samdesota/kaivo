@@ -1,5 +1,5 @@
 {
-  "name": "@cloud-code/env-server",
+  "name": "@zoottle/env-server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
