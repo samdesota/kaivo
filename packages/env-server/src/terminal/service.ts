@@ -84,6 +84,13 @@ function resolveWorkspaceId(
   return null
 }
 
+export function resolveWorkspaceIdForShellOwner(input: {
+  ownerAgentSessionId?: string | null
+  ownerSessionId?: string | null
+}): string | null {
+  return resolveWorkspaceId(null, input.ownerAgentSessionId ?? null, input.ownerSessionId ?? null)
+}
+
 export function ensureValidCwd(cwd: string): void {
   let stat: fs.Stats
   try {

@@ -276,6 +276,51 @@ describe('cloud-code opencode plugin', () => {
     expect(ctx.metadataCalls.at(0)?.metadata?.cloudcode_shell_id).toBe('pty-42')
   })
 
+  it('cloud_pty_list: queries shells for the current opencode session', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      expect(init?.method).toBe('GET')
+      const requestUrl = new URL(String(url))
+      expect(`${requestUrl.origin}${requestUrl.pathname}`).toBe('http://app:3000/trpc/agentShell.list')
+      const parsed = JSON.parse(requestUrl.searchParams.get('input') ?? '{}')
+      expect(parsed.json).toEqual({ opencodeSessionId: 'oc-list' })
+      return new Response(
+        JSON.stringify({
+          result: {
+            data: {
+              json: [
+                {
+                  id: 'pty-42',
+                  workspaceId: 'workspace-a',
+                  cwd: '/tmp/project',
+                  ownerKind: 'agent',
+                  ownerAgentSessionId: null,
+                  ownerSessionId: 'oc-list',
+                  exitCode: null,
+                  createdAt: '2026-05-09T00:00:00.000Z',
+                  lastActivityAt: '2026-05-09T00:01:00.000Z',
+                  alive: true,
+                  title: 'npm run dev',
+                },
+              ],
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }) as unknown as typeof fetch
+
+    const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
+    const result = (await hooks.tool!.cloud_pty_list!.execute(
+      {},
+      makeCtx('oc-list') as never,
+    )) as { output: string; metadata: Record<string, unknown> }
+
+    expect(result.output).toContain('pty-42 alive cwd="/tmp/project"')
+    expect(result.output).toContain('title="npm run dev"')
+    expect(result.metadata.count).toBe(1)
+    expect(result.metadata.shell_ids).toEqual(['pty-42'])
+  })
+
   it('cloud_open_pane: mutation publishes pane intent', async () => {
     const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
       expect(String(url)).toBe('http://app:3000/trpc/agentUi.openPane')

@@ -2,7 +2,7 @@ import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { z } from 'zod'
 import { agentShellProcedure, router } from '../trpc.js'
-import { ShellError, ensureValidCwd, terminalService } from '../../terminal/service.js'
+import { ShellError, ensureValidCwd, resolveWorkspaceIdForShellOwner, terminalService } from '../../terminal/service.js'
 import { terminalDaemonClient, useTerminalDaemon } from '../../terminal/daemon-client.js'
 import { logger } from '../../logger.js'
 import { upsertWorkspaceResource } from '../../identity/client.js'
@@ -29,7 +29,45 @@ type RunOnceEvent =
   | { type: 'stderr'; b64: string }
   | { type: 'exit'; code: number; truncated: boolean }
 
+async function getWorkspaceShell(input: {
+  shellId: string
+  opencodeSessionId?: string | null
+  ownerAgentSessionId?: string | null
+}) {
+  const workspaceId = resolveWorkspaceIdForShellOwner({
+    ownerAgentSessionId: input.ownerAgentSessionId ?? null,
+    ownerSessionId: input.opencodeSessionId ?? null,
+  })
+  if (!workspaceId) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'agent session has no workspace' })
+  }
+
+  const info = useTerminalDaemon() ? await terminalDaemonClient.get(input.shellId) : terminalService.get(input.shellId)
+  if (!info || info.workspaceId !== workspaceId) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'shell not found in this workspace' })
+  }
+  return info
+}
+
 export const agentShellRouter = router({
+  list: agentShellProcedure
+    .input(
+      z.object({
+        opencodeSessionId: z.string().optional(),
+        ownerAgentSessionId: z.string().optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const workspaceId = resolveWorkspaceIdForShellOwner({
+        ownerAgentSessionId: input.ownerAgentSessionId ?? null,
+        ownerSessionId: input.opencodeSessionId ?? null,
+      })
+      if (!workspaceId) return []
+      return useTerminalDaemon()
+        ? await terminalDaemonClient.list({ workspaceId })
+        : terminalService.list({ workspaceId })
+    }),
+
   runOnce: agentShellProcedure
     .input(
       z.object({
@@ -144,10 +182,12 @@ export const agentShellRouter = router({
       z.object({
         shellId: z.string().min(1),
         b64: z.string(),
+        opencodeSessionId: z.string().optional(),
+        ownerAgentSessionId: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
-      const info = useTerminalDaemon() ? await terminalDaemonClient.get(input.shellId) : terminalService.get(input.shellId)
+      const info = await getWorkspaceShell(input)
       if (!info || !info.alive) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'shell not running' })
       }
@@ -158,8 +198,9 @@ export const agentShellRouter = router({
     }),
 
   close: agentShellProcedure
-    .input(z.object({ shellId: z.string().min(1) }))
+    .input(z.object({ shellId: z.string().min(1), opencodeSessionId: z.string().optional(), ownerAgentSessionId: z.string().optional() }))
     .mutation(async ({ input }) => {
+      await getWorkspaceShell(input)
       if (useTerminalDaemon()) await terminalDaemonClient.dispose(input.shellId)
       else terminalService.dispose(input.shellId)
       return { ok: true as const }
@@ -170,10 +211,13 @@ export const agentShellRouter = router({
       z.object({
         shellId: z.string().min(1),
         maxBytes: z.number().int().positive().max(1024 * 1024).optional(),
+        opencodeSessionId: z.string().optional(),
+        ownerAgentSessionId: z.string().optional(),
       }),
     )
     .query(async ({ input }) => {
       const max = input.maxBytes ?? 64 * 1024
+      const info = await getWorkspaceShell(input)
       if (useTerminalDaemon()) {
         try {
           const snap = await terminalDaemonClient.snapshot(input.shellId)
@@ -195,12 +239,11 @@ export const agentShellRouter = router({
       }
       const bytes = Buffer.from(snap, 'utf8')
       const tail = bytes.length > max ? bytes.subarray(bytes.length - max) : bytes
-      const info = terminalService.get(input.shellId)
       return {
         b64: tail.toString('base64'),
         truncated: bytes.length > max,
-        exitCode: info?.exitCode ?? null,
-        alive: info?.alive ?? false,
+        exitCode: info.exitCode,
+        alive: info.alive,
       }
     }),
 })

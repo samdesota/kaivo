@@ -36,6 +36,7 @@ const CLOUD_TOOL_OVERRIDES = {
   pty: false,
   cloud_bash: true,
   cloud_pty: true,
+  cloud_pty_list: true,
   cloud_pty_write: true,
   cloud_pty_read: true,
   cloud_pty_close: true,
