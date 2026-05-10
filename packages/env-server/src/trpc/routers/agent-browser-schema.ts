@@ -61,13 +61,23 @@ export const browserConnectionSchema = z.object({
   connectedAt: z.string().datetime(),
 })
 
-export const browserTabSummarySchema = z.object({
+const browserTabSummaryBaseSchema = z.object({
   browserTabId: browserTabIdSchema,
   url: z.string().min(1).max(MAX_BROWSER_URL_LENGTH),
   title: z.string().max(500),
   active: z.boolean(),
   connected: z.boolean(),
   connectedByCurrentAgent: z.boolean(),
+  presentation: z.enum(['embedded', 'popup']).optional(),
+  openerBrowserTabId: browserTabIdSchema.nullable().optional(),
+})
+
+export const browserChildTabSummarySchema = browserTabSummaryBaseSchema.extend({
+  openerBrowserTabId: browserTabIdSchema,
+})
+
+export const browserTabSummarySchema = browserTabSummaryBaseSchema.extend({
+  childTabs: z.array(browserChildTabSummarySchema).optional(),
 })
 
 export const listTabsInputSchema = z.object({
@@ -103,6 +113,7 @@ export const snapshotOutputSchema = z.object({
   interactiveCount: z.number().int().min(0),
   durationMs: z.number().min(0),
   text: z.string(),
+  childTabs: z.array(browserChildTabSummarySchema).optional(),
 })
 
 export const interactActionSchema = z.discriminatedUnion('type', [

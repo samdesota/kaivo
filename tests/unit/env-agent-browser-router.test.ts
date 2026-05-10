@@ -13,6 +13,24 @@ vi.mock('../../packages/env-server/src/agent/opencode.js', () => ({
   },
 }))
 
+vi.mock('../../packages/env-server/src/db/client.js', () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => ({
+            all: () => [{ workspaceId: 'ws-1' }],
+          }),
+        }),
+      }),
+    }),
+  },
+}))
+
+vi.mock('../../packages/env-server/src/identity/client.js', () => ({
+  listWorkspaceBrowserTabs: async () => [{ browserTabId: 'tab-sb-local' }],
+}))
+
 function fakeBrowserService(): AgentBrowserService {
   return {
     async listTabs(scope) {

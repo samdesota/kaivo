@@ -1,6 +1,11 @@
 import { agentShellProcedure, router } from '../trpc.js'
+import { TRPCError } from '@trpc/server'
 import { getAgentBrowserService } from '../../browser/agent-browser-service.js'
 import { openPaneForAgent } from './agent-ui.js'
+import { db } from '../../db/client.js'
+import { agentSessions } from '../../db/schema.js'
+import { eq } from 'drizzle-orm'
+import { listWorkspaceBrowserTabs } from '../../identity/client.js'
 import {
   cdpConnectionInputSchema,
   connectTabInputSchema,
@@ -13,33 +18,49 @@ import {
   snapshotInputSchema,
 } from './agent-browser-schema.js'
 
-function scope(input: { sandboxId?: string; opencodeSessionId: string }) {
+async function scope(input: { sandboxId?: string; opencodeSessionId: string }) {
+  const row = db
+    .select({ workspaceId: agentSessions.workspaceId })
+    .from(agentSessions)
+    .where(eq(agentSessions.opencodeSessionId, input.opencodeSessionId))
+    .limit(1)
+    .all()[0]
+  const workspaceId = row?.workspaceId ?? null
+  const rootBrowserTabIds = workspaceId
+    ? (await listWorkspaceBrowserTabs(workspaceId)).map((tab) => tab.browserTabId)
+    : []
   return {
     sandboxId: input.sandboxId ?? null,
     opencodeSessionId: input.opencodeSessionId,
+    workspaceId,
+    rootBrowserTabIds,
   }
 }
 
 export const agentBrowserRouter = router({
-  listTabs: agentShellProcedure.input(listTabsInputSchema).query(({ input }) => {
-    return getAgentBrowserService().listTabs(scope(input))
+  listTabs: agentShellProcedure.input(listTabsInputSchema).query(async ({ input }) => {
+    return getAgentBrowserService().listTabs(await scope(input))
   }),
 
-  connectTab: agentShellProcedure.input(connectTabInputSchema).mutation(({ input }) => {
-    return getAgentBrowserService().connectTab(scope(input), { browserTabId: input.browserTabId })
+  connectTab: agentShellProcedure.input(connectTabInputSchema).mutation(async ({ input }) => {
+    const browserScope = await scope(input)
+    const visibleTabs = await getAgentBrowserService().listTabs(browserScope)
+    if (!visibleTabs.some((tab) => tab.browserTabId === input.browserTabId || tab.childTabs?.some((child) => child.browserTabId === input.browserTabId))) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'browser tab is not in the current workspace' })
+    }
+    return getAgentBrowserService().connectTab(browserScope, { browserTabId: input.browserTabId })
   }),
 
-  openAndConnect: agentShellProcedure.input(openAndConnectInputSchema).mutation(({ input }) => {
-    const browserScope = scope(input)
-    return openNormalPaneAndConnect(browserScope, input)
+  openAndConnect: agentShellProcedure.input(openAndConnectInputSchema).mutation(async ({ input }) => {
+    return openNormalPaneAndConnect(input)
   }),
 
-  disconnect: agentShellProcedure.input(cdpConnectionInputSchema).mutation(({ input }) => {
-    return getAgentBrowserService().disconnect(scope(input), { cdpId: input.cdpId })
+  disconnect: agentShellProcedure.input(cdpConnectionInputSchema).mutation(async ({ input }) => {
+    return getAgentBrowserService().disconnect(await scope(input), { cdpId: input.cdpId })
   }),
 
-  snapshot: agentShellProcedure.input(snapshotInputSchema).query(({ input }) => {
-    return getAgentBrowserService().snapshot(scope(input), {
+  snapshot: agentShellProcedure.input(snapshotInputSchema).query(async ({ input }) => {
+    return getAgentBrowserService().snapshot(await scope(input), {
       cdpId: input.cdpId,
       filter: input.filter,
       filterFlags: input.filterFlags,
@@ -47,27 +68,27 @@ export const agentBrowserRouter = router({
     })
   }),
 
-  interact: agentShellProcedure.input(interactInputSchema).mutation(({ input }) => {
-    return getAgentBrowserService().interact(scope(input), {
+  interact: agentShellProcedure.input(interactInputSchema).mutation(async ({ input }) => {
+    return getAgentBrowserService().interact(await scope(input), {
       cdpId: input.cdpId,
       action: input.action,
       postSnapshot: input.postSnapshot,
     })
   }),
 
-  screenshot: agentShellProcedure.input(screenshotInputSchema).query(({ input }) => {
-    return getAgentBrowserService().screenshot(scope(input), { cdpId: input.cdpId })
+  screenshot: agentShellProcedure.input(screenshotInputSchema).query(async ({ input }) => {
+    return getAgentBrowserService().screenshot(await scope(input), { cdpId: input.cdpId })
   }),
 
-  executeJs: agentShellProcedure.input(executeJsInputSchema).mutation(({ input }) => {
-    return getAgentBrowserService().executeJs(scope(input), {
+  executeJs: agentShellProcedure.input(executeJsInputSchema).mutation(async ({ input }) => {
+    return getAgentBrowserService().executeJs(await scope(input), {
       cdpId: input.cdpId,
       expression: input.expression,
     })
   }),
 
-  readLogs: agentShellProcedure.input(readLogsInputSchema).query(({ input }) => {
-    return getAgentBrowserService().readLogs(scope(input), {
+  readLogs: agentShellProcedure.input(readLogsInputSchema).query(async ({ input }) => {
+    return getAgentBrowserService().readLogs(await scope(input), {
       cdpId: input.cdpId,
       maxEntries: input.maxEntries,
     })
@@ -75,19 +96,19 @@ export const agentBrowserRouter = router({
 })
 
 async function openNormalPaneAndConnect(
-  browserScope: { sandboxId: string | null; opencodeSessionId: string },
-  input: { opencodeSessionId: string; url: string; title?: string; activate?: boolean },
+  input: { sandboxId?: string; opencodeSessionId: string; url: string; title?: string; activate?: boolean },
 ) {
   const service = getAgentBrowserService()
-  const before = new Set((await service.listTabs(browserScope)).map((tab) => tab.browserTabId))
-  openPaneForAgent({
+  const initialScope = await scope(input)
+  const before = new Set((await service.listTabs(initialScope)).map((tab) => tab.browserTabId))
+  await openPaneForAgent({
     opencodeSessionId: input.opencodeSessionId,
     content: { type: 'browser', url: input.url },
     title: input.title,
     activate: input.activate,
   })
-  const tab = await waitForOpenedTab(() => service.listTabs(browserScope), before, input.url)
-  return service.connectTab(browserScope, { browserTabId: tab.browserTabId })
+  const tab = await waitForOpenedTab(async () => service.listTabs(await scope(input)), before, input.url)
+  return service.connectTab(await scope(input), { browserTabId: tab.browserTabId })
 }
 
 async function waitForOpenedTab(

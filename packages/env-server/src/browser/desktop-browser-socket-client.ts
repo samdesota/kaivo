@@ -43,7 +43,13 @@ async function call<T>(method: string, params: Record<string, unknown>): Promise
 }
 
 function withScope(scope: AgentBrowserScope, params: Record<string, unknown> = {}): Record<string, unknown> {
-  return { ...params, sandboxId: scope.sandboxId, opencodeSessionId: scope.opencodeSessionId }
+  return {
+    ...params,
+    sandboxId: scope.sandboxId,
+    opencodeSessionId: scope.opencodeSessionId,
+    workspaceId: scope.workspaceId,
+    rootBrowserTabIds: scope.rootBrowserTabIds,
+  }
 }
 
 function toTrpcError(message: string): TRPCError {

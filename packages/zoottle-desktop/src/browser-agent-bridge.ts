@@ -13,7 +13,7 @@ type BridgeRequest = {
   params?: Record<string, unknown>
 }
 
-type TabRecord = { id: string; url?: string; title?: string; active?: boolean }
+type TabRecord = { id: string; url?: string; title?: string; active?: boolean; presentation?: 'embedded' | 'popup'; openerTabId?: string }
 
 type BrowserConnection = {
   cdpId: string
@@ -30,6 +30,20 @@ type BrowserTabSummary = {
   active: boolean
   connected: boolean
   connectedByCurrentAgent: boolean
+  presentation?: 'embedded' | 'popup'
+  openerBrowserTabId?: string | null
+  childTabs?: BrowserChildTabSummary[]
+}
+
+type BrowserChildTabSummary = {
+  browserTabId: string
+  url: string
+  title: string
+  active: boolean
+  connected: boolean
+  connectedByCurrentAgent: boolean
+  presentation?: 'embedded' | 'popup'
+  openerBrowserTabId: string
 }
 
 type BrowserLogEntry = {
@@ -51,6 +65,7 @@ type SnapshotOutput = {
   interactiveCount: number
   durationMs: number
   text: string
+  childTabs: BrowserChildTabSummary[]
 }
 
 export type BrowserAgentBridgeOptions = {
@@ -151,7 +166,7 @@ async function dispatch(
   logs: BrowserLogState,
 ): Promise<unknown> {
   const scope = parseScope(params)
-  if (method === 'listTabs') return listTabs(scope, options, registry)
+  if (method === 'listTabs') return listTabs(scope, params, options, registry)
   if (method === 'connectTab') return connectTab(scope, String(params.browserTabId ?? ''), options, registry, logs)
   if (method === 'openAndConnect') return openAndConnect(scope, params, options, registry)
   if (method === 'disconnect') return disconnect(scope, String(params.cdpId ?? ''), options, registry, logs)
@@ -165,17 +180,25 @@ async function dispatch(
 
 async function listTabs(
   scope: BrowserAgentScope,
+  params: Record<string, unknown>,
   options: BrowserAgentBridgeOptions,
   registry: BrowserAgentConnectionRegistry,
 ): Promise<BrowserTabSummary[]> {
   const tabs = await getTabs(options)
-  return tabs.map((tab) => ({
+  const rootBrowserTabIds = Array.isArray(params.rootBrowserTabIds)
+    ? params.rootBrowserTabIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    : []
+  const visibleTabs = tabsForRoots(rootBrowserTabIds, tabs)
+  return visibleTabs.map((tab) => ({
     browserTabId: tab.id,
     url: tab.url ?? 'about:blank',
     title: tab.title ?? '',
     active: Boolean(tab.active),
     connected: registry.isConnected(tab.id),
     connectedByCurrentAgent: registry.isConnectedBy(scope, tab.id),
+    presentation: tab.presentation,
+    openerBrowserTabId: tab.openerTabId ?? null,
+    childTabs: childTabsFor(tab.id, tabs, scope, registry),
   }))
 }
 
@@ -268,6 +291,7 @@ async function snapshot(
     interactiveCount: pageSnapshot.interactiveCount,
     durationMs: pageSnapshot.durationMs,
     text: snapshotToText(pageSnapshot),
+    childTabs: childTabsFor(connection.browserTabId, await getTabs(options), scope, registry),
   }
 }
 
@@ -601,6 +625,40 @@ async function evaluateExpression(contents: WebContents, expression: string): Pr
 async function getTabs(options: BrowserAgentBridgeOptions): Promise<TabRecord[]> {
   const app = requireWebframe(options)
   return await app.caller.tabs.list() as TabRecord[]
+}
+
+function tabsForRoots(rootBrowserTabIds: string[], tabs: TabRecord[]): TabRecord[] {
+  const ids = new Set<string>()
+  for (const browserTabId of rootBrowserTabIds) collectDescendantTabIds(browserTabId, tabs, ids)
+  return tabs.filter((tab) => ids.has(tab.id))
+}
+
+function childTabsFor(
+  browserTabId: string,
+  tabs: TabRecord[],
+  scope: BrowserAgentScope,
+  registry: BrowserAgentConnectionRegistry,
+): BrowserChildTabSummary[] {
+  return tabs
+    .filter((tab) => tab.openerTabId === browserTabId)
+    .map((tab) => ({
+      browserTabId: tab.id,
+      url: tab.url ?? 'about:blank',
+      title: tab.title ?? '',
+      active: Boolean(tab.active),
+      connected: registry.isConnected(tab.id),
+      connectedByCurrentAgent: registry.isConnectedBy(scope, tab.id),
+      presentation: tab.presentation,
+      openerBrowserTabId: browserTabId,
+    }))
+}
+
+function collectDescendantTabIds(browserTabId: string, tabs: TabRecord[], ids: Set<string>): void {
+  if (ids.has(browserTabId)) return
+  ids.add(browserTabId)
+  for (const tab of tabs) {
+    if (tab.openerTabId === browserTabId) collectDescendantTabIds(tab.id, tabs, ids)
+  }
 }
 
 function requireWebframe(options: BrowserAgentBridgeOptions): WebframeApp {

@@ -216,7 +216,8 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
         },
       }),
       zoottle_browser_list_tabs: tool({
-        description: 'List Zoottle browser tabs available for agent connection.',
+        description:
+          'List Zoottle browser tabs in the current workspace that are available for agent connection. Includes child tabs/popups opened by workspace tabs; OAuth flows may appear as child tabs with openerBrowserTabId.',
         args: {},
         async execute(_args, context) {
           return runBrowserTool(client, 'agentBrowser.listTabs', {}, context as unknown as ToolCtxLike, 'query')
@@ -244,7 +245,8 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
         },
       }),
       zoottle_browser_snapshot: tool({
-        description: 'Read a connected browser tab as a semantic tree of interactive elements. Use element IDs from this output with zoottle_browser_interact.',
+        description:
+          'Read a connected browser tab as a semantic tree of interactive elements. Use element IDs from this output with zoottle_browser_interact. Check childTabs in the output after clicks, especially OAuth/login buttons, because auth flows may open popups or new child tabs that need zoottle_browser_connect_tab.',
         args: { cdpId: z.string().min(1), filter: z.string().optional(), filterFlags: z.string().optional(), viewportOnly: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.snapshot', stripEmptyStrings(args), context as unknown as ToolCtxLike, 'query')
@@ -259,7 +261,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       zoottle_browser_interact: tool({
         description:
-          'Perform a browser action on a connected tab by element ID. After clicks, prefer postSnapshot wait="settle"; do not wait for full navigation because modern apps often route client-side.',
+          'Perform a browser action on a connected tab by element ID. After clicks, prefer postSnapshot wait="settle"; do not wait for full navigation because modern apps often route client-side. Inspect the returned snapshot.childTabs for OAuth/login popups or new child tabs, then connect to the child tab if needed.',
         args: { cdpId: z.string().min(1), action: browserInteractActionSchema, postSnapshot: browserPostSnapshotSchema },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.interact', normalizeInteractArgs(args), context as unknown as ToolCtxLike, 'mutate')

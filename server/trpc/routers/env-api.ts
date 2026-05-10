@@ -70,6 +70,24 @@ export const envApiRouter = router({
       }
     }),
 
+  listWorkspaceBrowserTabs: identityProcedure
+    .input(z.object({ workspaceId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const tabs = await workspaceService.listTabs(input.workspaceId)
+        return tabs
+          .filter((tab) => tab.type === 'browser' && tab.browserTabId)
+          .map((tab) => ({
+            workspaceTabId: tab.id,
+            browserTabId: tab.browserTabId!,
+            url: tab.url ?? '',
+            title: tab.title,
+          }))
+      } catch (err) {
+        throw toWorkspaceTrpcError(err)
+      }
+    }),
+
   upsertWorkspaceResource: identityProcedure
     .input(z.object({
       workspaceId: z.string().min(1),

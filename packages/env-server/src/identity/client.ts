@@ -78,6 +78,13 @@ export interface WorkspaceResourceInput {
   }
 }
 
+export interface WorkspaceBrowserTabSummary {
+  workspaceTabId: string
+  browserTabId: string
+  url: string
+  title: string
+}
+
 // Superjson wire format matches what the plugin client uses: `{ json: <val> }`.
 // We don't use any special Date/Map/Set values on this surface, so the
 // identity shape round-trips cleanly.
@@ -206,6 +213,10 @@ export async function getRepoConfig(configId: string): Promise<RepoConfigBundle>
 
 export async function openPane(input: OpenPaneInput): Promise<{ ok: true; tab: unknown }> {
   return mutation<{ ok: true; tab: unknown }>('envApi.openPane', input as unknown as Record<string, unknown>)
+}
+
+export async function listWorkspaceBrowserTabs(workspaceId: string): Promise<WorkspaceBrowserTabSummary[]> {
+  return query<WorkspaceBrowserTabSummary[]>('envApi.listWorkspaceBrowserTabs', { workspaceId })
 }
 
 export async function createAgentNotification(input: AgentNotificationInput): Promise<unknown> {

@@ -13,6 +13,8 @@ import type {
 export type AgentBrowserScope = {
   sandboxId: string | null
   opencodeSessionId: string
+  workspaceId: string | null
+  rootBrowserTabIds: string[]
 }
 
 export interface AgentBrowserService {
