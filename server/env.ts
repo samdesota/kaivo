@@ -69,6 +69,9 @@ const schema = z.object({
   // this is essentially a self-check; still required so the wiring mirrors
   // the split-process deployment.
   CC_SERVICE_CREDENTIAL: z.string().min(16),
+  // Local desktop app capability token. When set, Electron can exchange it for
+  // a normal session cookie without requiring the password setup/login flow.
+  CC_DESKTOP_AUTH_TOKEN: z.string().min(32).optional(),
 }).transform((value) => {
   return {
     ...value,

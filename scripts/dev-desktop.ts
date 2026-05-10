@@ -6,6 +6,8 @@ import { runLocalDevLauncher } from './local-launch'
 const runtimeModule = runtime as typeof runtime & { default?: typeof runtime }
 const desktopBrowserSocketPath = runtime.desktopBrowserSocketPath ?? runtimeModule.default?.desktopBrowserSocketPath
 if (!desktopBrowserSocketPath) throw new Error('Unable to load desktop browser socket path helper')
+const readOrCreateDesktopAuthToken = runtime.readOrCreateDesktopAuthToken ?? runtimeModule.default?.readOrCreateDesktopAuthToken
+if (!readOrCreateDesktopAuthToken) throw new Error('Unable to load desktop auth token helper')
 
 async function main(): Promise<void> {
   const cwd = path.resolve(process.cwd())
@@ -21,7 +23,7 @@ async function main(): Promise<void> {
   console.log(`  env:      ${result.config.env.url}`)
   console.log(`  client:   ${result.config.client.url}`)
   console.log(`  manifest: ${path.join(result.config.rootDir, 'launch.json')}`)
-  console.log(`  password: password`)
+  console.log(`  desktop auth: enabled`)
 
   const desktopCwd = path.join(cwd, 'packages/zoottle-desktop')
   run('npm', ['run', 'build'], desktopCwd)
@@ -37,6 +39,7 @@ async function main(): Promise<void> {
       CC_INSTANCE_ID: result.config.instanceId,
       CC_INSTANCE_ROOT: result.config.rootDir,
       CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(result.config),
+      CC_DESKTOP_AUTH_TOKEN: readOrCreateDesktopAuthToken(result.config),
       CC_APP_PORT: String(result.config.app.port),
       CC_APP_URL: result.config.app.url,
       CC_APP_DATA_DIR: result.config.app.dataDir,

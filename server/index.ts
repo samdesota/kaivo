@@ -13,7 +13,8 @@ import { logger } from './logger.js'
 import { runLocalAppMigrations } from './db/local-migrate.js'
 import { getLocalEnvRegistration, upsertLocalEnvRegistration } from './db/local-env-store.js'
 import { loadMasterKey } from './secrets/index.js'
-import { seedAdminFromEnv, purgeExpiredSessions } from './auth/service.js'
+import { createSession, seedAdminFromEnv, purgeExpiredSessions, verifyDesktopAuthToken } from './auth/service.js'
+import { setSessionCookie } from './auth/cookie.js'
 import { appRouter, type AppRouter } from './trpc/router.js'
 import { createContext } from './trpc/context.js'
 import { initializeAppRealtime } from './realtime/app-realtime.js'
@@ -62,6 +63,14 @@ export async function buildServer() {
   initializeAppRealtime()
 
   server.get('/healthz', async () => ({ ok: true, instanceId: env.CC_INSTANCE_ID }))
+
+  server.get<{ Querystring: { token?: string; next?: string } }>('/internal/desktop-auth', async (req, reply) => {
+    const token = req.query.token ?? ''
+    if (!verifyDesktopAuthToken(token)) return reply.code(401).send({ error: 'unauthorized' })
+    const session = await createSession()
+    setSessionCookie(reply, session.id, session.expiresAt)
+    return reply.redirect(safeDesktopRedirect(req.query.next))
+  })
 
   server.get<{ Params: { id: string } }>('/internal/local-env/:id', async (req, reply) => {
     const row = getLocalEnvRegistration(req.params.id)
@@ -159,6 +168,18 @@ export async function buildServer() {
   }
 
   return server
+}
+
+function safeDesktopRedirect(next: string | undefined): string {
+  if (!next) return '/'
+  try {
+    const target = new URL(next, env.PUBLIC_URL)
+    const publicOrigin = new URL(env.PUBLIC_URL).origin
+    if (target.origin !== publicOrigin) return '/'
+    return `${target.pathname}${target.search}${target.hash}`
+  } catch {
+    return '/'
+  }
 }
 
 async function main() {

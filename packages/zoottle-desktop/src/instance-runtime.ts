@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import fs from 'node:fs'
 import path from 'node:path'
 
 export type DesktopRuntimeMode = 'development' | 'production'
@@ -62,6 +63,31 @@ export type InstanceRuntimeConfig = {
 
 export function desktopBrowserSocketPath(config: Pick<InstanceRuntimeConfig, 'instanceId' | 'rootDir'>): string {
   return path.join('/tmp', `cloud-code-browser-${sanitizeId(config.instanceId)}-${shortHash(config.rootDir)}.sock`)
+}
+
+export function desktopAuthTokenPath(config: Pick<InstanceRuntimeConfig, 'rootDir'>): string {
+  return path.join(config.rootDir, 'desktop-auth-token')
+}
+
+export function readOrCreateDesktopAuthToken(config: Pick<InstanceRuntimeConfig, 'rootDir'>): string {
+  const tokenPath = desktopAuthTokenPath(config)
+  try {
+    const existing = fs.readFileSync(tokenPath, 'utf8').trim()
+    if (existing) return existing
+  } catch {
+    // Create below.
+  }
+  const token = randomBytes(32).toString('base64url')
+  fs.mkdirSync(path.dirname(tokenPath), { recursive: true })
+  fs.writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 })
+  return token
+}
+
+export function desktopAuthExchangeUrl(appUrl: string, token: string, nextUrl = appUrl): string {
+  const url = new URL('/internal/desktop-auth', appUrl)
+  url.searchParams.set('token', token)
+  url.searchParams.set('next', nextUrl)
+  return url.toString()
 }
 
 export type ResolveInstanceRuntimeOptions = {

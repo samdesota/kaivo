@@ -1,4 +1,5 @@
 import bcrypt from 'bcrypt'
+import { timingSafeEqual } from 'node:crypto'
 import { eq, lt, or } from 'drizzle-orm'
 import { ulid } from 'ulid'
 import { db } from '../db/client.js'
@@ -122,6 +123,18 @@ export async function createSession(): Promise<Session> {
   const expiresAt = new Date(now.getTime() + ABSOLUTE_TTL_MS)
   await db.insert(webSessions).values({ id, createdAt: now, lastSeen: now, expiresAt })
   return { id, expiresAt, lastSeen: now }
+}
+
+export function isDesktopAuthEnabled(): boolean {
+  return Boolean(env.CC_DESKTOP_AUTH_TOKEN)
+}
+
+export function verifyDesktopAuthToken(token: string): boolean {
+  const expected = env.CC_DESKTOP_AUTH_TOKEN
+  if (!expected) return false
+  const left = Buffer.from(token)
+  const right = Buffer.from(expected)
+  return left.length === right.length && timingSafeEqual(left, right)
 }
 
 /**

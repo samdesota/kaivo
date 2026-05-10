@@ -4,7 +4,7 @@ import http from 'node:http'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { app } from 'electron'
 import type { InstanceRuntimeConfig } from './instance-runtime'
-import { desktopBrowserSocketPath } from './instance-runtime'
+import { desktopBrowserSocketPath, readOrCreateDesktopAuthToken } from './instance-runtime'
 import { ensureDesktopPairing, type DesktopPairingResult } from './desktop-pairing'
 
 export type ServiceName = 'app' | 'terminal' | 'env'
@@ -239,6 +239,7 @@ function packagedLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig)
         CC_INSTANCE_ID: config.instanceId,
         CC_INSTANCE_ROOT: config.rootDir,
         CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
+        CC_DESKTOP_AUTH_TOKEN: readOrCreateDesktopAuthToken(config),
         CC_SERVE_CLIENT: 'true',
         DATA_DIR: config.app.dataDir,
         PORT: String(config.app.port),
@@ -286,6 +287,7 @@ function devLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig, cwd:
         CC_INSTANCE_ID: config.instanceId,
         CC_INSTANCE_ROOT: config.rootDir,
         CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
+        CC_DESKTOP_AUTH_TOKEN: readOrCreateDesktopAuthToken(config),
         CC_SERVE_CLIENT: 'true',
         DATA_DIR: config.app.dataDir,
         PORT: String(config.app.port),

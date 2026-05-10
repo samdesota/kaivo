@@ -13,6 +13,8 @@ const resolveRuntimeConfig = runtime.resolveInstanceRuntimeConfig ?? runtimeModu
 if (!resolveRuntimeConfig) throw new Error('Unable to load instance runtime resolver')
 const desktopBrowserSocketPath = runtime.desktopBrowserSocketPath ?? runtimeModule.default?.desktopBrowserSocketPath
 if (!desktopBrowserSocketPath) throw new Error('Unable to load desktop browser socket path helper')
+const readOrCreateDesktopAuthToken = runtime.readOrCreateDesktopAuthToken ?? runtimeModule.default?.readOrCreateDesktopAuthToken
+if (!readOrCreateDesktopAuthToken) throw new Error('Unable to load desktop auth token helper')
 const desktopPairingModule = desktopPairing as typeof desktopPairing & { default?: typeof desktopPairing }
 const ensureDesktopPairing = desktopPairing.ensureDesktopPairing ?? desktopPairingModule.default?.ensureDesktopPairing
 if (!ensureDesktopPairing) throw new Error('Unable to load desktop pairing helper')
@@ -52,6 +54,9 @@ export type LaunchManifest = {
   commands: {
     launch: string
     script: string
+  }
+  auth?: {
+    desktopAuth: boolean
   }
 }
 
@@ -251,12 +256,15 @@ export function buildLaunchManifest(
       launch: options.command,
       script: options.script,
     },
+    auth: {
+      desktopAuth: options.mode === 'desktop',
+    },
   }
 }
 
 async function startServices(config: InstanceRuntimeConfig, options: RequiredLocalLaunchOptions): Promise<LaunchedService[]> {
   return [
-    startProcess('app', appLaunchSpec(config, options.cwd)),
+    startProcess('app', appLaunchSpec(config, options)),
     startProcess('env', envLaunchSpec(config, options.cwd)),
     startProcess('client', clientLaunchSpec(config, options.cwd)),
   ]
@@ -277,11 +285,11 @@ async function waitForServices(
   }
 }
 
-function appLaunchSpec(config: InstanceRuntimeConfig, cwd: string): ServiceLaunchSpec {
+function appLaunchSpec(config: InstanceRuntimeConfig, options: RequiredLocalLaunchOptions): ServiceLaunchSpec {
   return {
     command: nodeCommand(),
     args: ['node_modules/.bin/tsx', 'server/index.ts'],
-    cwd,
+    cwd: options.cwd,
     env: {
       ...process.env,
       NODE_ENV: 'test',
@@ -289,6 +297,7 @@ function appLaunchSpec(config: InstanceRuntimeConfig, cwd: string): ServiceLaunc
       CC_INSTANCE_ID: config.instanceId,
       CC_INSTANCE_ROOT: config.rootDir,
       CC_DESKTOP_BROWSER_SOCKET: desktopBrowserSocketPath(config),
+      ...(options.mode === 'desktop' ? { CC_DESKTOP_AUTH_TOKEN: readOrCreateDesktopAuthToken(config) } : {}),
       CC_SERVE_CLIENT: 'true',
       DATA_DIR: config.app.dataDir,
       PORT: String(config.app.port),

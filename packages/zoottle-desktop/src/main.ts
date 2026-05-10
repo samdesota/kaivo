@@ -3,7 +3,7 @@ import path from 'node:path'
 import { app, BrowserWindow, ipcMain, Menu, webContents as electronWebContents, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
-import { desktopBrowserSocketPath } from './instance-runtime'
+import { desktopBrowserSocketPath, readOrCreateDesktopAuthToken } from './instance-runtime'
 import { ensureDesktopServices, type ServiceSupervisor } from './service-supervisor'
 import { startBrowserAgentBridge, type BrowserAgentBridge } from './browser-agent-bridge'
 
@@ -233,10 +233,17 @@ async function main(): Promise<void> {
   await app.whenReady()
   installAppShortcutMenu()
   installIpcHandlers()
-  const config = resolveDesktopConfig({
+  const baseEnv: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: app.isPackaged ? 'production' : process.env.NODE_ENV,
-  })
+  }
+  let config = resolveDesktopConfig(baseEnv)
+  if (config.manageServices && !baseEnv.CC_DESKTOP_AUTH_TOKEN) {
+    config = resolveDesktopConfig({
+      ...baseEnv,
+      CC_DESKTOP_AUTH_TOKEN: readOrCreateDesktopAuthToken(config.instance),
+    })
+  }
   if (config.manageServices) {
     serviceSupervisor = await ensureDesktopServices(config.instance, { preserveTerminalOnStop: app.isPackaged })
   }

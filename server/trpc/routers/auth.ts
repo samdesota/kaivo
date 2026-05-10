@@ -4,6 +4,7 @@ import { protectedProcedure, publicProcedure, router } from '../trpc.js'
 import {
   AuthError,
   bootstrap,
+  isDesktopAuthEnabled,
   isBootstrapped,
   login,
   logout,
@@ -36,8 +37,10 @@ function authErrorToTrpc(err: unknown): TRPCError {
 
 export const authRouter = router({
   status: publicProcedure.query(async ({ ctx }) => {
+    const desktopAuth = isDesktopAuthEnabled()
     return {
-      firstRun: !(await isBootstrapped()),
+      firstRun: !desktopAuth && !(await isBootstrapped()),
+      desktopAuth,
       authenticated: ctx.session !== null,
     }
   }),

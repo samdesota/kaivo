@@ -46,6 +46,20 @@ describe('resolveDesktopConfig', () => {
     expect(config.manageServices).toBe(true)
     expect(config.chromeUrl).toBe('http://127.0.0.1:3333')
   })
+
+  it('uses desktop auth exchange URL when a token is available for the app origin', () => {
+    const config = resolveDesktopConfig(
+      {
+        NODE_ENV: 'development',
+        CC_DESKTOP_MANAGE_SERVICES: 'true',
+        CC_APP_PORT: '3333',
+        CC_DESKTOP_AUTH_TOKEN: 'x'.repeat(32),
+      },
+      { cwd: '/tmp/cloud-code-a', homeDir: '/tmp/home' },
+    )
+
+    expect(config.chromeUrl).toBe('http://127.0.0.1:3333/internal/desktop-auth?token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&next=http%3A%2F%2F127.0.0.1%3A3333')
+  })
 })
 
 describe('resolveInstanceRuntimeConfig', () => {
