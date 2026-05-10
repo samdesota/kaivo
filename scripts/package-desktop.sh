@@ -105,7 +105,7 @@ run_job client_pid "client-spa" bash -lc "cd '$repo_root' && npx vite build"
 run_job app_server_pid "app-server-build" bash -lc "cd '$repo_root' && npx tsup"
 run_job env_server_pid "env-server-build" bash -lc "cd '$repo_root/packages/env-server' && npm run build"
 run_job opencode_plugin_pid "opencode-plugin-build" bash -lc "cd '$repo_root/packages/opencode-plugin' && npm run build"
-run_job desktop_pid "desktop-build" bash -lc "cd '$desktop_dir' && npm run build"
+run_job desktop_pid "desktop-build" bash -lc "cd '$desktop_dir' && npm install --no-audit --no-fund --silent && npm run build"
 
 # runtime package.json with only server-side deps
 node --input-type=module -e "
