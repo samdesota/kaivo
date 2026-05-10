@@ -4,7 +4,19 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { envTrpc } from '../../env-trpc'
 import { envWsUrl } from '../../lib/env-client'
+import { THEME_COLOR_CHANGE_EVENT } from '../../lib/ui-prefs'
 import { useEnv } from './env-context'
+
+function readTerminalTheme() {
+  const rootStyle = getComputedStyle(document.documentElement)
+  const hue = rootStyle.getPropertyValue('--app-color-hue').trim() || '222.86'
+  const saturation = rootStyle.getPropertyValue('--app-color-saturation').trim() || '20%'
+  return {
+    background: `hsl(${hue} ${saturation} 10.78%)`,
+    foreground: `hsl(${hue} ${saturation} 90.2%)`,
+    cursor: `hsl(${hue} ${saturation} 98.04%)`,
+  }
+}
 
 /**
  * Attaches an xterm instance to an existing shell session via
@@ -32,17 +44,17 @@ export function XTermAttached({ shellId }: { shellId: string }) {
       fontFamily:
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
       fontSize: 13,
-      theme: {
-        background: '#111318',
-        foreground: '#e6e6e6',
-        cursor: '#ffffff',
-      },
+      theme: readTerminalTheme(),
       convertEol: false,
       scrollback: 10_000,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
+    const onThemeColorChange = () => {
+      term.options.theme = readTerminalTheme()
+    }
+    window.addEventListener(THEME_COLOR_CHANGE_EVENT, onThemeColorChange)
     requestAnimationFrame(() => {
       try {
         fit.fit()
@@ -138,6 +150,7 @@ export function XTermAttached({ shellId }: { shellId: string }) {
     return () => {
       mounted = false
       if (reconnectTimer) clearTimeout(reconnectTimer)
+      window.removeEventListener(THEME_COLOR_CHANGE_EVENT, onThemeColorChange)
       dataSub.dispose()
       resizeObserver.disconnect()
       try {

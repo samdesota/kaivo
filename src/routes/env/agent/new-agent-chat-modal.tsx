@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
@@ -82,6 +82,23 @@ export function NewAgentChatModal({
 }
 
 export function NewAgentChatOverlay({
+  ...props
+}: {
+  workspaceId?: string
+  workspaceName?: string
+  initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  folderId?: string | null
+  onClose: () => void
+  onCreated: (sessionId: string, workspaceId?: string) => void
+}) {
+  return (
+    <Suspense fallback={<NewAgentChatOverlayFallback />}>
+      <NewAgentChatOverlayContent {...props} />
+    </Suspense>
+  )
+}
+
+function NewAgentChatOverlayContent({
   workspaceId,
   workspaceName = 'Current workspace',
   initialWorkspaceMode = 'existing',
@@ -96,10 +113,10 @@ export function NewAgentChatOverlay({
   onClose: () => void
   onCreated: (sessionId: string, workspaceId?: string) => void
 }) {
-  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined)
-  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined)
-  const worktrees = envTrpc.repo.listWorktrees.useQuery(undefined)
-  const workspaceTree = trpc.workspace.listTree.useQuery(undefined)
+  const [recentFolders] = envTrpc.repo.listRecentFolders.useSuspenseQuery(undefined)
+  const [repoConfigs] = envTrpc.repo.listConfigs.useSuspenseQuery(undefined)
+  const [worktrees] = envTrpc.repo.listWorktrees.useSuspenseQuery(undefined)
+  const [workspaceTree] = trpc.workspace.listTree.useSuspenseQuery(undefined)
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const start = envTrpc.agent.sessionStart.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
@@ -221,10 +238,10 @@ export function NewAgentChatOverlay({
     }
   }
 
-  const folders = (recentFolders.data ?? []) as RecentFolder[]
-  const configs = (repoConfigs.data ?? []) as RepoConfig[]
-  const existingWorktrees = (worktrees.data ?? []) as RepoWorktree[]
-  const treeNodes = (workspaceTree.data ?? []) as WorkspaceTreePickerNode[]
+  const folders = recentFolders as RecentFolder[]
+  const configs = repoConfigs as RepoConfig[]
+  const existingWorktrees = worktrees as RepoWorktree[]
+  const treeNodes = workspaceTree as WorkspaceTreePickerNode[]
   const searchableFolders = useMemo(
     () => folders.filter((folder) => !existingWorktrees.some((worktree) => isPathWithinWorktree(folder.path, worktree.workingDir))),
     [existingWorktrees, folders],
@@ -363,14 +380,14 @@ export function NewAgentChatOverlay({
       <div className="mb-10 flex max-h-[84vh] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
         {step === 'choose' ? (
           <>
-            <div className="shrink-0 border-b border-neutral-800">
+            <div className="shrink-0 border-b border-neutral-800 bg-input">
               <input
                 ref={searchRef}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 onKeyDown={handleSearchKeyDown}
                 placeholder="Search folders, work trees, repo configs, or type a path…"
-                className="w-full bg-transparent px-4 py-3 text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
+                className="w-full bg-input px-4 py-3 text-sm text-content-strong outline-none placeholder:text-placeholder"
               />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto pb-2 pt-2">
@@ -382,14 +399,14 @@ export function NewAgentChatOverlay({
                   {pathBrowse.data && (
                     <button onClick={() => choose({ type: 'folder', path: pathBrowse.data.path })} className={compactChoiceClass(highlightedIndex === 0)}>
                       <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                        <span className="shrink-0 truncate text-neutral-100">Use this folder</span>
-                        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-neutral-500" title={pathBrowse.data.path}>{pathBrowse.data.path}</span>
+                        <span className="shrink-0 truncate text-content-strong">Use this folder</span>
+                        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={pathBrowse.data.path}>{pathBrowse.data.path}</span>
                       </span>
                     </button>
                   )}
                   {pathBrowse.data?.parent && (
                     <button onClick={() => setSearch(pathBrowse.data?.parent ?? '')} className={compactChoiceClass(false)}>
-                      <span className="min-w-0 flex-1 text-neutral-300">..</span>
+                      <span className="min-w-0 flex-1 text-content-default">..</span>
                     </button>
                   )}
                   {pathDirs.map((dir, index) => {
@@ -398,8 +415,8 @@ export function NewAgentChatOverlay({
                     return (
                       <div key={dir.path} className={compactChoiceClass(active)}>
                         <button onClick={() => choose({ type: 'folder', path: dir.path })} className="flex min-w-0 flex-1 items-baseline gap-2 text-left">
-                          <span className="shrink-0 truncate text-neutral-100">{dir.name}</span>
-                          <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-neutral-500" title={dir.path}>{dir.path}</span>
+                          <span className="shrink-0 truncate text-content-strong">{dir.name}</span>
+                          <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={dir.path}>{dir.path}</span>
                         </button>
                         <button
                           type="button"
@@ -407,7 +424,7 @@ export function NewAgentChatOverlay({
                             event.stopPropagation()
                             drillIntoPath(dir.path)
                           }}
-                          className="ml-2 shrink-0 rounded px-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+                          className="ml-2 shrink-0 rounded px-1 text-ui-muted hover:bg-neutral-800 hover:text-header-3"
                           aria-label={`Open ${dir.name}`}
                           title="Open folder"
                         >
@@ -420,20 +437,20 @@ export function NewAgentChatOverlay({
                 </section>
               ) : (
                 <div className="space-y-2">
-                  {(recentFolders.isLoading || filteredFolders.length > 0) && (
-                    <ResultSection label="Recent folders" loading={recentFolders.isLoading}>
+                  {filteredFolders.length > 0 && (
+                    <ResultSection label="Recent folders">
                       {filteredFolders.map((folder, index) => (
                         <button key={folder.path} onClick={() => choose({ type: 'folder', path: folder.path })} className={compactChoiceClass(highlightedIndex === index)}>
                           <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                            <span className="shrink-0 truncate text-neutral-100">{folder.label ?? folderName(folder.path)}</span>
-                            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-neutral-500" title={folder.path}>{folder.path}</span>
+                            <span className="shrink-0 truncate text-content-strong">{folder.label ?? folderName(folder.path)}</span>
+                            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={folder.path}>{folder.path}</span>
                           </span>
                         </button>
                       ))}
                     </ResultSection>
                   )}
-                  {(worktrees.isLoading || filteredWorktrees.length > 0) && (
-                    <ResultSection label="Work trees" loading={worktrees.isLoading}>
+                  {filteredWorktrees.length > 0 && (
+                    <ResultSection label="Work trees">
                       {worktreeGroups.map((group) => (
                         <div key={group.parent}>
                           <SectionLabel label={group.parent} />
@@ -442,8 +459,8 @@ export function NewAgentChatOverlay({
                             return (
                             <button key={worktree.id} onClick={() => choose({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName })} className={compactChoiceClass(highlightedIndex === rowIndex, 'row')}>
                               <span className="min-w-0 flex-1 text-left">
-                                <span className="block truncate text-neutral-100">{worktree.worktreeName}</span>
-                                <span className="block truncate font-mono text-[10px] text-neutral-500" title={worktree.workingDir}>{worktree.workingDir}</span>
+                                <span className="block truncate text-content-strong">{worktree.worktreeName}</span>
+                                <span className="block truncate font-mono text-[10px] text-help" title={worktree.workingDir}>{worktree.workingDir}</span>
                               </span>
                             </button>
                             )
@@ -452,15 +469,15 @@ export function NewAgentChatOverlay({
                       ))}
                     </ResultSection>
                   )}
-                  {(repoConfigs.isLoading || filteredConfigs.length > 0) && (
-                    <ResultSection label="Clone from repo config" loading={repoConfigs.isLoading}>
+                  {filteredConfigs.length > 0 && (
+                    <ResultSection label="Clone from repo config">
                       {filteredConfigs.map((config, index) => (
                         <button key={config.id} onClick={() => choose({ type: 'repoConfig', configId: config.id, worktreeName: '' })} className={compactChoiceClass(highlightedIndex === filteredFolders.length + filteredWorktrees.length + index)}>
                           <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                            <span className="shrink-0 truncate text-neutral-100">{config.name}</span>
-                            <span className="min-w-0 flex-1 truncate text-[10px] text-neutral-500" title={config.githubFullName ?? config.originUrl ?? config.id}>{config.githubFullName ?? config.originUrl ?? config.id}</span>
+                            <span className="shrink-0 truncate text-content-strong">{config.name}</span>
+                            <span className="min-w-0 flex-1 truncate text-[10px] text-help" title={config.githubFullName ?? config.originUrl ?? config.id}>{config.githubFullName ?? config.originUrl ?? config.id}</span>
                           </span>
-                          <span className="ml-2 text-sm text-neutral-500">+</span>
+                          <span className="ml-2 text-sm text-ui-muted">+</span>
                         </button>
                       ))}
                     </ResultSection>
@@ -472,20 +489,20 @@ export function NewAgentChatOverlay({
         ) : (
           <>
             <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 px-3 py-2">
-              <button onClick={() => setStep('choose')} className="rounded px-2 py-1 text-sm leading-none text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200" aria-label="Back">‹</button>
-              <div className="text-sm font-medium text-neutral-100">Create chat</div>
+              <button onClick={() => setStep('choose')} className="rounded px-2 py-1 text-sm leading-none text-ui-default hover:bg-highlight hover:text-header-3" aria-label="Back">‹</button>
+              <div className="text-sm font-medium text-header-2">Create chat</div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="px-4 pb-2 pt-3">
-                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500">Destination</div>
-                <div className="rounded border border-neutral-800 bg-neutral-930 px-3 py-2">
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-label">Destination</div>
+                <div className="rounded border border-neutral-800 bg-input px-3 py-2">
                   <SelectedDestination selection={selection} config={selectedConfig} />
                 </div>
               </div>
               {selection?.type === 'repoConfig' && (
                 <div>
-                  <label className="block px-4 pb-2 pt-3 text-xs text-neutral-400">
-                    <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500">Work tree name</span>
+                  <label className="block px-4 pb-2 pt-3 text-xs text-ui-default">
+                    <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-label">Work tree name</span>
                     <Input
                       value={selection.worktreeName}
                       onChange={(event) => setSelection({ ...selection, worktreeName: event.target.value })}
@@ -493,8 +510,8 @@ export function NewAgentChatOverlay({
                     />
                   </label>
                   {clonePreview && (
-                    <div className="truncate px-4 pb-2 text-[10px] text-neutral-500" title={clonePreview}>
-                      Will clone to <span className="font-mono text-neutral-300">{clonePreview}</span>
+                    <div className="truncate px-4 pb-2 text-[10px] text-help" title={clonePreview}>
+                      Will clone to <span className="font-mono text-content-default">{clonePreview}</span>
                     </div>
                   )}
                 </div>
@@ -508,8 +525,8 @@ export function NewAgentChatOverlay({
                 workspaceNameValue={workspaceNameDraft.edited ? workspaceNameDraft.value : generatedWorkspaceName}
                 resolvedWorkspaceName={workspaceNameValue}
                 parentFolderId={parentFolderId}
-                foldersLoading={workspaceTree.isLoading}
-                workspacesLoading={workspaceTree.isLoading}
+                foldersLoading={false}
+                workspacesLoading={false}
                 onWorkspaceChange={setSelectedWorkspaceId}
                 onParentFolderChange={setParentFolderId}
                 onWorkspaceNameChange={(value) => setWorkspaceNameDraft({ value, edited: true })}
@@ -561,8 +578,8 @@ export function WorkspaceModeControl({
   onWorkspaceNameChange: (value: string) => void
 }) {
   return (
-    <div className="shrink-0 px-4 pb-3 pt-3 text-xs text-neutral-500">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-neutral-500">Workspace</div>
+    <div className="shrink-0 px-4 pb-3 pt-3 text-xs text-help">
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-label">Workspace</div>
       <div className="space-y-3">
         <SegmentedControl
           value={mode}
@@ -572,6 +589,7 @@ export function WorkspaceModeControl({
           ]}
           onChange={onModeChange}
           ariaLabel="Workspace mode"
+          className="bg-input [&_[aria-pressed='true']]:bg-neutral-800"
         />
         {mode === 'new' ? (
           <div className="grid gap-3 sm:grid-cols-2">
@@ -615,23 +633,33 @@ export function WorkspaceModeControl({
   )
 }
 
+function NewAgentChatOverlayFallback() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+      <div className="mb-10 flex max-h-[84vh] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+        <div className="shrink-0 border-b border-neutral-800 bg-input px-4 py-3 text-sm text-placeholder">
+          Loading workspace options…
+        </div>
+        <div className="p-4 text-xs text-help">Preparing recent folders, work trees, and repo configs.</div>
+      </div>
+    </div>
+  )
+}
+
 function EmptyList({ children }: { children: ReactNode }) {
-  return <div className="p-4 text-center text-xs text-neutral-500">{children}</div>
+  return <div className="p-4 text-center text-xs text-help">{children}</div>
 }
 
 function ResultSection({
   label,
-  loading,
   children,
 }: {
   label: string
-  loading: boolean
   children: ReactNode
 }) {
   return (
     <section>
       <SectionLabel label={label} />
-      {loading && <EmptyList>Loading…</EmptyList>}
       {children}
     </section>
   )
@@ -639,15 +667,15 @@ function ResultSection({
 
 function SectionLabel({ label, meta }: { label: string; meta?: string }) {
   return (
-    <div className="flex min-w-0 items-center justify-between gap-3 px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wide text-neutral-500 first:pt-2">
+    <div className="flex min-w-0 items-center justify-between gap-3 px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wide text-label first:pt-2">
       <span className="min-w-0 truncate">{label}</span>
-      {meta && <span className="shrink-0 text-neutral-600">{meta}</span>}
+      {meta && <span className="shrink-0 text-ui-muted">{meta}</span>}
     </div>
   )
 }
 
 function SelectedDestination({ selection, config }: { selection: NewAgentChatSelection | null; config?: RepoConfig | null }) {
-  if (!selection) return <div className="text-xs text-neutral-500">No destination selected</div>
+  if (!selection) return <div className="text-xs text-help">No destination selected</div>
   if (selection.type === 'folder') {
     return <DestinationText title={folderName(selection.path)} detail={selection.path} />
   }
@@ -660,8 +688,8 @@ function SelectedDestination({ selection, config }: { selection: NewAgentChatSel
 function DestinationText({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="min-w-0 text-xs">
-      <div className="truncate font-medium text-neutral-100">{title}</div>
-      <div className="truncate font-mono text-[10px] text-neutral-500" title={detail}>{detail}</div>
+      <div className="truncate font-medium text-content-strong">{title}</div>
+      <div className="truncate font-mono text-[10px] text-help" title={detail}>{detail}</div>
     </div>
   )
 }
@@ -718,8 +746,8 @@ function pathBrowsePlan(value: string, home?: string): BrowsePlan {
 
 function compactChoiceClass(selected: boolean, layout: 'col' | 'row' = 'col'): string {
   return (
-    `flex w-full min-w-0 ${layout === 'col' ? 'items-center' : 'items-start'} px-4 py-2 text-left text-xs hover:bg-neutral-900 ` +
-    (selected ? 'bg-neutral-900' : '')
+    `flex w-full min-w-0 ${layout === 'col' ? 'items-center' : 'items-start'} px-4 py-2 text-left text-xs hover:bg-highlight ` +
+    (selected ? 'bg-highlight' : '')
   )
 }
 

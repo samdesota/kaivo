@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, startTransition, useEffect } from 'react'
 import {
   Outlet,
   createRootRoute,
@@ -20,18 +20,17 @@ import { OverlayLayerPage } from './routes/internal/overlay-layer'
 function RootLayout() {
   const navigate = useNavigate()
   const { location } = useRouterState()
-  const status = trpc.auth.status.useQuery(undefined, {
+  const [status] = trpc.auth.status.useSuspenseQuery(undefined, {
     staleTime: 0,
     refetchOnWindowFocus: true,
   })
 
   useEffect(() => {
-    if (!status.data) return
-    const { firstRun, authenticated } = status.data
+    const { firstRun, authenticated } = status
     const p = location.pathname
 
     if (firstRun && p !== '/setup') {
-      void navigate({ to: '/setup', replace: true })
+      startTransition(() => void navigate({ to: '/setup', replace: true }))
       return
     }
     if (!firstRun && !authenticated && p !== '/login') {
@@ -39,28 +38,32 @@ function RootLayout() {
       // back on the page they meant to hit after signing in.
       const path = `${location.pathname}${location.searchStr ?? ''}`
       const next = path && path !== '/' ? path : undefined
-      void navigate({ to: '/login', search: { next }, replace: true })
+      startTransition(() => void navigate({ to: '/login', search: { next }, replace: true }))
       return
     }
     if (!firstRun && authenticated && (p === '/login' || p === '/setup')) {
       const s = location.search as { next?: string } | undefined
       const next =
         typeof s?.next === 'string' && s.next.startsWith('/') ? s.next : null
-      void navigate({ to: next ?? '/', replace: true })
+      startTransition(() => void navigate({ to: next ?? '/', replace: true }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status.data, location.pathname])
+  }, [status, location.pathname])
 
-  if (status.isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-950 text-neutral-500">
-        <div className="window-drag fixed top-0 right-0 left-0 h-10" />
-        Loading…
-      </div>
-    )
-  }
+  return (
+    <Suspense fallback={<RouteSuspenseFallback />}>
+      <Outlet />
+    </Suspense>
+  )
+}
 
-  return <Outlet />
+function RouteSuspenseFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-neutral-975 text-help">
+      <div className="window-drag fixed top-0 right-0 left-0 h-10" />
+      Loading…
+    </div>
+  )
 }
 
 const rootRoute = createRootRoute({ component: RootLayout })

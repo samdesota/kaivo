@@ -139,7 +139,7 @@ export function WorkspaceTabBar({
               if (e.key === 'Enter') void saveRename()
               if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
             }}
-            className="min-w-32 rounded border border-neutral-600 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
+            className="min-w-32 rounded border border-neutral-600 bg-input px-2 py-1 text-xs text-neutral-100 outline-none"
             aria-label="Workspace name"
           />
         ) : (
@@ -153,8 +153,8 @@ export function WorkspaceTabBar({
               dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
             }}
             className={
-              'group flex shrink-0 items-center gap-0.5 rounded transition-colors hover:bg-neutral-900 hover:text-neutral-100 ' +
-              (active ? 'bg-neutral-800 text-neutral-100' : '')
+              'group flex shrink-0 items-center gap-0.5 rounded transition-colors hover:bg-highlight hover:text-neutral-100 ' +
+              (active ? 'bg-highlight text-neutral-100' : '')
             }
           >
             <span className="max-w-48 truncate whitespace-nowrap py-1 pl-2 pr-1 text-xs">{workspace.name}</span>
@@ -176,7 +176,7 @@ export function WorkspaceTabBar({
       <button
         onClick={() => void createWorkspace()}
         disabled={create.isPending}
-        className="shrink-0 rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
+        className="shrink-0 rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400 hover:bg-highlight hover:text-neutral-100 disabled:opacity-50"
         aria-label="Create new workspace"
       >
         +

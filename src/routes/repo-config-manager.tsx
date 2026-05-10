@@ -104,7 +104,7 @@ export function NewRepoConfigForm({
           value={draft.url}
           onChange={(e) => setDraft({ ...draft, url: e.target.value })}
           placeholder="https://github.com/user/repo.git"
-          className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 focus:border-neutral-600 focus:outline-none"
+          className="w-full rounded border border-neutral-800 bg-input px-2 py-1.5 text-sm text-neutral-100 focus:border-neutral-600 focus:outline-none"
         />
       ) : !ghStatus.data?.connected ? (
         <p className="text-xs text-neutral-500">
@@ -134,13 +134,13 @@ export function NewRepoConfigForm({
           value={draft.name}
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           placeholder="config name (defaults to repo name)"
-          className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-200 focus:border-neutral-600 focus:outline-none"
+          className="rounded border border-neutral-800 bg-input px-2 py-1.5 text-xs text-neutral-200 focus:border-neutral-600 focus:outline-none"
         />
         <input
           value={draft.ref}
           onChange={(e) => setDraft({ ...draft, ref: e.target.value })}
           placeholder={draft.source === 'github' ? `ref (default: ${defaultRefHint})` : 'branch / ref (optional)'}
-          className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-200 focus:border-neutral-600 focus:outline-none"
+          className="rounded border border-neutral-800 bg-input px-2 py-1.5 text-xs text-neutral-200 focus:border-neutral-600 focus:outline-none"
         />
       </div>
 
@@ -258,7 +258,7 @@ export function RepoConfigEditor({ configId, onDeleted }: { configId: string; on
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none"
+              className="w-full rounded border border-neutral-800 bg-input px-2 py-1.5 text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none"
             />
           </div>
           <div>
@@ -267,7 +267,7 @@ export function RepoConfigEditor({ configId, onDeleted }: { configId: string; on
               value={ref}
               onChange={(e) => setRef(e.target.value)}
               placeholder="(repo default)"
-              className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none"
+              className="w-full rounded border border-neutral-800 bg-input px-2 py-1.5 text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none"
             />
           </div>
         </div>
@@ -409,7 +409,7 @@ function FileEditor({
         value={path}
         onChange={(e) => setPath(e.target.value)}
         placeholder=".env"
-        className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 font-mono text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none"
+        className="w-full rounded border border-neutral-800 bg-input px-2 py-1.5 font-mono text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none"
       />
       <textarea
         value={contents}
@@ -418,7 +418,7 @@ function FileEditor({
         rows={8}
         spellCheck={false}
         disabled={Boolean(fileId) && !hydrated}
-        className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 font-mono text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none disabled:opacity-60"
+        className="w-full rounded border border-neutral-800 bg-input px-2 py-1.5 font-mono text-xs text-neutral-100 focus:border-neutral-600 focus:outline-none disabled:opacity-60"
       />
       <div className="flex gap-2">
         <button

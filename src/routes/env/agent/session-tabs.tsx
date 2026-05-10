@@ -245,7 +245,7 @@ export function NewSessionPopover({
               key={r.id}
               onClick={() => void createIn(r.workspacePath)}
               disabled={start.isPending}
-              className="flex w-full flex-col items-start px-3 py-1.5 text-left text-xs hover:bg-neutral-900 disabled:opacity-60"
+              className="flex w-full flex-col items-start px-3 py-1.5 text-left text-xs hover:bg-highlight disabled:opacity-60"
             >
               <span className="text-neutral-200">{r.slug}</span>
               <span className="font-mono text-[10px] text-neutral-500">{r.workspacePath}</span>
@@ -256,14 +256,14 @@ export function NewSessionPopover({
               void chooseFolder()
             }}
             disabled={start.isPending}
-            className="flex w-full items-center gap-2 border-t border-neutral-800 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-900 disabled:opacity-60"
+            className="flex w-full items-center gap-2 border-t border-neutral-800 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-highlight disabled:opacity-60"
           >
             <span>Choose folder…</span>
           </button>
           <button
             onClick={() => void createIn(undefined)}
             disabled={start.isPending}
-            className="flex w-full items-center gap-2 border-t border-neutral-800 px-3 py-1.5 text-left text-xs text-neutral-400 hover:bg-neutral-900 disabled:opacity-60"
+            className="flex w-full items-center gap-2 border-t border-neutral-800 px-3 py-1.5 text-left text-xs text-neutral-400 hover:bg-highlight disabled:opacity-60"
           >
             <span>(no repo — default working dir)</span>
           </button>
@@ -318,7 +318,7 @@ function ClosedDropdown({
                 onReopen(s.id)
                 setOpen(false)
               }}
-              className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-neutral-900"
+              className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-highlight"
             >
               <span className="min-w-0 flex-1 truncate text-neutral-200">
                 {s.title ?? s.id.slice(-8)}

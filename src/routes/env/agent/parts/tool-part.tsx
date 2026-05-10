@@ -89,13 +89,13 @@ function ApplyPatchToolPart({
   return (
     <div className="text-xs">
       <ToolHeader open={open} onToggle={() => setOpen((v) => !v)} status={state.status}>
-        <span className="font-mono text-neutral-300">apply_patch</span>
+        <span className="font-mono text-content-default">apply_patch</span>
         {changedFiles > 0 && (
-          <span className="truncate text-[11px] text-neutral-400">
+          <span className="truncate text-[11px] text-ui-default">
             {changedFiles} file{changedFiles === 1 ? '' : 's'}
           </span>
         )}
-        <span className="ml-auto text-[10px] text-neutral-500">{state.status ?? 'idle'}</span>
+        <span className="ml-auto text-[10px] text-ui-muted">{state.status ?? 'idle'}</span>
       </ToolHeader>
       {open && (
         <ToolBody>
@@ -104,12 +104,12 @@ function ApplyPatchToolPart({
               <DiffView diff={patchText} />
             </div>
           ) : (
-            <div className="text-[11px] text-neutral-500">
+            <div className="text-[11px] text-help">
               {state.status === 'pending' ? 'Waiting for patch…' : 'No patch available.'}
             </div>
           )}
           {state.output && (
-            <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-neutral-800 bg-neutral-950 p-2 font-mono text-[11px] text-neutral-400">
+            <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-neutral-800 bg-neutral-950 p-2 font-mono text-[11px] text-ui-default">
               {state.output}
             </pre>
           )}
@@ -181,11 +181,11 @@ function BashToolPart({
   return (
     <div className="text-xs">
       <ToolHeader open={open} onToggle={() => setOpen((v) => !v)} status={state.status}>
-        <span className="font-mono text-neutral-400">$</span>
-        <span className="truncate font-mono text-neutral-200">{cmd || '(no command)'}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-neutral-500">
+        <span className="font-mono text-ui-default">$</span>
+        <span className="truncate font-mono text-header-3">{cmd || '(no command)'}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-ui-muted">
           {exitCode !== null && (
-            <span className={exitCode === 0 ? 'text-neutral-500' : 'text-red-400'}>
+            <span className={exitCode === 0 ? 'text-ui-muted' : 'text-red-400'}>
               exit {exitCode}
             </span>
           )}
@@ -194,7 +194,7 @@ function BashToolPart({
       </ToolHeader>
       {!open && state.status === 'completed' && state.output && (
         <ToolBody>
-          <div className="truncate font-mono text-[11px] text-neutral-500">
+          <div className="truncate font-mono text-[11px] text-help">
             {lastLine(state.output)}
           </div>
         </ToolBody>
@@ -206,11 +206,11 @@ function BashToolPart({
               <XTermAttached key={shellId} shellId={shellId} />
             </div>
           ) : state.output ? (
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-neutral-800 bg-black p-2 font-mono text-[11px] text-neutral-300">
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-neutral-800 bg-black p-2 font-mono text-[11px] text-content-default">
               {state.output}
             </pre>
           ) : (
-            <div className="text-[11px] text-neutral-500">
+            <div className="text-[11px] text-help">
               {state.status === 'pending' ? 'Waiting to start…' : 'No output available.'}
             </div>
           )}
@@ -242,7 +242,7 @@ function ToolHeader({
       onClick={onToggle}
       className="flex w-full items-center gap-2 rounded py-0.5 text-left hover:bg-neutral-900/40"
     >
-      <span className="inline-flex w-3 justify-center font-mono text-neutral-500">
+      <span className="inline-flex w-3 justify-center font-mono text-ui-muted">
         {open ? '▾' : '▸'}
       </span>
       <StatusDot status={status} />
@@ -276,14 +276,14 @@ function PtyToolPart({
       <div className="flex items-center gap-2 py-0.5">
         <span className="inline-flex w-3 justify-center font-mono text-neutral-700">·</span>
         <StatusDot status={state.status} />
-        <span className="text-neutral-300">Opened shell</span>
-        <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-neutral-200">
+        <span className="text-content-default">Opened shell</span>
+        <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-header-3">
           {label}
         </span>
         {shellId && onOpenShell && (
           <button
             onClick={() => onOpenShell({ type: 'shell', shellId })}
-            className="ml-auto rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[11px] text-neutral-200 hover:bg-neutral-800"
+            className="ml-auto rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[11px] text-header-3 hover:bg-neutral-800"
           >
             Open in Shells panel
           </button>
@@ -324,20 +324,20 @@ function GenericToolPart({
   return (
     <div className="text-xs">
       <ToolHeader open={open} onToggle={() => setOpen((v) => !v)} status={state.status}>
-        <span className="font-mono text-neutral-300">{tool}</span>
+        <span className="font-mono text-content-default">{tool}</span>
         {isTask && taskDescription && (
-          <span className="truncate text-[11px] text-neutral-400">— {taskDescription}</span>
+          <span className="truncate text-[11px] text-ui-default">— {taskDescription}</span>
         )}
         {showPath && (
           <span
-            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left font-mono text-[11px] text-neutral-400"
+            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left font-mono text-[11px] text-ui-default"
             style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
             title={filePath}
           >
             {filePath}
           </span>
         )}
-        <span className="ml-auto text-[10px] text-neutral-500">{state.status ?? 'idle'}</span>
+        <span className="ml-auto text-[10px] text-ui-muted">{state.status ?? 'idle'}</span>
       </ToolHeader>
       {open && isTask && (
         <ToolBody>
@@ -353,16 +353,16 @@ function GenericToolPart({
           <div className="font-mono text-[11px]">
             {state.input && (
               <>
-                <div className="mb-1 text-neutral-500">input</div>
-                <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap text-neutral-400">
+                <div className="mb-1 text-label">input</div>
+                <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap text-ui-default">
                   {JSON.stringify(state.input, null, 2)}
                 </pre>
               </>
             )}
             {state.output && (
               <>
-                <div className="mb-1 text-neutral-500">output</div>
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-neutral-300">
+                <div className="mb-1 text-label">output</div>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-content-default">
                   {state.output}
                 </pre>
               </>
@@ -390,13 +390,13 @@ function SubagentTranscript({
 }) {
   if (!transcript) {
     return (
-      <div className="text-[11px] italic text-neutral-500">Waiting for subagent…</div>
+      <div className="text-[11px] italic text-help">Waiting for subagent…</div>
     )
   }
   const parts = flattenParts(transcript)
   if (parts.length === 0) {
     return (
-      <div className="text-[11px] italic text-neutral-500">Subagent has not produced output yet.</div>
+      <div className="text-[11px] italic text-help">Subagent has not produced output yet.</div>
     )
   }
   return (

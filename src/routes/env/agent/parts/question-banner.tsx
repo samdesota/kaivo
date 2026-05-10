@@ -170,7 +170,7 @@ function QuestionRow({
           disabled={disabled}
           placeholder={hasOptions ? 'Or type a custom answer…' : 'Type your answer…'}
           rows={2}
-          className="w-full resize-none rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-sky-500/60 focus:outline-none disabled:opacity-60"
+          className="w-full resize-none rounded border border-neutral-700 bg-input px-2 py-1.5 text-sm text-neutral-100 placeholder:text-placeholder focus:border-sky-500/60 focus:outline-none disabled:opacity-60"
         />
       )}
     </div>

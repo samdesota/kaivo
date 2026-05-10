@@ -12,34 +12,54 @@
   --text-xs: 0.875rem;
   --text-xs--line-height: 1.25rem;
 
+  --radius-sm: 0.3125rem;
+  --radius-md: 0.4375rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+  --radius-default: 0.3125rem;
+
   /* Neutral scale generated from src/lib/color-scheme.js.
-     Hue comes from the workspace sidebar background (#181a1f); saturation is reduced
-     for a quieter neutral scheme;
-     each step preserves the previous neutral color's lightness. */
-  --color-neutral-50: hsl(222.86 20% 98.04%);
-  --color-neutral-100: hsl(222.86 20% 90.2%);
-  --color-neutral-200: hsl(222.86 20% 80.98%);
-  --color-neutral-300: hsl(222.86 20% 70.98%);
-  --color-neutral-400: hsl(222.86 20% 55.1%);
-  --color-neutral-500: hsl(222.86 20% 40%);
-  --color-neutral-600: hsl(222.86 20% 34.12%);
-  --color-neutral-700: hsl(222.86 20% 28.04%);
-  --color-neutral-800: hsl(222.86 20% 20%);
-  --color-neutral-900: hsl(222.86 20% 14.9%);
-  --color-neutral-910: hsl(222.86 20% 14.08%);
-  --color-neutral-920: hsl(222.86 20% 13.25%);
-  --color-neutral-930: hsl(222.86 20% 12.43%);
-  --color-neutral-940: hsl(222.86 20% 11.6%);
-  --color-neutral-950: hsl(222.86 20% 10.78%);
-  --color-neutral-960: hsl(222.86 20% 9.68%);
-  --color-neutral-970: hsl(222.86 20% 8.59%);
-  --color-neutral-975: hsl(222.86 20% 8.04%);
+     Hue and saturation are user-controlled; lightness stays fixed per step. */
+  --color-neutral-50: hsl(var(--app-color-hue) var(--app-color-saturation) 98.04%);
+  --color-neutral-100: hsl(var(--app-color-hue) var(--app-color-saturation) 90.2%);
+  --color-neutral-200: hsl(var(--app-color-hue) var(--app-color-saturation) 80.98%);
+  --color-neutral-300: hsl(var(--app-color-hue) var(--app-color-saturation) 70.98%);
+  --color-neutral-400: hsl(var(--app-color-hue) var(--app-color-saturation) 55.1%);
+  --color-neutral-500: hsl(var(--app-color-hue) var(--app-color-saturation) 40%);
+  --color-neutral-600: hsl(var(--app-color-hue) var(--app-color-saturation) 34.12%);
+  --color-neutral-700: hsl(var(--app-color-hue) var(--app-color-saturation) 28.04%);
+  --color-neutral-800: hsl(var(--app-color-hue) var(--app-color-saturation) 18%);
+  --color-neutral-900: hsl(var(--app-color-hue) var(--app-color-saturation) 14.9%);
+  --color-neutral-910: hsl(var(--app-color-hue) var(--app-color-saturation) 14.08%);
+  --color-neutral-920: hsl(var(--app-color-hue) var(--app-color-saturation) 13.25%);
+  --color-neutral-930: hsl(var(--app-color-hue) var(--app-color-saturation) 12.43%);
+  --color-neutral-940: hsl(var(--app-color-hue) var(--app-color-saturation) 11.6%);
+  --color-neutral-950: hsl(var(--app-color-hue) var(--app-color-saturation) 10.78%);
+  --color-neutral-960: hsl(var(--app-color-hue) var(--app-color-saturation) 9.68%);
+  --color-neutral-970: hsl(var(--app-color-hue) var(--app-color-saturation) 8.59%);
+  --color-neutral-975: hsl(var(--app-color-hue) var(--app-color-saturation) 8.04%);
+
+  --color-content-default: var(--color-neutral-300);
+  --color-content-strong: var(--color-neutral-200);
+  --color-content-muted: var(--color-neutral-400);
+  --color-ui-default: var(--color-neutral-300);
+  --color-ui-muted: var(--color-neutral-400);
+  --color-header-1: var(--color-neutral-100);
+  --color-header-2: var(--color-neutral-200);
+  --color-header-3: var(--color-neutral-300);
+  --color-help: var(--color-neutral-400);
+  --color-label: var(--color-neutral-300);
+  --color-placeholder: var(--color-neutral-500);
+  --color-highlight: hsl(var(--app-color-hue) 13% 10.78%);
+  --color-input: var(--color-neutral-970);
 }
 
 :root {
   /* Overridable via the Settings → Appearance control. Drives base
      html font-size, so all rem-based Tailwind sizes scale together. */
   --app-font-size: 16px;
+  --app-color-hue: 222.86;
+  --app-color-saturation: 20%;
 }
 
 html {
@@ -54,8 +74,8 @@ body,
 
 body {
   margin: 0;
-  background: hsl(222.86 20% 10.78%);
-  color: hsl(222.86 20% 70.98%);
+  background: var(--color-neutral-950);
+  color: var(--color-content-default);
 }
 
 html.overlay-layer-document,
@@ -87,4 +107,10 @@ body.overlay-layer-document,
 
 .lucide {
   stroke-width: 1.5;
+}
+
+@layer utilities {
+  .rounded {
+    border-radius: var(--radius-default);
+  }
 }

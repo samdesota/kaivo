@@ -16,11 +16,11 @@ import {
 import { shouldRefreshFileForFsEvent } from './file-watch-match'
 
 const workspaceEditorTheme = EditorView.theme({
-  '&': { backgroundColor: '#111318' },
-  '.cm-scroller': { backgroundColor: '#111318' },
-  '.cm-content': { backgroundColor: '#111318' },
-  '.cm-gutters': { backgroundColor: '#111318', borderRightColor: '#2c313a' },
-  '.cm-gutter, .cm-gutterElement, .cm-activeLineGutter': { backgroundColor: '#111318' },
+  '&': { backgroundColor: 'var(--color-neutral-950)' },
+  '.cm-scroller': { backgroundColor: 'var(--color-neutral-950)' },
+  '.cm-content': { backgroundColor: 'var(--color-neutral-950)' },
+  '.cm-gutters': { backgroundColor: 'var(--color-neutral-950)', borderRightColor: 'var(--color-neutral-800)' },
+  '.cm-gutter, .cm-gutterElement, .cm-activeLineGutter': { backgroundColor: 'var(--color-neutral-950)' },
 })
 
 export function FileViewer({
@@ -78,7 +78,7 @@ export function FileViewer({
     setActiveEditorState(nextFileEditorStateForDraft(activeEditorState, nextDraft, diskMtime))
   }
 
-  if (read.isLoading) return <div className="h-full bg-neutral-975 p-4 text-neutral-500">Loading…</div>
+  if (read.isLoading) return <div className="h-full bg-neutral-975 p-4 text-help">Loading…</div>
   if (read.error && activeEditorState.draft === null) {
     return <div className="h-full bg-neutral-975 p-4 text-red-400">{extractTrpcMessage(read.error)}</div>
   }
@@ -109,14 +109,14 @@ export function FileViewer({
 
   if (data.tooLarge) {
     return (
-      <div className="h-full bg-neutral-975 p-4 text-sm text-neutral-400">
+      <div className="h-full bg-neutral-975 p-4 text-sm text-ui-default">
         File is too large to display ({formatBytes(data.size ?? 0)}). Limit is 5 MB.
       </div>
     )
   }
   if (data.binary) {
     return (
-      <div className="h-full bg-neutral-975 p-4 text-sm text-neutral-400">
+      <div className="h-full bg-neutral-975 p-4 text-sm text-ui-default">
         Binary file ({formatBytes(data.size ?? 0)}). Preview not supported.
       </div>
     )
@@ -158,7 +158,7 @@ function FileViewerHeader({
 }) {
   return (
     <div className="flex flex-none basis-8 items-center justify-between border-b border-neutral-800 bg-neutral-975 px-3 text-xs">
-      <span className="truncate text-neutral-400">{path}</span>
+      <span className="truncate text-ui-default">{path}</span>
       <div className="flex items-center gap-2">
         {writeError && <span className="text-red-400">{writeError}</span>}
         {dirty && (

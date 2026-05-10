@@ -243,7 +243,7 @@ export function CommandPalette({
             }
           }}
           placeholder="Search shells, previews, actions…"
-          className="w-full border-b border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none"
+          className="w-full border-b border-neutral-800 bg-input px-4 py-3 text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none"
         />
         <ul className="max-h-[50vh] overflow-y-auto py-1">
           {filtered.length === 0 ? (

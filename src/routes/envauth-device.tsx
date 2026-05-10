@@ -69,7 +69,7 @@ export function EnvAuthDevicePage() {
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="ABCD-1234"
-                className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 font-mono text-sm uppercase text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none"
+                className="w-full rounded border border-neutral-800 bg-input px-3 py-2 font-mono text-sm uppercase text-neutral-100 placeholder:text-placeholder focus:border-neutral-600 focus:outline-none"
                 disabled={confirm.isPending}
                 autoFocus={!search.code}
               />

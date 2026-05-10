@@ -142,6 +142,7 @@ export function WorkspacePage() {
   const viewStateStore = useWorkspaceViewStateStore(workspaceId)
   const tabsStore = useWorkspaceTabsStore(workspaceId)
   const appliedSearchWorkspaceId = useRef<string | null>(null)
+  const lastReadyWorkspaceRef = useRef<ReactNode | null>(null)
 
   useEffect(() => {
     if (workspace.data?.id) markOpened.mutate({ id: workspace.data.id })
@@ -255,6 +256,7 @@ export function WorkspacePage() {
       tabsLoading: tabsStore.isLoading,
       tabsHasData: Boolean(tabsStore.data),
     })
+    if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
@@ -273,6 +275,7 @@ export function WorkspacePage() {
       workspaceHasData: Boolean(workspace.data),
       envsHasData: Boolean(envs.data),
     })
+    if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
 
@@ -285,7 +288,7 @@ export function WorkspacePage() {
     tabOrder: tabsStore.tabs.map((tab) => tab.id),
   }
 
-  return (
+  const readyWorkspace = (
     <WorkspaceContextProvider
       value={{
         workspace: workspace.data,
@@ -298,6 +301,8 @@ export function WorkspacePage() {
       <WorkspaceShell key={workspace.data.id} dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
     </WorkspaceContextProvider>
   )
+  lastReadyWorkspaceRef.current = readyWorkspace
+  return readyWorkspace
 }
 
 function logWorkspaceLoading(reason: string, workspaceId: string, state: Record<string, unknown>) {
@@ -755,7 +760,7 @@ export function WorkspaceSidebar({
       <div className="flex-none border-t border-neutral-900 px-2 py-2">
         <Link
           to="/settings"
-          className="flex items-center gap-2 rounded px-[3px] py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-900 hover:text-neutral-200"
+          className="flex items-center gap-2 rounded px-[3px] py-1 text-xs text-neutral-500 transition-colors hover:bg-highlight hover:text-neutral-200"
         >
           <Settings className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate font-medium">Settings</span>
@@ -822,8 +827,8 @@ export function WorkspaceSidebar({
                 {folder.collapsed ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
               </button>
               <div className={
-                'flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
-                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-neutral-900 text-neutral-100 ring-1 ring-neutral-600 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
+                'flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 group-hover:bg-highlight group-hover:text-neutral-200 ' +
+                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-highlight text-neutral-100 ring-1 ring-neutral-600 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
               }
               onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}>
                 <span className="min-w-0 flex-1 truncate px-0.5 font-medium" title={folder.name}>{folder.name}</span>
@@ -886,8 +891,8 @@ export function WorkspaceSidebar({
           <div className="group flex items-center gap-px text-neutral-400">
             <span className="h-4 w-1 shrink-0" aria-hidden="true" />
             <div className={
-              'relative flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 transition-colors group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
-              (active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400')
+              'relative flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 transition-colors group-hover:bg-highlight group-hover:text-neutral-200 ' +
+              (active ? 'bg-highlight text-neutral-100' : 'text-neutral-400')
             }>
               {editing ? (
                 <input
@@ -899,7 +904,7 @@ export function WorkspaceSidebar({
                     if (e.key === 'Enter') void saveRename()
                     if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
                   }}
-                  className="min-w-0 flex-1 rounded border border-neutral-600 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
+                  className="min-w-0 flex-1 rounded border border-neutral-600 bg-input px-2 py-1 text-xs text-neutral-100 outline-none"
                   aria-label="Workspace name"
                 />
               ) : (

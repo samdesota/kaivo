@@ -77,7 +77,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-900"
+        className="flex items-center gap-1 rounded border border-neutral-800 bg-highlight/60 px-2 py-1 text-[11px] text-neutral-300 hover:bg-highlight"
         title="Pick model for this session"
       >
         <span className="text-neutral-500">model:</span>
@@ -91,14 +91,14 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter models…"
-            className="block w-full rounded-t border-b border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+            className="block w-full rounded-t border-b border-neutral-800 bg-input px-3 py-1.5 text-xs text-neutral-100 placeholder:text-placeholder focus:outline-none"
           />
           <div className="max-h-80 overflow-auto">
             <button
               onClick={() => void pick(null, null)}
               className={
-                'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-neutral-900 ' +
-                (!curr?.providerID && !curr?.modelID ? 'bg-neutral-900/60 text-neutral-100' : 'text-neutral-400')
+                'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-highlight ' +
+                (!curr?.providerID && !curr?.modelID ? 'bg-highlight text-neutral-100' : 'text-neutral-400')
               }
             >
               <span className="font-mono">default</span>
@@ -120,8 +120,8 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
                   key={m.label}
                   onClick={() => void pick(m.providerID, m.modelID)}
                   className={
-                    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-neutral-900 ' +
-                    (active ? 'bg-neutral-900/60 text-neutral-100' : 'text-neutral-300')
+                    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-highlight ' +
+                    (active ? 'bg-highlight text-neutral-100' : 'text-neutral-300')
                   }
                 >
                   <span className="font-mono text-neutral-100">{m.modelID}</span>

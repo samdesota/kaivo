@@ -254,7 +254,7 @@ export function Composer({
                 : 'Message the agent. Enter to send, Shift+Enter for newline. Type / for commands.'
           }
           rows={1}
-          className="min-h-[32px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none disabled:opacity-60"
+          className="min-h-[32px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none disabled:opacity-60"
         />
         {effectiveRunning ? (
           <button

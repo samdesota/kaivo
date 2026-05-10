@@ -234,7 +234,7 @@ function TextInputOverlay({
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={request.placeholder}
-            className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+            className="w-full rounded border border-neutral-800 bg-input px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-600"
           />
         </label>
         <div className="flex justify-end gap-2">

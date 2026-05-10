@@ -38,7 +38,7 @@ export function BorderedTabStrip({
             aria-selected={active}
             className={cn(
               'group flex min-w-[100px] max-w-[250px] shrink-0 items-stretch border-l border-neutral-800 transition-colors first:border-l-0 last:border-r',
-              active ? 'bg-neutral-900/60 text-neutral-200' : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200',
+              active ? 'bg-highlight text-neutral-200' : 'text-neutral-400 hover:bg-highlight hover:text-neutral-200',
             )}
           >
             <button

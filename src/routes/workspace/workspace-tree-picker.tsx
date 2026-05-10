@@ -90,10 +90,10 @@ export function WorkspaceTreePicker({
         aria-label={ariaLabel}
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between gap-2 rounded border border-neutral-800 bg-neutral-930 px-3 py-2 text-left text-xs text-neutral-100 outline-none hover:border-neutral-700 disabled:opacity-60"
+        className="flex w-full items-center justify-between gap-2 rounded border border-neutral-800 bg-input px-3 py-2 text-left text-xs text-content-strong outline-none hover:border-neutral-700 disabled:opacity-60"
       >
         <span className="min-w-0 truncate">{selectedLabel}</span>
-        <span className="shrink-0 text-neutral-500">v</span>
+        <span className="shrink-0 text-ui-muted">v</span>
       </button>
       {open && menuRect && createPortal(
         <div
@@ -105,7 +105,7 @@ export function WorkspaceTreePicker({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={searchPlaceholder}
-            className="w-full border-b border-neutral-800 bg-transparent px-3 py-2 text-xs text-neutral-100 outline-none placeholder:text-neutral-500"
+            className="w-full border-b border-neutral-800 bg-input px-3 py-2 text-xs text-content-strong outline-none placeholder:text-placeholder"
             autoFocus
           />
           <div className="max-h-64 overflow-y-auto py-1">
@@ -119,7 +119,7 @@ export function WorkspaceTreePicker({
                   onClick={() => selectable && choose(row.id)}
                   className={
                     'flex w-full min-w-0 items-center gap-1 px-3 py-1.5 text-left text-xs ' +
-                    (selectable ? 'text-neutral-200 hover:bg-neutral-900' : 'cursor-default text-neutral-500')
+                    (selectable ? 'text-header-3 hover:bg-highlight' : 'cursor-default text-ui-muted')
                   }
                 >
                   <span className="shrink-0 text-neutral-700" style={{ width: row.depth * 14 }} aria-hidden="true" />
@@ -127,7 +127,7 @@ export function WorkspaceTreePicker({
                 </button>
               )
             })}
-            {visibleRows.length === 0 && <div className="p-4 text-center text-xs text-neutral-500">No matches.</div>}
+            {visibleRows.length === 0 && <div className="p-4 text-center text-xs text-help">No matches.</div>}
           </div>
         </div>,
         document.body,
