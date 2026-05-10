@@ -8,7 +8,7 @@ import { openFolderPickerOverlay } from '../../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../../lib/utils'
 import { useWorkspaceAgentTabsStore } from '../../workspace/agent-tabs-store'
 import { useEnv } from '../env-context'
-import { NewAgentChatModal } from './new-agent-chat-modal'
+import { NewAgentChatOverlayLauncher } from './new-agent-chat-modal'
 
 interface SessionSummary {
   id: string
@@ -169,7 +169,7 @@ export function NewSessionPopover({
         >
           {start.isPending ? <span className="h-3 w-3 animate-spin rounded-full border border-running border-t-transparent" /> : <Plus className="h-3 w-3" aria-hidden="true" />}
         </button>
-        <NewAgentChatModal
+        <NewAgentChatOverlayLauncher
           open={open}
           workspaceId={workspaceId}
           onClose={() => setOpen(false)}

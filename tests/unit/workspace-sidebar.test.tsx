@@ -111,7 +111,7 @@ vi.mock('../../src/lib/trpc-plain', () => ({
 }))
 
 vi.mock('../../src/routes/env/agent/new-agent-chat-modal', () => ({
-  NewAgentChatModal: ({ open, initialWorkspaceMode, workspaceName }: { open: boolean; initialWorkspaceMode?: string; workspaceName?: string }) =>
+  NewAgentChatOverlayLauncher: ({ open, initialWorkspaceMode, workspaceName }: { open: boolean; initialWorkspaceMode?: string; workspaceName?: string }) =>
     open ? (
       <div>
         <label>

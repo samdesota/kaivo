@@ -9,6 +9,18 @@ import { FolderPickerModal } from '../env/agent/folder-picker-modal'
 import { CommandPalette } from '../env/shell/command-palette'
 import type { PaneContent } from '../env/shell/tab-state'
 import { Modal } from '../../components/ui'
+import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
+import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
+import { WorkspaceCleanupOverlay } from '../workspace/workspace-cleanup-overlay'
+import type { WorkspaceResourceRecord } from '../workspace/resources-store'
+
+/**
+ * Detached modal layer rendered at /internal/overlay-layer.
+ *
+ * App code sends typed requests through lib/overlay-layer-controller. App data
+ * is available through the root trpc provider; env-backed overlays receive env
+ * credentials in the request and get an envTrpc provider below.
+ */
 
 export const OVERLAY_CHANNEL = 'cloud-code-overlay-layer'
 
@@ -54,6 +66,28 @@ export type OverlayRequest = {
   placeholder?: string
   confirmLabel?: string
   cancelLabel?: string
+} | {
+  requestId: string
+  type: 'repo-config'
+  configId: string
+} | {
+  requestId: string
+  type: 'new-repo-config'
+} | {
+  requestId: string
+  type: 'provider-credentials'
+  provider: 'anthropic' | 'openai'
+  label: string
+  hasApiKey: boolean
+  baseUrl: string | null
+} | {
+  requestId: string
+  type: 'workspace-cleanup'
+  workspace: { id: string; name: string }
+  allWorkspaces: Array<{ id: string; name: string }>
+  resources: WorkspaceResourceRecord[]
+  env: EnvRef & { label: string }
+  envToken: string
 }
 
 export type OverlayResponse =
@@ -67,6 +101,10 @@ export type OverlayResponse =
   | { requestId: string; type: 'new-workspace' }
   | { requestId: string; type: 'confirmed'; confirmed: boolean }
   | { requestId: string; type: 'text-submitted'; value: string }
+  | { requestId: string; type: 'repo-config-closed'; changed: boolean }
+  | { requestId: string; type: 'repo-config-created'; configId: string }
+  | { requestId: string; type: 'provider-credentials-saved' }
+  | { requestId: string; type: 'workspace-cleanup-complete' }
   | { requestId: string; type: 'error'; message: string }
 
 export function OverlayLayerPage() {
@@ -126,6 +164,10 @@ function isOverlayRequest(message: OverlayRequest | OverlayResponse | { type: 'c
     || message.type === 'command-palette'
     || message.type === 'confirm'
     || message.type === 'text-input'
+    || message.type === 'repo-config'
+    || message.type === 'new-repo-config'
+    || message.type === 'provider-credentials'
+    || message.type === 'workspace-cleanup'
 }
 
 function OverlayRequestRenderer({
@@ -141,6 +183,15 @@ function OverlayRequestRenderer({
   if (request.type === 'text-input') {
     return <TextInputOverlay request={request} respond={respond} />
   }
+  if (request.type === 'repo-config') {
+    return <RepoConfigOverlay request={request} respond={respond} />
+  }
+  if (request.type === 'new-repo-config') {
+    return <NewRepoConfigOverlay request={request} respond={respond} />
+  }
+  if (request.type === 'provider-credentials') {
+    return <ProviderCredentialsOverlayRenderer request={request} respond={respond} />
+  }
 
   return <EnvOverlayRequestRenderer request={request} respond={respond} />
 }
@@ -149,7 +200,7 @@ function EnvOverlayRequestRenderer({
   request,
   respond,
 }: {
-  request: Exclude<OverlayRequest, { type: 'confirm' | 'text-input' }>
+  request: Extract<OverlayRequest, { type: 'new-agent-chat' | 'folder-picker' | 'command-palette' | 'workspace-cleanup' }>
   respond: (response: OverlayResponse) => void
 }) {
   const queryClient = useMemo(() => new QueryClient(), [request.requestId])
@@ -199,9 +250,69 @@ function EnvOverlayRequestRenderer({
               onNewWorkspace={() => respond({ requestId: request.requestId, type: 'new-workspace' })}
             />
           )}
+          {request.type === 'workspace-cleanup' && (
+            <WorkspaceCleanupOverlay
+              workspace={request.workspace}
+              allWorkspaces={request.allWorkspaces}
+              resources={request.resources}
+              onCancel={() => respond({ requestId: request.requestId, type: 'closed' })}
+              onCleaned={() => respond({ requestId: request.requestId, type: 'workspace-cleanup-complete' })}
+            />
+          )}
         </EnvContextProvider>
       </envTrpc.Provider>
     </QueryClientProvider>
+  )
+}
+
+function RepoConfigOverlay({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'repo-config' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  const close = (changed: boolean) => respond({ requestId: request.requestId, type: 'repo-config-closed', changed })
+  return (
+    <Modal open onClose={() => close(true)} title="Repo config" widthClass="max-w-2xl">
+      <RepoConfigEditor configId={request.configId} onDeleted={() => close(true)} />
+    </Modal>
+  )
+}
+
+function NewRepoConfigOverlay({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'new-repo-config' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  return (
+    <Modal open onClose={() => respond({ requestId: request.requestId, type: 'closed' })} title="New repo config" widthClass="max-w-lg">
+      <NewRepoConfigForm
+        onCreated={(configId) => respond({ requestId: request.requestId, type: 'repo-config-created', configId })}
+        onCancel={() => respond({ requestId: request.requestId, type: 'closed' })}
+      />
+    </Modal>
+  )
+}
+
+function ProviderCredentialsOverlayRenderer({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'provider-credentials' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  return (
+    <ProviderCredentialsOverlay
+      provider={request.provider}
+      label={request.label}
+      hasApiKey={request.hasApiKey}
+      baseUrl={request.baseUrl}
+      onClose={() => respond({ requestId: request.requestId, type: 'closed' })}
+      onSaved={() => respond({ requestId: request.requestId, type: 'provider-credentials-saved' })}
+    />
   )
 }
 

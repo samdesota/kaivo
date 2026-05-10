@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../trpc'
-import { openConfirmOverlay } from '../lib/overlay-layer-controller'
+import { openConfirmOverlay, openNewRepoConfigOverlay, openRepoConfigOverlay } from '../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../lib/trpc-plain'
 import { extractTrpcMessage } from '../lib/utils'
 import { RepoCombobox } from './repo-combobox'
-import { Modal } from '../components/ui'
 
 type Source = 'url' | 'github'
 
@@ -443,7 +442,11 @@ function FileEditor({
 /** Master/detail view of all global repo configs. */
 export function RepoConfigsManager() {
   const list = trpc.repoConfig.list.useQuery()
-  const [activeId, setActiveId] = useState<string | null>(null)
+
+  async function openConfig(configId: string) {
+    const changed = await openRepoConfigOverlay({ configId })
+    if (changed) await list.refetch()
+  }
 
   return (
     <div>
@@ -456,14 +459,10 @@ export function RepoConfigsManager() {
           {list.data?.map((c) => (
             <li key={c.id}>
               <button
-                onClick={() => {
-                  setActiveId(c.id)
-                }}
+                onClick={() => void openConfig(c.id)}
                 className={
                   'block w-full rounded border px-2 py-1.5 text-left text-xs ' +
-                  (activeId === c.id
-                    ? 'border-neutral-600 bg-neutral-900 text-neutral-100'
-                    : 'border-neutral-800 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-900')
+                  'border-neutral-800 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-900'
                 }
               >
                 <div className="truncate font-medium">{c.name}</div>
@@ -475,39 +474,24 @@ export function RepoConfigsManager() {
           ))}
         </ul>
       </div>
-      <Modal
-        open={Boolean(activeId)}
-        onClose={() => setActiveId(null)}
-        title="Repo config"
-        widthClass="max-w-2xl"
-      >
-        {activeId ? <RepoConfigEditor configId={activeId} onDeleted={() => setActiveId(null)} /> : null}
-      </Modal>
     </div>
   )
 }
 
 export function RepoConfigCreateButton() {
-  const [creating, setCreating] = useState(false)
+  const queryClient = useQueryClient()
+
+  async function createConfig() {
+    const configId = await openNewRepoConfigOverlay()
+    if (configId) await queryClient.invalidateQueries({ queryKey: trpcQueryKey('repoConfig.list') })
+  }
+
   return (
-    <>
-      <button
-        onClick={() => setCreating(true)}
-        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
-      >
-        + New
-      </button>
-      <Modal
-        open={creating}
-        onClose={() => setCreating(false)}
-        title="New repo config"
-        widthClass="max-w-lg"
-      >
-        <NewRepoConfigForm
-          onCreated={() => setCreating(false)}
-          onCancel={() => setCreating(false)}
-        />
-      </Modal>
-    </>
+    <button
+      onClick={() => void createConfig()}
+      className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
+    >
+      + New
+    </button>
   )
 }

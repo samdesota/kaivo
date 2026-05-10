@@ -36,7 +36,7 @@ type ChooserRow =
   | { key: string; kind: 'worktree'; selection: NewAgentChatSelection; title: string; detail: string }
   | { key: string; kind: 'repoConfig'; selection: NewAgentChatSelection; title: string; detail: string }
 
-export function NewAgentChatModal({
+export function NewAgentChatOverlayLauncher({
   open,
   workspaceId,
   workspaceName = 'Current workspace',

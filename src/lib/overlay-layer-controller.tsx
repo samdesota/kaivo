@@ -6,6 +6,13 @@ import { makeTrpcClient, trpc } from '../trpc'
 import { OVERLAY_CHANNEL, OverlayLayerApp, type OverlayRequest, type OverlayResponse } from '../routes/internal/overlay-layer'
 import type { PaneContent } from '../routes/env/shell/tab-state'
 import type { NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
+import type { WorkspaceResourceRecord } from '../routes/workspace/resources-store'
+
+/**
+ * Desktop modals must be opened through this controller so they render in the
+ * detached Electron overlay above browser tabs. Add new modal request/response
+ * types here and render their UI in routes/internal/overlay-layer.tsx.
+ */
 
 type NewAgentChatInput = {
   workspaceId?: string
@@ -127,8 +134,65 @@ export async function openTextInputOverlay(input: {
   throw new Error(`unexpected overlay response: ${response.type}`)
 }
 
+export async function openRepoConfigOverlay(input: { configId: string }): Promise<boolean> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'repo-config',
+    configId: input.configId,
+  })
+  if (response.type === 'repo-config-closed') return response.changed
+  if (response.type === 'closed') return false
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openNewRepoConfigOverlay(): Promise<string | null> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'new-repo-config',
+  })
+  if (response.type === 'repo-config-created') return response.configId
+  if (response.type === 'closed') return null
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openProviderCredentialsOverlay(input: {
+  provider: 'anthropic' | 'openai'
+  label: string
+  hasApiKey: boolean
+  baseUrl: string | null
+}): Promise<boolean> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'provider-credentials',
+    ...input,
+  })
+  if (response.type === 'provider-credentials-saved') return true
+  if (response.type === 'closed') return false
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openWorkspaceCleanupOverlay(input: EnvOverlayInput & {
+  workspace: { id: string; name: string }
+  allWorkspaces: Array<{ id: string; name: string }>
+  resources: WorkspaceResourceRecord[]
+}): Promise<boolean> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'workspace-cleanup',
+    ...input,
+  })
+  if (response.type === 'workspace-cleanup-complete') return true
+  if (response.type === 'closed') return false
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
 async function openOverlayRequest(request: OverlayRequest): Promise<OverlayResponse> {
-  if (request.type !== 'confirm' && request.type !== 'text-input' && !request.envToken) {
+  if (request.type !== 'confirm'
+    && request.type !== 'text-input'
+    && request.type !== 'repo-config'
+    && request.type !== 'new-repo-config'
+    && request.type !== 'provider-credentials'
+    && !request.envToken) {
     throw new Error('env token is required for env overlays')
   }
 

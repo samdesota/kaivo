@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { trpc } from '../../trpc'
-import { Button, FormError, Input, Modal } from '../../components/ui'
-import { openConfirmOverlay } from '../../lib/overlay-layer-controller'
+import { Button, FormError } from '../../components/ui'
+import { openConfirmOverlay, openProviderCredentialsOverlay } from '../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../lib/utils'
 import { makeEnvClient, type EnvRef } from '../../lib/env-client'
 import { SettingsPanel } from './panel'
@@ -144,40 +144,12 @@ function ProviderSection({
   cfg: { provider: string; hasApiKey: boolean; hasBaseUrl: boolean; baseUrl: string | null }
   onChanged: () => void
 }) {
-  const [apiKey, setApiKey] = useState('')
-  const [baseUrl, setBaseUrl] = useState(cfg.baseUrl ?? '')
-  const [modalOpen, setModalOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const setKey = trpc.settings.setProviderKey.useMutation()
-  const setBase = trpc.settings.setProviderBaseUrl.useMutation()
   const del = trpc.settings.deleteProvider.useMutation()
 
   useEffect(() => {
-    setBaseUrl(cfg.baseUrl ?? '')
-  }, [cfg.baseUrl])
-
-  async function onSave() {
     setError(null)
-    try {
-      if (apiKey.trim()) {
-        await setKey.mutateAsync({
-          provider: meta.id,
-          apiKey: apiKey.trim(),
-          baseUrl: baseUrl.trim() || null,
-        })
-      } else {
-        await setBase.mutateAsync({
-          provider: meta.id,
-          baseUrl: baseUrl.trim() || null,
-        })
-      }
-      setApiKey('')
-      setModalOpen(false)
-      onChanged()
-    } catch (err) {
-      setError(extractTrpcMessage(err))
-    }
-  }
+  }, [cfg.baseUrl])
 
   async function onDelete() {
     setError(null)
@@ -190,8 +162,6 @@ function ProviderSection({
     if (!confirmed) return
     try {
       await del.mutateAsync({ provider: meta.id })
-      setApiKey('')
-      setBaseUrl('')
       onChanged()
     } catch (err) {
       setError(extractTrpcMessage(err))
@@ -228,9 +198,14 @@ function ProviderSection({
           <Button
             onClick={() => {
               setError(null)
-              setApiKey('')
-              setBaseUrl(cfg.baseUrl ?? '')
-              setModalOpen(true)
+              void openProviderCredentialsOverlay({
+                provider: meta.id,
+                label: meta.label,
+                hasApiKey: cfg.hasApiKey,
+                baseUrl: cfg.baseUrl,
+              }).then((saved) => {
+                if (saved) onChanged()
+              }).catch((err) => setError(extractTrpcMessage(err)))
             }}
             className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
           >
@@ -248,54 +223,6 @@ function ProviderSection({
         </div>
         {error && <FormError>{error}</FormError>}
       </div>
-      <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={`${cfg.hasApiKey ? 'Edit' : 'Add'} ${meta.label} credentials`}
-        widthClass="max-w-lg"
-      >
-        <div>
-          <label className="mb-3 block">
-            <span className="block text-[11px] font-medium text-neutral-400">API key</span>
-            <Input
-              id={`${meta.id}-key`}
-              type="password"
-              autoComplete="off"
-              placeholder={cfg.hasApiKey ? 'Stored. Enter a new value to rotate.' : 'sk-…'}
-              value={apiKey}
-              className="mt-1 h-7 px-2 py-1 text-xs"
-              onChange={(e) => setApiKey(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className="block text-[11px] font-medium text-neutral-400">Base URL</span>
-            <Input
-              id={`${meta.id}-base`}
-              type="url"
-              placeholder="Default provider URL"
-              value={baseUrl}
-              className="mt-1 h-7 px-2 py-1 text-xs"
-              onChange={(e) => setBaseUrl(e.target.value)}
-            />
-          </label>
-          {error && <div className="mt-3"><FormError>{error}</FormError></div>}
-          <div className="mt-4 flex justify-end gap-2">
-            <Button
-              onClick={() => setModalOpen(false)}
-              className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void onSave()}
-              disabled={setKey.isPending || setBase.isPending || (!apiKey.trim() && !cfg.hasApiKey)}
-              className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
-            >
-              {setKey.isPending || setBase.isPending ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </SettingsPanel>
   )
 }

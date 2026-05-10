@@ -1,5 +1,13 @@
 # Zoottle — operator notes
 
+## Modal and Overlay Layer
+
+Any UI that behaves like a modal, command palette, picker, confirmation dialog, or blocking overlay must render in the detached overlay layer, not inside the workspace/app DOM. This is required because in-app modals can appear underneath Electron browser tabs.
+
+Use `src/lib/overlay-layer-controller.tsx` as the app-facing API. Add a typed `OverlayRequest`/`OverlayResponse` in `src/routes/internal/overlay-layer.tsx`, render the modal UI there, and expose an `openXOverlay(...)` function from the controller. Env-backed overlays must pass `env` and `envToken`; the overlay layer creates its own `envTrpc` provider. App/identity data is available through the normal root `trpc` provider.
+
+Do not add new `<Modal>`, `role="dialog"`, command palette, or picker UI directly to workspace/app routes unless it is intentionally non-blocking inline UI. If a route needs to trigger a modal from JSX, create a small `XOverlayLauncher` component that calls the controller and returns `null`.
+
 Zoottle is currently local-first. The default product path is the Electron desktop app, which starts a local identity/app server and a matching local `cc-env`, then auto-pairs them.
 
 Remote Docker sandboxes/orchestrator are legacy for now. The production box still has old data that will be exported into local SQLite at the final migration step of the current Fractal plan.
