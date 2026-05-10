@@ -1,17 +1,17 @@
-# Cloud Code Tools — operator notes
+# Zoottle — operator notes
 
-Cloud Code is currently local-first. The default product path is the Electron desktop app, which starts a local identity/app server and a matching local `cc-env`, then auto-pairs them.
+Zoottle is currently local-first. The default product path is the Electron desktop app, which starts a local identity/app server and a matching local `cc-env`, then auto-pairs them.
 
 Remote Docker sandboxes/orchestrator are legacy for now. The production box still has old data that will be exported into local SQLite at the final migration step of the current Fractal plan.
 
 Production box: `root@161.35.136.150` → legacy `https://code.438d.xyz`.
 
-Local repo lives at `/Users/sam/d/cloud-code-tools`. The box has its own checkout at `/opt/cloud-code-tools`.
+Local repo lives at `/Users/sam/d/repos/cloud-code-tools/zootle`. The box has its own legacy checkout at `/opt/cloud-code-tools`.
 
 ## Default Local Desktop
 
 ```bash
-cd /Users/sam/d/cloud-code-tools
+cd /Users/sam/d/repos/cloud-code-tools/zootle
 npm run dev
 ```
 

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { buildLaunchManifest, runLocalDevLauncher } from '../../scripts/local-launch'
-import { resolveInstanceRuntimeConfig } from '../../packages/cloud-code-desktop/src/instance-runtime'
+import { resolveInstanceRuntimeConfig } from '../../packages/zoottle-desktop/src/instance-runtime'
 
 describe('local launch manifest', () => {
   it('serializes every service without secrets', () => {
