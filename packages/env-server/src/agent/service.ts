@@ -34,13 +34,13 @@ type OpenAIOAuthStatus = {
 const CLOUD_TOOL_OVERRIDES = {
   bash: false,
   pty: false,
-  cloud_bash: true,
-  cloud_pty: true,
-  cloud_pty_list: true,
-  cloud_pty_write: true,
-  cloud_pty_read: true,
-  cloud_pty_close: true,
-  cloud_open_pane: true,
+  zoottle_bash: true,
+  zoottle_pty: true,
+  zoottle_pty_list: true,
+  zoottle_pty_write: true,
+  zoottle_pty_read: true,
+  zoottle_pty_close: true,
+  zoottle_open_pane: true,
   websearch: true,
 } as const
 

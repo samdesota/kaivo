@@ -139,7 +139,7 @@ async function promptOnce(
     path: { id: ocSessionId },
     body: {
       parts: [{ type: 'text', text: prompt }],
-      tools: opts.tools ?? { bash: false, cloud_bash: true, cloud_pty: true },
+      tools: opts.tools ?? { bash: false, zoottle_bash: true, zoottle_pty: true },
       model: MODEL,
     },
     throwOnError: true,
@@ -238,24 +238,24 @@ const cases: CaseDef[] = [
       const r = await promptOnce(
         ctx,
         'Reply with exactly the digit "4" and nothing else. What is 2 + 2?',
-        { tools: { bash: false, cloud_bash: false, cloud_pty: false } },
+        { tools: { bash: false, zoottle_bash: false, zoottle_pty: false } },
       )
       if (!r.text.trim()) throw new Error('no assistant text in reply')
       if (!/4/.test(r.text)) throw new Error(`expected "4" in reply, got: ${r.text.slice(0, 200)}`)
     },
   },
   {
-    name: 'tool: cloud_bash echoes a marker',
+    name: 'tool: zoottle_bash echoes a marker',
     async run(ctx) {
       const marker = `E2E_${Date.now().toString(36).toUpperCase()}`
       const r = await promptOnce(
         ctx,
-        `Run the shell command: echo ${marker}. Use cloud_bash.`,
+        `Run the shell command: echo ${marker}. Use zoottle_bash.`,
       )
       const tool = r.parts.find(
-        (p) => p.type === 'tool' && p.tool === 'cloud_bash' && p.state?.status === 'completed',
+        (p) => p.type === 'tool' && p.tool === 'zoottle_bash' && p.state?.status === 'completed',
       )
-      if (!tool) throw new Error('no completed cloud_bash tool part in transcript')
+      if (!tool) throw new Error('no completed zoottle_bash tool part in transcript')
       const out = tool.state?.output ?? ''
       if (!out.includes(marker)) throw new Error(`output missing marker ${marker}: ${out.slice(0, 200)}`)
     },
@@ -271,7 +271,7 @@ const cases: CaseDef[] = [
         ctx,
         'Use the task tool to spawn a general subagent that simply replies with the word "done". Use the task tool.',
         // Block bash so the model can't shortcut around `task`.
-        { tools: { bash: false, cloud_bash: false, cloud_pty: false } },
+        { tools: { bash: false, zoottle_bash: false, zoottle_pty: false } },
         )
       const taskCall = r.parts.find((p) => p.type === 'tool' && p.tool === 'task')
       if (!taskCall) {

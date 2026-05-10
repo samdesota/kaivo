@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser Interaction Stress</title>
+    <style>
+      :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; background: #08090b; color: #e7e9ee; }
+      main { max-width: 1120px; margin: 0 auto; padding: 28px; }
+      h1 { margin: 0 0 8px; font-size: 28px; }
+      p { color: #a5adba; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 22px; }
+      .card { border: 1px solid #252a34; background: #101319; border-radius: 14px; padding: 14px; }
+      .card h2 { margin: 0 0 10px; font-size: 15px; color: #f5f7fb; }
+      button, input, select, textarea, [role="button"], a.test-link { box-sizing: border-box; width: 100%; border-radius: 10px; border: 1px solid #3a4250; background: #171b24; color: #eef2f8; padding: 10px 12px; font: inherit; }
+      button, [role="button"], a.test-link { cursor: pointer; text-align: center; text-decoration: none; display: inline-block; }
+      button:hover, [role="button"]:hover, a.test-link:hover { background: #202738; }
+      label { display: block; margin-bottom: 7px; color: #a5adba; font-size: 13px; }
+      textarea { min-height: 74px; resize: vertical; }
+      .contenteditable { min-height: 45px; outline: none; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .row input[type="checkbox"] { width: auto; }
+      .pill { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; border: 1px solid #303849; border-radius: 999px; padding: 4px 8px; color: #a5adba; font-size: 12px; }
+      .ok { color: #75e39b; }
+      .bad { color: #ff8585; }
+      #results { margin-top: 22px; border: 1px solid #252a34; background: #0d1016; border-radius: 14px; padding: 14px; }
+      pre { overflow: auto; max-height: 360px; margin: 0; white-space: pre-wrap; color: #ccd3df; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Browser Interaction Stress</h1>
+      <p>Use browser integration tools against this page. Each control records the real DOM events it received.</p>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Native Button Click</h2>
+          <button id="native-click">Native click button</button>
+          <span class="pill">expects: click</span>
+        </section>
+
+        <section class="card">
+          <h2>Pointerdown-Only Button</h2>
+          <button id="pointerdown-only">Pointerdown only</button>
+          <span class="pill">expects: pointerdown</span>
+        </section>
+
+        <section class="card">
+          <h2>Mousedown-Only Button</h2>
+          <button id="mousedown-only">Mousedown only</button>
+          <span class="pill">expects: mousedown</span>
+        </section>
+
+        <section class="card">
+          <h2>Full Pointer Sequence</h2>
+          <button id="sequence-button">Sequence button</button>
+          <span class="pill">records pointer/mouse/click order</span>
+        </section>
+
+        <section class="card">
+          <h2>Text Input</h2>
+          <label for="text-input">Name</label>
+          <input id="text-input" placeholder="Type here" />
+          <span class="pill">expects: beforeinput/input/change</span>
+        </section>
+
+        <section class="card">
+          <h2>Textarea</h2>
+          <label for="textarea-input">Notes</label>
+          <textarea id="textarea-input" placeholder="Type notes"></textarea>
+          <span class="pill">expects: beforeinput/input/change</span>
+        </section>
+
+        <section class="card">
+          <h2>Contenteditable</h2>
+          <label for="editable-input">Editable block</label>
+          <div id="editable-input" class="contenteditable" role="textbox" contenteditable="true" aria-label="Editable block"></div>
+          <span class="pill">expects inserted text</span>
+        </section>
+
+        <section class="card">
+          <h2>Checkbox</h2>
+          <label class="row"><input id="checkbox-input" type="checkbox" /> Toggle me</label>
+          <span class="pill">expects: click/change</span>
+        </section>
+
+        <section class="card">
+          <h2>Select</h2>
+          <label for="select-input">Choice</label>
+          <select id="select-input">
+            <option value="alpha">Alpha</option>
+            <option value="bravo">Bravo</option>
+            <option value="charlie">Charlie</option>
+          </select>
+          <span class="pill">manual/JS select probe</span>
+        </section>
+
+        <section class="card">
+          <h2>Role Button Div</h2>
+          <div id="role-button" role="button" tabindex="0" aria-label="Role button">Role button</div>
+          <span class="pill">expects: click or keydown</span>
+        </section>
+
+        <section class="card">
+          <h2>Pointer Role Button</h2>
+          <div id="pointer-role-button" role="button" tabindex="0" aria-label="Pointer role button">Pointer role button</div>
+          <span class="pill">expects: pointerdown</span>
+        </section>
+
+        <section class="card">
+          <h2>Prevented Link</h2>
+          <a id="test-link" class="test-link" href="https://example.com/" aria-label="Prevented test link">Prevented link</a>
+          <span class="pill">expects: click</span>
+        </section>
+      </div>
+
+      <section id="results">
+        <h2>Results</h2>
+        <pre id="log-output">[]</pre>
+      </section>
+    </main>
+
+    <script>
+      const state = { events: [], hits: {}, values: {} };
+      const interestingEvents = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'beforeinput', 'input', 'change', 'keydown', 'keyup', 'focus', 'blur'];
+
+      function record(id, event, extra) {
+        state.hits[id] = state.hits[id] || [];
+        state.hits[id].push(event.type);
+        state.events.push({ id, type: event.type, value: valueFor(event.currentTarget), extra: extra || null, ts: Date.now() });
+        state.values[id] = valueFor(event.currentTarget);
+        render();
+      }
+
+      function valueFor(el) {
+        if (!el) return null;
+        if (el.type === 'checkbox') return el.checked;
+        if ('value' in el) return el.value;
+        return el.textContent;
+      }
+
+      function wire(id) {
+        const el = document.getElementById(id);
+        for (const eventName of interestingEvents) {
+          el.addEventListener(eventName, (event) => record(id, event));
+        }
+      }
+
+      for (const id of [
+        'native-click', 'pointerdown-only', 'mousedown-only', 'sequence-button', 'text-input', 'textarea-input',
+        'editable-input', 'checkbox-input', 'select-input', 'role-button', 'pointer-role-button', 'test-link'
+      ]) wire(id);
+
+      document.getElementById('native-click').addEventListener('click', () => { document.body.dataset.nativeClick = 'yes'; });
+      document.getElementById('pointerdown-only').addEventListener('pointerdown', () => { document.body.dataset.pointerdownOnly = 'yes'; });
+      document.getElementById('mousedown-only').addEventListener('mousedown', () => { document.body.dataset.mousedownOnly = 'yes'; });
+      document.getElementById('sequence-button').addEventListener('click', () => { document.body.dataset.sequenceClick = 'yes'; });
+      document.getElementById('role-button').addEventListener('click', () => { document.body.dataset.roleClick = 'yes'; });
+      document.getElementById('role-button').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') document.body.dataset.roleKey = 'yes'; });
+      document.getElementById('pointer-role-button').addEventListener('pointerdown', () => { document.body.dataset.pointerRole = 'yes'; });
+      document.getElementById('test-link').addEventListener('click', (event) => { event.preventDefault(); document.body.dataset.linkClick = 'yes'; });
+
+      window.__stress = {
+        state,
+        summary() {
+          return {
+            datasets: { ...document.body.dataset },
+            hits: state.hits,
+            values: state.values,
+            checked: document.getElementById('checkbox-input').checked,
+            select: document.getElementById('select-input').value,
+            text: document.getElementById('text-input').value,
+            textarea: document.getElementById('textarea-input').value,
+            editable: document.getElementById('editable-input').textContent,
+          };
+        },
+        reset() {
+          state.events = [];
+          state.hits = {};
+          state.values = {};
+          for (const key of Object.keys(document.body.dataset)) delete document.body.dataset[key];
+          render();
+        }
+      };
+
+      function render() {
+        document.getElementById('log-output').textContent = JSON.stringify(window.__stress.summary(), null, 2);
+      }
+
+      render();
+      console.log('browser interaction stress ready');
+    </script>
+  </body>
+</html>

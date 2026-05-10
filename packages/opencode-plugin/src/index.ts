@@ -6,7 +6,7 @@ import { AgentShellClient, AppUnreachableError } from './client.js'
  * Tool-name collision: OpenCode ships a built-in `bash` tool that shells
  * out locally. We can't replace it from a plugin in a way that also
  * surfaces our shellId metadata to the Zoottle UI, so we expose our
- * tools under `cloud_bash` and `cloud_pty` and teach the system prompt to
+ * tools under `zoottle_bash` and `zoottle_pty` and teach the system prompt to
  * prefer them. The `plugin` config entry is always paired with an agent
  * prompt that mentions these names.
  */
@@ -51,7 +51,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     return {}
   }
   console.error(
-    `[zoottle-opencode-plugin] registering cloud_bash, cloud_pty, cloud_pty_list, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane, cloud_browser_* (appUrl=${creds.appUrl})`,
+    `[zoottle-opencode-plugin] registering zoottle_bash, zoottle_pty, zoottle_pty_list, zoottle_pty_write, zoottle_pty_read, zoottle_pty_close, zoottle_open_pane, zoottle_browser_* (appUrl=${creds.appUrl})`,
   )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
@@ -62,9 +62,9 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
 
   return {
     tool: {
-      cloud_bash: tool({
+      zoottle_bash: tool({
         description:
-          'Run a finite shell command inside the Zoottle sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `cloud_pty` instead so the human can see and interact with them.',
+          'Run a finite shell command inside the Zoottle sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `zoottle_pty` instead so the human can see and interact with them.',
         args: {
           command: z
             .string()
@@ -75,9 +75,9 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudBash(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      cloud_pty: tool({
+      zoottle_pty: tool({
         description:
-          'Open a persistent interactive PTY shell inside the Zoottle sandbox. Prefer this for dev servers, watch commands, REPLs, or anything that runs indefinitely — the shell appears in the human user\'s Shells panel so they can watch output and type into it. Returns a shellId you can then use with `cloud_pty_write` to send commands or `cloud_pty_read` to check output. Once a PTY is open, DO NOT run the same long-running command via cloud_bash.',
+          'Open a persistent interactive PTY shell inside the Zoottle sandbox. Prefer this for dev servers, watch commands, REPLs, or anything that runs indefinitely — the shell appears in the human user\'s Shells panel so they can watch output and type into it. Returns a shellId you can then use with `zoottle_pty_write` to send commands or `zoottle_pty_read` to check output. Once a PTY is open, DO NOT run the same long-running command via zoottle_bash.',
         args: {
           cwd: z.string().optional().describe('Starting cwd for the shell. Defaults to /workspace.'),
           label: z.string().optional().describe('Short human-readable label shown in the Shells panel.'),
@@ -88,7 +88,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudPty(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      cloud_pty_list: tool({
+      zoottle_pty_list: tool({
         description:
           'List persistent Zoottle PTY shells in this agent session\'s workspace. Use this before reading or reusing an existing shell. Returns shell ids, cwd, alive/exit state, last activity, and title, which may contain the running command from shell integration.',
         args: {},
@@ -96,11 +96,11 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudPtyList(client, context as unknown as ToolCtxLike)
         },
       }),
-      cloud_pty_write: tool({
+      zoottle_pty_write: tool({
         description:
-          'Send text input to an already-opened PTY shell (created with `cloud_pty`). Use this to run commands inside a persistent shell instead of spawning new ones. By default a trailing newline is appended so the shell executes the line.',
+          'Send text input to an already-opened PTY shell (created with `zoottle_pty`). Use this to run commands inside a persistent shell instead of spawning new ones. By default a trailing newline is appended so the shell executes the line.',
         args: {
-          shellId: z.string().describe('Shell id returned by cloud_pty.'),
+          shellId: z.string().describe('Shell id returned by zoottle_pty.'),
           input: z
             .string()
             .describe('Text to send. Control characters like "\\x03" for Ctrl-C are allowed.'),
@@ -113,11 +113,11 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudPtyWrite(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      cloud_pty_read: tool({
+      zoottle_pty_read: tool({
         description:
-          'Read the most recent output from a PTY shell. Returns the last `maxBytes` of scrollback, whether the shell is still alive, and the exit code if it exited. Use after `cloud_pty_write` or to poll progress of a long-running process.',
+          'Read the most recent output from a PTY shell. Returns the last `maxBytes` of scrollback, whether the shell is still alive, and the exit code if it exited. Use after `zoottle_pty_write` or to poll progress of a long-running process.',
         args: {
-          shellId: z.string().describe('Shell id returned by cloud_pty.'),
+          shellId: z.string().describe('Shell id returned by zoottle_pty.'),
           maxBytes: z
             .number()
             .int()
@@ -128,17 +128,17 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudPtyRead(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      cloud_pty_close: tool({
+      zoottle_pty_close: tool({
         description:
-          'Terminate a PTY shell created with `cloud_pty` and dispose it. Call when the process is no longer needed so the Shells panel stays tidy.',
+          'Terminate a PTY shell created with `zoottle_pty` and dispose it. Call when the process is no longer needed so the Shells panel stays tidy.',
         args: {
-          shellId: z.string().describe('Shell id returned by cloud_pty.'),
+          shellId: z.string().describe('Shell id returned by zoottle_pty.'),
         },
         async execute(args, context) {
           return runCloudPtyClose(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      cloud_open_pane: tool({
+      zoottle_open_pane: tool({
         description:
           'Open or focus a right-side pane tab in the Zoottle UI. Supports file, shell, and browser panes. Use browser panes for web pages and local dev servers. This tool does not read, write, or execute anything by itself.',
         args: {
@@ -163,63 +163,63 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudOpenPane(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      cloud_browser_list_tabs: tool({
+      zoottle_browser_list_tabs: tool({
         description: 'List Zoottle browser tabs available for agent connection.',
         args: {},
         async execute(_args, context) {
           return runBrowserTool(client, 'agentBrowser.listTabs', {}, context as unknown as ToolCtxLike, 'query')
         },
       }),
-      cloud_browser_connect_tab: tool({
+      zoottle_browser_connect_tab: tool({
         description: 'Connect the agent to an existing Zoottle browser tab and return a cdpId for subsequent browser tools.',
         args: { browserTabId: z.string().min(1) },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.connectTab', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      cloud_browser_open_and_connect: tool({
+      zoottle_browser_open_and_connect: tool({
         description: 'Open a URL in a Zoottle browser tab and connect the agent to it in one step.',
         args: { url: z.string().min(1), title: z.string().optional(), activate: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.openAndConnect', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      cloud_browser_disconnect: tool({
+      zoottle_browser_disconnect: tool({
         description: 'Disconnect a previously connected browser tab by cdpId.',
         args: { cdpId: z.string().min(1) },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.disconnect', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      cloud_browser_snapshot: tool({
-        description: 'Read a connected browser tab as a semantic tree of interactive elements. Use element IDs from this output with cloud_browser_interact.',
+      zoottle_browser_snapshot: tool({
+        description: 'Read a connected browser tab as a semantic tree of interactive elements. Use element IDs from this output with zoottle_browser_interact.',
         args: { cdpId: z.string().min(1), filter: z.string().optional(), filterFlags: z.string().optional(), viewportOnly: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.snapshot', stripEmptyStrings(args), context as unknown as ToolCtxLike, 'query')
         },
       }),
-      cloud_browser_read_logs: tool({
-        description: 'Read buffered console logs from a connected browser tab. Logs are collected after the tab is connected with cloud_browser_connect_tab or cloud_browser_open_and_connect.',
+      zoottle_browser_read_logs: tool({
+        description: 'Read buffered console logs from a connected browser tab. Logs are collected after the tab is connected with zoottle_browser_connect_tab or zoottle_browser_open_and_connect.',
         args: { cdpId: z.string().min(1), maxEntries: z.number().int().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.readLogs', args, context as unknown as ToolCtxLike, 'query')
         },
       }),
-      cloud_browser_interact: tool({
+      zoottle_browser_interact: tool({
         description: 'Perform a browser action on a connected tab by element ID or navigation action.',
         args: { cdpId: z.string().min(1), action: z.any(), postSnapshot: z.any().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.interact', normalizeInteractArgs(args), context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      cloud_browser_screenshot: tool({
+      zoottle_browser_screenshot: tool({
         description: 'Capture a screenshot from a connected browser tab.',
         args: { cdpId: z.string().min(1), format: z.enum(['jpeg', 'png']).optional(), quality: z.number().int().optional(), fullPage: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.screenshot', args, context as unknown as ToolCtxLike, 'query')
         },
       }),
-      cloud_browser_execute_js: tool({
+      zoottle_browser_execute_js: tool({
         description: 'Execute JavaScript in a connected browser tab. Prefer snapshot and interact first; use this for explicit inspection or one-off DOM operations.',
         args: { cdpId: z.string().min(1), expression: z.string().min(1), awaitPromise: z.boolean().optional(), timeoutMs: z.number().int().optional() },
         async execute(args, context) {

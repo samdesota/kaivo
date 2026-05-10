@@ -34,7 +34,7 @@ export function ToolPart({
   childTranscript?: TranscriptState
 }) {
   const rawTool = (part as { tool?: string }).tool ?? 'tool'
-  const tool = rawTool === 'cloud_bash' ? 'bash' : rawTool === 'cloud_pty' ? 'pty' : rawTool
+  const tool = rawTool === 'zoottle_bash' ? 'bash' : rawTool === 'zoottle_pty' ? 'pty' : rawTool
   const callID = (part as { callID?: string }).callID ?? ''
   const state: ToolState = ((part as { state?: ToolState }).state ?? {}) as ToolState
 

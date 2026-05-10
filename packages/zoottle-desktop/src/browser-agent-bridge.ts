@@ -299,20 +299,20 @@ async function interact(
 
 async function executeAction(contents: WebContents, action: { type?: string; [key: string]: unknown }): Promise<unknown> {
   if (action.type === 'click') {
-    return await evaluateExpression(contents, `window.__agentBrowser.click(${JSON.stringify(normalizeElementId(String(action.elementId)))})`)
+    return await dispatchMouseClick(contents, normalizeElementId(String(action.elementId)))
   }
   if (action.type === 'type') {
-    return await evaluateExpression(contents, `window.__agentBrowser.type(${JSON.stringify(normalizeElementId(String(action.elementId)))}, ${JSON.stringify(String(action.text ?? ''))}, ${JSON.stringify({ clear: action.clear })})`)
+    return await dispatchTextInput(contents, normalizeElementId(String(action.elementId)), String(action.text ?? ''), { clear: action.clear !== false })
   }
   if (action.type === 'fill') {
     let result: unknown = { ok: true }
     for (const field of (Array.isArray(action.fields) ? action.fields : []) as Array<Record<string, unknown>>) {
-      result = await evaluateExpression(contents, `window.__agentBrowser.type(${JSON.stringify(normalizeElementId(String(field.elementId)))}, ${JSON.stringify(String(field.text ?? ''))}, ${JSON.stringify({ clear: field.clear })})`)
+      result = await dispatchTextInput(contents, normalizeElementId(String(field.elementId)), String(field.text ?? ''), { clear: field.clear !== false })
     }
     return result
   }
   if (action.type === 'scroll') {
-    return await evaluateExpression(contents, `window.scrollBy(${Number(action.x ?? 0)}, ${Number(action.y ?? 0)}); ({ ok: true })`)
+    return await dispatchWheel(contents, Number(action.x ?? 0), Number(action.y ?? 0))
   }
   if (action.type === 'goto') {
     await contents.debugger.sendCommand('Page.navigate', { url: String(action.url) })
@@ -321,16 +321,16 @@ async function executeAction(contents: WebContents, action: { type?: string; [ke
     return { ok: true, navigated: action.url }
   }
   if (action.type === 'back') {
-    await evaluateExpression(contents, 'history.back(); ({ ok: true })')
+    const navigated = await navigateHistory(contents, -1)
     await wait(500)
     await ensureAgentTree(contents)
-    return { ok: true }
+    return navigated
   }
   if (action.type === 'forward') {
-    await evaluateExpression(contents, 'history.forward(); ({ ok: true })')
+    const navigated = await navigateHistory(contents, 1)
     await wait(500)
     await ensureAgentTree(contents)
-    return { ok: true }
+    return navigated
   }
   if (action.type === 'wait') {
     const waited = Math.min(Number(action.ms ?? 500), 5000)
@@ -338,6 +338,126 @@ async function executeAction(contents: WebContents, action: { type?: string; [ke
     return { ok: true, waited }
   }
   throw new Error('invalid action')
+}
+
+async function dispatchMouseClick(contents: WebContents, elementId: string): Promise<Record<string, unknown>> {
+  const { x, y, width, height } = await elementCenter(contents, elementId)
+  await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' })
+  await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+  await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  return { ok: true, x, y, width, height }
+}
+
+async function dispatchTextInput(
+  contents: WebContents,
+  elementId: string,
+  text: string,
+  options: { clear: boolean },
+): Promise<Record<string, unknown>> {
+  const elementInfo = await evaluateExpression(
+    contents,
+    `(() => {
+      const element = window.__agentBrowser.element(${JSON.stringify(elementId)});
+      return {
+        tagName: element.tagName,
+        targetValue: element.tagName === 'SELECT'
+          ? Array.from(element.options).find((option) => option.value === ${JSON.stringify(text)} || option.textContent.trim() === ${JSON.stringify(text)})?.value
+          : undefined,
+        selectIndex: element.tagName === 'SELECT'
+          ? Array.from(element.options).findIndex((option) => option.value === ${JSON.stringify(text)} || option.textContent.trim() === ${JSON.stringify(text)})
+          : -1,
+      };
+    })()`,
+  ) as { tagName?: unknown; selectIndex?: unknown; targetValue?: unknown }
+  if (elementInfo.tagName === 'SELECT') {
+    return await dispatchSelectInput(contents, elementId, Number(elementInfo.selectIndex), String(elementInfo.targetValue ?? ''))
+  }
+  await dispatchMouseClick(contents, elementId)
+  if (options.clear) {
+    await pressShortcut(contents, process.platform === 'darwin' ? 'Meta' : 'Control', 'A')
+    await pressKey(contents, 'Backspace')
+  }
+  if (text) await contents.debugger.sendCommand('Input.insertText', { text })
+  return { ok: true, valueLength: text.length }
+}
+
+async function dispatchSelectInput(contents: WebContents, elementId: string, selectIndex: number, targetValue: string): Promise<Record<string, unknown>> {
+  if (!Number.isInteger(selectIndex) || selectIndex < 0) throw new Error('select option not found')
+  await evaluateExpression(
+    contents,
+    `(() => {
+      const element = window.__agentBrowser.element(${JSON.stringify(elementId)});
+      element.scrollIntoView({ block: 'center', inline: 'center' });
+      element.focus();
+      return true;
+    })()`,
+  )
+  await pressKey(contents, 'Home')
+  for (let i = 0; i < selectIndex; i += 1) await pressKey(contents, 'ArrowDown')
+  await pressKey(contents, 'Enter')
+  const actualValue = await evaluateExpression(
+    contents,
+    `window.__agentBrowser.element(${JSON.stringify(elementId)}).value`,
+  )
+  return { ok: actualValue === targetValue, selectedIndex: selectIndex, value: actualValue }
+}
+
+async function dispatchWheel(contents: WebContents, deltaX: number, deltaY: number): Promise<Record<string, unknown>> {
+  const viewport = await evaluateExpression(
+    contents,
+    '({ x: Math.max(1, Math.floor(window.innerWidth / 2)), y: Math.max(1, Math.floor(window.innerHeight / 2)) })',
+  ) as { x?: unknown; y?: unknown }
+  const x = Number(viewport.x)
+  const y = Number(viewport.y)
+  await contents.debugger.sendCommand('Input.synthesizeScrollGesture', {
+    x: Number.isFinite(x) ? x : 1,
+    y: Number.isFinite(y) ? y : 1,
+    xDistance: -deltaX,
+    yDistance: -deltaY,
+    gestureSourceType: 'mouse',
+  })
+  return { ok: true, deltaX, deltaY }
+}
+
+async function navigateHistory(contents: WebContents, offset: -1 | 1): Promise<Record<string, unknown>> {
+  const history = await contents.debugger.sendCommand('Page.getNavigationHistory') as {
+    currentIndex?: number
+    entries?: Array<{ id: number; url?: string }>
+  }
+  const currentIndex = Number(history.currentIndex ?? -1)
+  const entry = history.entries?.[currentIndex + offset]
+  if (!entry) return { ok: false, reason: offset < 0 ? 'no back history' : 'no forward history' }
+  await contents.debugger.sendCommand('Page.navigateToHistoryEntry', { entryId: entry.id })
+  return { ok: true, navigated: entry.url }
+}
+
+async function elementCenter(contents: WebContents, elementId: string): Promise<{ x: number; y: number; width: number; height: number }> {
+  const rect = await evaluateExpression(
+    contents,
+    `(() => {
+      const element = window.__agentBrowser.element(${JSON.stringify(elementId)});
+      element.scrollIntoView({ block: 'center', inline: 'center' });
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, width: rect.width, height: rect.height };
+    })()`,
+  ) as { x?: unknown; y?: unknown; width?: unknown; height?: unknown }
+  const x = Number(rect.x)
+  const y = Number(rect.y)
+  const width = Number(rect.width)
+  const height = Number(rect.height)
+  if (!Number.isFinite(x) || !Number.isFinite(y) || width <= 0 || height <= 0) throw new Error('element is not clickable')
+  return { x, y, width, height }
+}
+
+async function pressShortcut(contents: WebContents, modifier: 'Control' | 'Meta', key: string): Promise<void> {
+  const modifiers = modifier === 'Meta' ? 4 : 2
+  await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code: `Key${key.toUpperCase()}`, modifiers })
+  await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key, code: `Key${key.toUpperCase()}`, modifiers })
+}
+
+async function pressKey(contents: WebContents, key: string): Promise<void> {
+  await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code: key })
+  await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key })
 }
 
 async function screenshot(
