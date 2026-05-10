@@ -183,10 +183,10 @@ export function Composer({
   return (
     <div className="relative border-t border-neutral-800 p-2">
       {effectiveRunning && (
-        <div className="mb-2 flex items-center gap-2 rounded border border-brand-500/40 bg-brand-500/5 px-2 py-1 text-[11px] text-brand-300">
+        <div className="mb-2 flex items-center gap-2 rounded border border-neutral-700 bg-neutral-900/40 px-2 py-1 text-[11px] text-neutral-300">
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-400" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-neutral-400 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-neutral-400" />
           </span>
           <span>Agent is responding…</span>
           <span className="ml-auto text-[10px] text-neutral-500">esc to stop</span>

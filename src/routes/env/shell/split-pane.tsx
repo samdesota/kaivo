@@ -120,7 +120,7 @@ export function SplitPane({
             aria-orientation="vertical"
             onMouseDown={onMouseDown}
             onDoubleClick={() => setRatio(initialRatio)}
-            className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-brand-500/40"
+            className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-neutral-800"
             title="Drag to resize · double-click to reset"
           />
         )}

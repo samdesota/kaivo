@@ -282,7 +282,7 @@ export interface BrowseResult {
   home: string
   /** Absolute path of CC_WORKING_DIR — useful as a "go default" anchor. */
   defaultPath: string
-  /** Absolute path of the parent of `path`, or null if no parent within scope. */
+  /** Absolute path of the parent of `path`, or null at filesystem root. */
   parent: string | null
   /** Subdirectories of `path`, sorted: visible first, then hidden, name asc. */
   dirs: BrowseEntry[]
@@ -290,11 +290,10 @@ export interface BrowseResult {
 
 /**
  * Folder picker source. Lists subdirectories of the requested path,
- * scoped to the user-trusted area = $HOME ∪ CC_WORKING_DIR. We don't
- * expose files because the picker is for choosing a working dir.
+ * exposing directories only because the picker is for choosing a working dir.
  *
  * `absPath` may be omitted (defaults to CC_WORKING_DIR) or absolute.
- * Symlinks are resolved before the containment check.
+ * Symlinks are resolved before listing.
  */
 export async function browseHome(absPath?: string): Promise<BrowseResult> {
   const home = path.resolve(os.homedir())
@@ -314,15 +313,7 @@ export async function browseHome(absPath?: string): Promise<BrowseResult> {
   try {
     realDefault = await fs.realpath(defaultPath)
   } catch {
-    // working dir doesn't exist on disk; fall back to the unresolved
-    // path so the containment check still works for $HOME-anchored
-    // browsing without throwing here.
-  }
-  const insideHome = real === home || real.startsWith(home + path.sep)
-  const insideDefault =
-    real === realDefault || real.startsWith(realDefault + path.sep)
-  if (!insideHome && !insideDefault) {
-    throw new FsError('path_traversal', 'path is outside $HOME and CC_WORKING_DIR')
+    // Working dir doesn't exist on disk; fall back to the unresolved path.
   }
   let entries: import('node:fs').Dirent[]
   try {
@@ -354,14 +345,12 @@ export async function browseHome(absPath?: string): Promise<BrowseResult> {
     if (aHidden !== bHidden) return aHidden ? 1 : -1
     return a.name.localeCompare(b.name)
   })
-  // No parent if we're already at the top of either anchor (preventing
-  // `..` from walking out into /Users or /).
-  const atTop = real === home || real === realDefault
+  const parent = path.dirname(real)
   return {
     path: real,
     home,
     defaultPath: realDefault,
-    parent: atTop ? null : path.dirname(real),
+    parent: parent === real ? null : parent,
     dirs,
   }
 }

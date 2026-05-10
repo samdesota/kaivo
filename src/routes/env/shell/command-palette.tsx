@@ -289,7 +289,7 @@ function KindBadge({ kind }: { kind: PaletteItem['kind'] }) {
       ? 'border-emerald-700 text-emerald-400'
       : kind === 'preview'
         ? 'border-sky-700 text-sky-400'
-        : 'border-brand-500/40 text-brand-400'
+        : 'border-neutral-700 text-neutral-300'
   return (
     <span
       className={`inline-block rounded border px-1 py-[1px] text-[9px] uppercase tracking-wide ${cls}`}

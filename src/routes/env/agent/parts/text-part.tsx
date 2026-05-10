@@ -95,7 +95,7 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
             event.preventDefault()
             onOpenBrowserPane(toBrowserPaneUrl(href))
           }}
-          className="text-brand-400 underline hover:text-brand-300"
+          className="text-neutral-300 underline hover:text-neutral-300"
           title={opensInPane ? 'Open in browser pane' : undefined}
         >
           {p.children}

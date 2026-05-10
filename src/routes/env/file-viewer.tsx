@@ -165,7 +165,7 @@ function FileViewerHeader({
           <button
             onClick={onSave}
             disabled={isSaving}
-            className="rounded bg-brand-500 px-3 py-1 text-white hover:bg-brand-600 disabled:opacity-50"
+            className="rounded bg-neutral-700 px-3 py-1 text-white hover:bg-neutral-600 disabled:opacity-50"
           >
             {isSaving ? 'Saving…' : 'Save'}
           </button>
@@ -199,7 +199,7 @@ function StaleFileBanner({
         <button
           onClick={onSave}
           disabled={isSaving}
-          className="rounded bg-brand-500 px-2 py-1 text-white hover:bg-brand-600 disabled:opacity-50"
+          className="rounded bg-neutral-700 px-2 py-1 text-white hover:bg-neutral-600 disabled:opacity-50"
         >
           {isSaving ? 'Saving…' : 'Save'}
         </button>

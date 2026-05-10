@@ -700,7 +700,7 @@ export function WorkspaceSidebar({
     >
       <div
         onPointerDown={startSidebarResize}
-        className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-brand-500/40"
+        className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent hover:bg-neutral-800"
         aria-hidden="true"
       />
       <div className="window-drag flex flex-none basis-8 items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-3">
@@ -823,7 +823,7 @@ export function WorkspaceSidebar({
               </button>
               <div className={
                 'flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 group-hover:bg-neutral-900 group-hover:text-neutral-200 ' +
-                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-brand-500/10 text-neutral-100 ring-1 ring-brand-400/60 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
+                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-neutral-900 text-neutral-100 ring-1 ring-neutral-600 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
               }
               onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}>
                 <span className="min-w-0 flex-1 truncate px-0.5 font-medium" title={folder.name}>{folder.name}</span>
@@ -899,7 +899,7 @@ export function WorkspaceSidebar({
                     if (e.key === 'Enter') void saveRename()
                     if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
                   }}
-                  className="min-w-0 flex-1 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
+                  className="min-w-0 flex-1 rounded border border-neutral-600 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
                   aria-label="Workspace name"
                 />
               ) : (
@@ -1089,7 +1089,7 @@ function WorkspaceCleanupModal({
                     checked={selectedCleanupIds.has(row.id)}
                     disabled={!row.canCleanup || busy}
                     onChange={() => toggleCleanup(row.id)}
-                    className="h-3 w-3 shrink-0 accent-brand-500 disabled:opacity-40"
+                    className="h-3 w-3 shrink-0 accent-neutral-500 disabled:opacity-40"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-1.5">
@@ -1139,8 +1139,8 @@ function WorkspaceSidebarChatCount({ workspaceId, readVersion: _readVersion }: {
   return (
     <span className="flex shrink-0 items-center gap-1">
       {row.chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{row.chatCount}</span>}
-      {glyph === '.' && <span className="h-1 w-1 rounded-full bg-brand-500" aria-label="New chat response" />}
-      {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-brand-400 border-t-transparent" aria-label="Chat running" />}
+      {glyph === '.' && <span className="h-1 w-1 rounded-full bg-neutral-700" aria-label="New chat response" />}
+      {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-neutral-400 border-t-transparent" aria-label="Chat running" />}
       {glyph === '!' && <span className="w-3 text-center text-[10px] font-semibold text-amber-300" aria-label="Chat needs attention">!</span>}
     </span>
   )
@@ -1243,7 +1243,7 @@ function notificationRailClass(kind: AgentNotificationRecord['kind']): string {
   if (kind === 'permission') return 'bg-amber-400'
   if (kind === 'question') return 'bg-violet-400'
   if (kind === 'error') return 'bg-red-400'
-  return 'bg-brand-500'
+  return 'bg-neutral-700'
 }
 
 const sidebarAnimateLayoutChanges: AnimateLayoutChanges = (args) =>
@@ -1859,7 +1859,7 @@ function WorkspaceError({ message }: { message: string }) {
     <div className="min-h-screen bg-neutral-950 p-8 text-neutral-100">
       <div className="text-red-400">{message}</div>
       <div className="mt-4">
-        <Link to="/" className="text-brand-500 hover:underline">
+        <Link to="/" className="text-neutral-200 hover:underline">
           Back to workspace
         </Link>
       </div>

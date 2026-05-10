@@ -136,7 +136,7 @@ function patchFileCount(patchText: string): number {
 function StatusDot({ status }: { status?: string }) {
   const cls =
     status === 'running' || status === 'pending'
-      ? 'bg-brand-500 animate-pulse'
+      ? 'bg-neutral-700 animate-pulse'
       : status === 'error'
         ? 'bg-red-500'
         : status === 'completed'

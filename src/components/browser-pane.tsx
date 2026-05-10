@@ -253,7 +253,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
           value={address}
           onChange={(event) => setAddress(event.currentTarget.value)}
           placeholder="Search or enter URL"
-          className="ml-1 min-w-0 flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-brand-500"
+          className="ml-1 min-w-0 flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-neutral-600"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}

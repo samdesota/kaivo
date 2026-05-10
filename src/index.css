@@ -12,27 +12,28 @@
   --text-xs: 0.875rem;
   --text-xs--line-height: 1.25rem;
 
-  /* one-dark accent (blue) replaces brand */
-  --color-brand-300: #9cdcfe;
-  --color-brand-400: #7cc7ff;
-  --color-brand-500: #61afef;
-  --color-brand-600: #519aba;
-
-  /* Re-skin Tailwind's neutral scale to the one-dark palette so utility
-     classes used throughout the app (bg-neutral-900, text-neutral-300, …)
-     pick up the theme without rewriting every className. */
-  --color-neutral-50: #f9fafb;
-  --color-neutral-100: #e6e6e6;
-  --color-neutral-200: #c8cdd5;
-  --color-neutral-300: #abb2bf;
-  --color-neutral-400: #828997;
-  --color-neutral-500: #5c6370;
-  --color-neutral-600: #4b5263;
-  --color-neutral-700: #3e4451;
-  --color-neutral-800: #2c313a;
-  --color-neutral-900: #21252b;
-  --color-neutral-950: #181a1f;
-  --color-neutral-975: #111318;
+  /* Neutral scale generated from src/lib/color-scheme.js.
+     Hue comes from the workspace sidebar background (#181a1f); saturation is reduced
+     for a quieter neutral scheme;
+     each step preserves the previous neutral color's lightness. */
+  --color-neutral-50: hsl(222.86 20% 98.04%);
+  --color-neutral-100: hsl(222.86 20% 90.2%);
+  --color-neutral-200: hsl(222.86 20% 80.98%);
+  --color-neutral-300: hsl(222.86 20% 70.98%);
+  --color-neutral-400: hsl(222.86 20% 55.1%);
+  --color-neutral-500: hsl(222.86 20% 40%);
+  --color-neutral-600: hsl(222.86 20% 34.12%);
+  --color-neutral-700: hsl(222.86 20% 28.04%);
+  --color-neutral-800: hsl(222.86 20% 20%);
+  --color-neutral-900: hsl(222.86 20% 14.9%);
+  --color-neutral-910: hsl(222.86 20% 14.08%);
+  --color-neutral-920: hsl(222.86 20% 13.25%);
+  --color-neutral-930: hsl(222.86 20% 12.43%);
+  --color-neutral-940: hsl(222.86 20% 11.6%);
+  --color-neutral-950: hsl(222.86 20% 10.78%);
+  --color-neutral-960: hsl(222.86 20% 9.68%);
+  --color-neutral-970: hsl(222.86 20% 8.59%);
+  --color-neutral-975: hsl(222.86 20% 8.04%);
 }
 
 :root {
@@ -53,8 +54,8 @@ body,
 
 body {
   margin: 0;
-  background: #181a1f;
-  color: #abb2bf;
+  background: hsl(222.86 20% 10.78%);
+  color: hsl(222.86 20% 70.98%);
 }
 
 html.overlay-layer-document,

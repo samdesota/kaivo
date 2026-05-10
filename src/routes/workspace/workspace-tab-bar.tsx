@@ -139,7 +139,7 @@ export function WorkspaceTabBar({
               if (e.key === 'Enter') void saveRename()
               if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
             }}
-            className="min-w-32 rounded border border-brand-500 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
+            className="min-w-32 rounded border border-neutral-600 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none"
             aria-label="Workspace name"
           />
         ) : (

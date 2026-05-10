@@ -151,7 +151,7 @@ export function AgentSessionView({
             }
           }}
           disabled={start.isPending}
-          className="rounded-md bg-brand-500 px-4 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-60"
+          className="rounded-md bg-neutral-700 px-4 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-neutral-600 disabled:opacity-60"
         >
           {start.isPending ? 'Starting…' : 'Start agent'}
         </button>
@@ -208,7 +208,7 @@ function formatTokenCount(n: number): string {
 function ContextUsageBar({ used, limit }: { used: number; limit: number }) {
   const pct = Math.min(100, (used / limit) * 100)
   const color =
-    pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-brand-500'
+    pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-neutral-700'
   return (
     <div
       className="flex items-center gap-1.5"

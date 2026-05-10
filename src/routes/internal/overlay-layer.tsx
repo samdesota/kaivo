@@ -234,7 +234,7 @@ function TextInputOverlay({
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={request.placeholder}
-            className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-brand-500"
+            className="w-full rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-600"
           />
         </label>
         <div className="flex justify-end gap-2">
@@ -248,7 +248,7 @@ function TextInputOverlay({
           <button
             type="submit"
             disabled={!trimmed}
-            className="rounded bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            className="rounded bg-neutral-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-600 disabled:opacity-50"
           >
             {request.confirmLabel ?? 'Submit'}
           </button>
@@ -283,7 +283,7 @@ function ConfirmOverlay({
             onClick={() => close(true)}
             className={
               'rounded px-3 py-1.5 text-sm font-medium text-white ' +
-              (request.destructive ? 'bg-red-600 hover:bg-red-500' : 'bg-brand-500 hover:bg-brand-600')
+              (request.destructive ? 'bg-red-600 hover:bg-red-500' : 'bg-neutral-700 hover:bg-neutral-600')
             }
           >
             {request.confirmLabel ?? 'Confirm'}

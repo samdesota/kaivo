@@ -13,7 +13,7 @@ export function DashboardPage() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <header className="window-drag flex items-center justify-between border-b border-neutral-800 px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="h-6 w-6 rounded bg-brand-500" />
+          <div className="h-6 w-6 rounded bg-neutral-700" />
           <h1 className="text-lg font-semibold">Local Environment</h1>
         </div>
         <div className="flex items-center gap-3">

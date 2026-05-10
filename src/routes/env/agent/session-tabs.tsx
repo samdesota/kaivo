@@ -206,7 +206,7 @@ export function NewSessionPopover({
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={start.isPending}
-        className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600"
+        className="rounded-md bg-neutral-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-neutral-600"
       >
         {start.isPending ? 'Creating…' : label}
       </button>

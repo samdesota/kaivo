@@ -22,7 +22,7 @@ export function FilePart({ part }: { part: Part }) {
       </button>
       {open && p.url && (
         <div className="ml-[5px] border-l border-neutral-800 pl-3 pt-1 text-[11px] text-neutral-500">
-          <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:underline">
+          <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-neutral-200 hover:underline">
             {p.url}
           </a>
         </div>
