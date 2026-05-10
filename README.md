@@ -1,6 +1,6 @@
-# Zoottle
+# Cloud Code Tools
 
-Zoottle is a local-first desktop app. Electron owns a local identity/app server and a matching `cc-env` process, auto-pairs them on startup, and opens the React UI against the local app server.
+Cloud Code is now a local-first desktop app. Electron owns a local identity/app server and a matching `cc-env` process, auto-pairs them on startup, and opens the React UI against the local app server.
 
 The old remote Docker sandbox/orchestrator path is legacy while the new remote-env design is rebuilt later. Keep `cc-env` as the environment-service boundary.
 
@@ -35,7 +35,7 @@ Useful overrides:
 
 ```bash
 CC_INSTANCE_ID=my-branch npm run dev
-CC_INSTANCE_ROOT=/tmp/zoottle-a CC_APP_PORT=3101 CC_ENV_PORT=48001 npm run dev
+CC_INSTANCE_ROOT=/tmp/cloud-code-a CC_APP_PORT=3101 CC_ENV_PORT=48001 npm run dev
 ```
 
 Each instance scopes its app DB, env DB, logs, ports, env label, and pairing token.
@@ -86,7 +86,7 @@ docker compose up
 npm run docker:sandbox
 ```
 
-Do not add new default workflows that require Docker, Postgres, `zoottle-sandbox:dev`, or fixed `cc-env` port `47821`.
+Do not add new default workflows that require Docker, Postgres, `cloud-code-sandbox:dev`, or fixed `cc-env` port `47821`.
 
 ## Fractal Plan
 

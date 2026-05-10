@@ -4,7 +4,7 @@ import {
   serializeSnapshot,
   snapshotToText,
   type AgentTreeNode,
-} from '../../packages/zoottle-desktop/src/agent-tree-snapshot'
+} from '../../packages/cloud-code-desktop/src/agent-tree-snapshot'
 
 function raw(root: AgentTreeNode | null) {
   return {

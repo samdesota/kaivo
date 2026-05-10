@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# package-desktop.sh — build a self-contained Zoottle.app
+# package-desktop.sh — build a self-contained Cloud Code Desktop.app
 #
-# Bundles the webapp server, env-server, Zoottle OpenCode plugin, and client SPA
+# Bundles the webapp server, env-server, opencode plugin, and client SPA
 # into the Electron app so it runs without the source repo.
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-desktop_dir="$repo_root/packages/zoottle-desktop"
+desktop_dir="$repo_root/packages/cloud-code-desktop"
 bundle_dir="$desktop_dir/bundle"
 install_app=false
 
@@ -25,7 +25,7 @@ done
 
 echo "==> cleaning bundle dir"
 rm -rf "$bundle_dir"
-mkdir -p "$bundle_dir/app-server" "$bundle_dir/env-server" "$bundle_dir/zoottle-opencode-plugin"
+mkdir -p "$bundle_dir/app-server" "$bundle_dir/env-server" "$bundle_dir/opencode-plugin"
 
 echo "==> building client SPA"
 (cd "$repo_root" && npx vite build)
@@ -97,14 +97,14 @@ find "$bundle_dir/env-server/node_modules/node-pty/prebuilds" -name spawn-helper
 echo "==> building opencode plugin"
 (cd "$repo_root/packages/opencode-plugin" && npm run build)
 
-echo "==> staging Zoottle OpenCode plugin"
-cp "$repo_root/packages/opencode-plugin/dist/index.js" "$bundle_dir/zoottle-opencode-plugin/index.js"
+echo "==> staging opencode plugin"
+cp "$repo_root/packages/opencode-plugin/dist/index.js" "$bundle_dir/opencode-plugin/index.js"
 
 echo "==> building desktop electron app"
 (cd "$desktop_dir" && npm run build)
 
 echo "==> packaging electron app"
-(cd "$desktop_dir" && npx electron-packager . "Zoottle" \
+(cd "$desktop_dir" && npx electron-packager . "Cloud Code Desktop" \
   --platform=darwin --arch=arm64 --out=release --overwrite \
   --no-asar \
   --ignore='^/src($|/)' \
@@ -114,23 +114,23 @@ echo "==> packaging electron app"
 
 if [ "$install_app" = true ]; then
   echo "==> installing to /Applications"
-  stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/zoottle-install.XXXXXX")
-  next_app="$stage_dir/Zoottle.app"
-  backup_dir="${HOME}/Library/Application Support/zoottle-desktop/app-backups"
-  backup_app="$backup_dir/Zoottle.app.$(date +%Y%m%d%H%M%S)"
+  stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/cloud-code-desktop-install.XXXXXX")
+  next_app="$stage_dir/Cloud Code Desktop.app"
+  backup_dir="${HOME}/Library/Application Support/cloud-code-desktop/app-backups"
+  backup_app="$backup_dir/Cloud Code Desktop.app.$(date +%Y%m%d%H%M%S)"
   mkdir -p "$backup_dir"
-  cp -R "$desktop_dir/release/Zoottle-darwin-arm64/Zoottle.app" "$next_app"
+  cp -R "$desktop_dir/release/Cloud Code Desktop-darwin-arm64/Cloud Code Desktop.app" "$next_app"
   # fix spawn-helper permissions that cp may strip
   find "$next_app" -name spawn-helper -type f -exec chmod 755 {} + 2>/dev/null || true
   codesign --force --deep --sign - "$next_app"
-  if [ -e '/Applications/Zoottle.app' ]; then
-    mv '/Applications/Zoottle.app' "$backup_app"
+  if [ -e '/Applications/Cloud Code Desktop.app' ]; then
+    mv '/Applications/Cloud Code Desktop.app' "$backup_app"
   fi
-  mv "$next_app" '/Applications/Zoottle.app'
+  mv "$next_app" '/Applications/Cloud Code Desktop.app'
   rm -rf "$stage_dir"
   echo "==> previous app moved to $backup_app"
 else
-  echo "==> packaged app at $desktop_dir/release/Zoottle-darwin-arm64/Zoottle.app"
+  echo "==> packaged app at $desktop_dir/release/Cloud Code Desktop-darwin-arm64/Cloud Code Desktop.app"
   echo "==> not installing to /Applications; rerun with --install from outside the running app to install"
 fi
 

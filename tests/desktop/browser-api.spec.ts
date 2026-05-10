@@ -22,7 +22,7 @@ test('browser API creates and navigates a webframe tab from the chrome page', as
   try {
     await waitForHttp(chromeUrl)
     const app = await electron.launch({
-      args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/zoottle-desktop/dist/main.js')],
+      args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/cloud-code-desktop/dist/main.js')],
       env: {
         ...process.env,
         NODE_ENV: 'development',

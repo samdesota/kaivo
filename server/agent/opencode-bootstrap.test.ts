@@ -270,7 +270,7 @@ describe('startOpenCode — agent-shell token + plugin config injection', () => 
       '/home/coder/.config/opencode/opencode.json',
     )
     const cfg = JSON.parse(configExec!.stdin!) as { plugin: unknown[] }
-    expect(cfg.plugin).toContain('file:///opt/zoottle-opencode-plugin/index.js')
+    expect(cfg.plugin).toContain('file:///opt/cloud-code-plugin/index.js')
   })
 
   it('revokes prior tokens on restart (rotation)', async () => {

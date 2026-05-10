@@ -5,11 +5,11 @@ import { parseDesktopLogFile } from './harness/logs'
 
 test('desktop harness launches the built skeleton app and captures logs', async ({ desktopLogPath, desktopStateDir }) => {
   const app = await electron.launch({
-    args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/zoottle-desktop/dist/main.js')],
+    args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/cloud-code-desktop/dist/main.js')],
     env: {
       ...process.env,
       CC_INSTANCE_ID: 'desktop-skeleton-test',
-      CC_DESKTOP_CHROME_URL: 'data:text/html,<h1>Zoottle Desktop Skeleton</h1><script>console.log("desktop skeleton renderer ready")</script>',
+      CC_DESKTOP_CHROME_URL: 'data:text/html,<h1>Cloud Code Desktop Skeleton</h1><script>console.log("desktop skeleton renderer ready")</script>',
       CC_DESKTOP_TEST_LOG: desktopLogPath,
       CC_DESKTOP_TEST_STATE_DIR: desktopStateDir,
     },

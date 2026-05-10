@@ -32,7 +32,7 @@ export class OpenCodeError extends Error {
 
 const DEFAULT_PORT = 4096
 // /config blocks until the plugin is loaded, which includes loading our
-// bundled Zoottle plugin (reads ruleset, imports SDK, etc.). Observed
+// bundled cloud-code plugin (reads ruleset, imports SDK, etc.). Observed
 // cold-boot is ~18s on a freshly-created sandbox; 45s gives slack for
 // slower hosts without letting hangs go forever.
 const READY_TIMEOUT_MS = 45_000
@@ -305,7 +305,7 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * The sandbox image ships our OpenCode plugin at
- * `/opt/zoottle-opencode-plugin/index.js`. OpenCode's config loader only picks
+ * `/opt/cloud-code-plugin/index.js`. OpenCode's config loader only picks
  * up plugins from:
  *   - project-local `opencode.json` (resolved from cwd)
  *   - global `~/.config/opencode/opencode.json` (XDG)
@@ -316,7 +316,7 @@ function sleep(ms: number): Promise<void> {
  * rather than relying on the bind-mounted `~/.opencode` dir (which
  * OpenCode does NOT read).
  */
-const PLUGIN_CONTAINER_PATH = 'file:///opt/zoottle-opencode-plugin/index.js'
+const PLUGIN_CONTAINER_PATH = 'file:///opt/cloud-code-plugin/index.js'
 const CONFIG_CONTAINER_PATH = '/home/coder/.config/opencode/opencode.json'
 
 async function ensurePluginConfig(sandboxId: string): Promise<void> {

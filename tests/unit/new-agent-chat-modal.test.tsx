@@ -13,7 +13,7 @@ describe('WorkspaceModeControl', () => {
       <WorkspaceModeControl
         mode="new"
         onModeChange={vi.fn()}
-        existingWorkspaceName="zoottle"
+        existingWorkspaceName="cloud-code-tools"
         workspaceNameValue="sidebar-folders"
         onWorkspaceNameChange={onWorkspaceNameChange}
       />,
@@ -30,14 +30,14 @@ describe('WorkspaceModeControl', () => {
       <WorkspaceModeControl
         mode="existing"
         onModeChange={vi.fn()}
-        existingWorkspaceName="zoottle"
+        existingWorkspaceName="cloud-code-tools"
         workspaceNameValue="sidebar-folders"
         onWorkspaceNameChange={vi.fn()}
       />,
     )
 
     expect(screen.queryByLabelText('Workspace name')).toBeNull()
-    expect(screen.getByText('zoottle')).toBeTruthy()
+    expect(screen.getByText('cloud-code-tools')).toBeTruthy()
   })
 
   it('emits mode changes from the New/Existing dropdown', () => {
@@ -47,7 +47,7 @@ describe('WorkspaceModeControl', () => {
       <WorkspaceModeControl
         mode="existing"
         onModeChange={onModeChange}
-        existingWorkspaceName="zoottle"
+        existingWorkspaceName="cloud-code-tools"
         workspaceNameValue="sidebar-folders"
         onWorkspaceNameChange={vi.fn()}
       />,

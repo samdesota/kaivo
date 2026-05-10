@@ -5,7 +5,7 @@ import { AgentShellClient, AppUnreachableError } from './client.js'
 /**
  * Tool-name collision: OpenCode ships a built-in `bash` tool that shells
  * out locally. We can't replace it from a plugin in a way that also
- * surfaces our shellId metadata to the Zoottle UI, so we expose our
+ * surfaces our shellId metadata to the cloud-code UI, so we expose our
  * tools under `cloud_bash` and `cloud_pty` and teach the system prompt to
  * prefer them. The `plugin` config entry is always paired with an agent
  * prompt that mentions these names.
@@ -46,12 +46,12 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     const tokenSet = !!process.env[TOKEN_ENV]
     const urlSet = !!process.env[APP_URL_ENV]
     console.error(
-      `[zoottle-opencode-plugin] env missing — tokenSet=${tokenSet} urlSet=${urlSet}; tools not registered`,
+      `[cloud-code-plugin] env missing — tokenSet=${tokenSet} urlSet=${urlSet}; tools not registered`,
     )
     return {}
   }
   console.error(
-    `[zoottle-opencode-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane, cloud_browser_* (appUrl=${creds.appUrl})`,
+    `[cloud-code-plugin] registering cloud_bash, cloud_pty, cloud_pty_write, cloud_pty_read, cloud_pty_close, cloud_open_pane, cloud_browser_* (appUrl=${creds.appUrl})`,
   )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
@@ -64,7 +64,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     tool: {
       cloud_bash: tool({
         description:
-          'Run a finite shell command inside the Zoottle sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `cloud_pty` instead so the human can see and interact with them.',
+          'Run a finite shell command inside the cloud-code sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `cloud_pty` instead so the human can see and interact with them.',
         args: {
           command: z
             .string()
@@ -77,7 +77,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       cloud_pty: tool({
         description:
-          'Open a persistent interactive PTY shell inside the Zoottle sandbox. Prefer this for dev servers, watch commands, REPLs, or anything that runs indefinitely — the shell appears in the human user\'s Shells panel so they can watch output and type into it. Returns a shellId you can then use with `cloud_pty_write` to send commands or `cloud_pty_read` to check output. Once a PTY is open, DO NOT run the same long-running command via cloud_bash.',
+          'Open a persistent interactive PTY shell inside the cloud-code sandbox. Prefer this for dev servers, watch commands, REPLs, or anything that runs indefinitely — the shell appears in the human user\'s Shells panel so they can watch output and type into it. Returns a shellId you can then use with `cloud_pty_write` to send commands or `cloud_pty_read` to check output. Once a PTY is open, DO NOT run the same long-running command via cloud_bash.',
         args: {
           cwd: z.string().optional().describe('Starting cwd for the shell. Defaults to /workspace.'),
           label: z.string().optional().describe('Short human-readable label shown in the Shells panel.'),
@@ -132,7 +132,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       cloud_open_pane: tool({
         description:
-          'Open or focus a right-side pane tab in the Zoottle UI. Supports file, shell, preview, and browser panes. Use this to show the human relevant context. This tool does not read, write, or execute anything by itself.',
+          'Open or focus a right-side pane tab in the Cloud Code UI. Supports file, shell, preview, and browser panes. Use this to show the human relevant context. This tool does not read, write, or execute anything by itself.',
         args: {
           kind: z
             .enum(['file', 'shell', 'preview', 'browser'])
@@ -157,21 +157,21 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
         },
       }),
       cloud_browser_list_tabs: tool({
-        description: 'List Zoottle browser tabs available for agent connection.',
+        description: 'List Cloud Code browser tabs available for agent connection.',
         args: {},
         async execute(_args, context) {
           return runBrowserTool(client, 'agentBrowser.listTabs', {}, context as unknown as ToolCtxLike, 'query')
         },
       }),
       cloud_browser_connect_tab: tool({
-        description: 'Connect the agent to an existing Zoottle browser tab and return a cdpId for subsequent browser tools.',
+        description: 'Connect the agent to an existing Cloud Code browser tab and return a cdpId for subsequent browser tools.',
         args: { browserTabId: z.string().min(1) },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.connectTab', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
       cloud_browser_open_and_connect: tool({
-        description: 'Open a URL in a Zoottle browser tab and connect the agent to it in one step.',
+        description: 'Open a URL in a Cloud Code browser tab and connect the agent to it in one step.',
         args: { url: z.string().min(1), title: z.string().optional(), activate: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.openAndConnect', args, context as unknown as ToolCtxLike, 'mutate')

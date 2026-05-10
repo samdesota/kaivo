@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — install cc-env as a background service on macOS / Linux.
 #
-#   1. Builds cc-env + the Zoottle OpenCode plugin from this repo checkout
+#   1. Builds cc-env + the opencode plugin from this repo checkout
 #      (requires node ≥ 20 + npm in PATH).
 #   2. Stages the bundle into $INSTALL_DIR (default ~/.local/share/cc-env).
 #   3. Walks the device-flow pairing against a cc-control identity URL,
@@ -107,7 +107,7 @@ echo "==> building cc-env"
   npm run build --silent
 )
 
-echo "==> building Zoottle OpenCode plugin"
+echo "==> building opencode plugin"
 (
   cd "$repo_root/packages/opencode-plugin"
   npm install --no-audit --no-fund --silent
@@ -149,10 +149,10 @@ fi
 
 # Plugin bundle lives next to the binary so the Dockerfile / local install
 # share the same config shape.
-mkdir -p "$install_dir/zoottle-opencode-plugin"
-cp "$repo_root/packages/opencode-plugin/dist/index.js" "$install_dir/zoottle-opencode-plugin/index.js"
+mkdir -p "$install_dir/opencode-plugin"
+cp "$repo_root/packages/opencode-plugin/dist/index.js" "$install_dir/opencode-plugin/index.js"
 
-plugin_path_uri="file://${install_dir}/zoottle-opencode-plugin/index.js"
+plugin_path_uri="file://${install_dir}/opencode-plugin/index.js"
 
 # --- device-flow pairing ---------------------------------------------------
 

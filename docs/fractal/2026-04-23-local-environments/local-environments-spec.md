@@ -225,7 +225,7 @@ Auth middleware:
      - `HOME` left alone in local mode; set to `/home/coder` in container mode.
   6. Poll `http://127.0.0.1:<opencodePort>/config` with basic auth until 2xx or 45s timeout.
 - Port selection: `CC_OPENCODE_PORT` env var if set, else pick a free high port at first start and persist in `envMeta.opencodePort`.
-- Zoottle plugin: the container image ships it at `/opt/zoottle-opencode-plugin/index.js`; the npm-bundled local variant ships it inside the `cc-env` install (resolve via `require.resolve` to give opencode an absolute `file://` URL).
+- Cloudcode plugin: the container image ships it at `/opt/cloud-code-plugin/index.js`; the npm-bundled local variant ships it inside the `cc-env` install (resolve via `require.resolve` to give opencode an absolute `file://` URL).
 
 #### 3.5 Identity client
 Thin tRPC client against `CC_IDENTITY_URL`, bearer-authed with `identityToken`. Endpoints it calls:

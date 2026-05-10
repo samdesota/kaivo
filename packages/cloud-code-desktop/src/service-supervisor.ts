@@ -185,7 +185,7 @@ function packagedLaunchSpec(service: ServiceName, config: InstanceRuntimeConfig)
   }
 
   const envDir = path.join(bundle, 'env-server')
-  const pluginPath = `file://${path.join(bundle, 'zoottle-opencode-plugin', 'index.js')}`
+  const pluginPath = `file://${path.join(bundle, 'opencode-plugin', 'index.js')}`
 
   return {
     command: node,

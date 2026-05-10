@@ -11,7 +11,7 @@ describe('shouldRefreshFileForFsEvent', () => {
     expect(
       shouldRefreshFileForFsEvent(
         { type: 'change', path: '/src/a.ts' },
-        '/Users/sam/d/repos/zoottle/src/a.ts',
+        '/Users/sam/d/repos/cloud-code-tools/src/a.ts',
         true,
       ),
     ).toBe(true)

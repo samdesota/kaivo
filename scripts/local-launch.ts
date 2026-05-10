@@ -3,9 +3,9 @@ import net from 'node:net'
 import path from 'node:path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import * as runtime from '../packages/zoottle-desktop/src/instance-runtime.ts'
-import type { InstanceRuntimeConfig, RuntimePortName } from '../packages/zoottle-desktop/src/instance-runtime'
-import * as desktopPairing from '../packages/zoottle-desktop/src/desktop-pairing.ts'
+import * as runtime from '../packages/cloud-code-desktop/src/instance-runtime.ts'
+import type { InstanceRuntimeConfig, RuntimePortName } from '../packages/cloud-code-desktop/src/instance-runtime'
+import * as desktopPairing from '../packages/cloud-code-desktop/src/desktop-pairing.ts'
 import { runDevSeed } from './seed-dev'
 
 const runtimeModule = runtime as typeof runtime & { default?: typeof runtime }
@@ -500,7 +500,7 @@ function errorMessage(err: unknown): string {
 
 async function main(): Promise<void> {
   const result = await runLocalDevLauncher({ command: process.argv.join(' '), script: 'dev:local' })
-  console.log(`Local Zoottle dev runtime started:`)
+  console.log(`Local Cloud Code dev runtime started:`)
   console.log(`  app:    ${result.config.app.url}`)
   console.log(`  env:    ${result.config.env.url}`)
   console.log(`  client: ${result.config.client.url}`)
