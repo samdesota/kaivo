@@ -18,4 +18,6 @@ playwright-report
 test-data
 packages/cloud-code-desktop/release/
 packages/cloud-code-desktop/bundle/
+packages/zoottle-desktop/release/
+packages/zoottle-desktop/bundle/
 .opencode/
