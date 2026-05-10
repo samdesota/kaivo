@@ -366,6 +366,9 @@ function WorkspaceShell({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         void openCommandPalette()
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        openPane({ type: 'browser', url: 'https://www.google.com' })
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
@@ -376,7 +379,7 @@ function WorkspaceShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [agentCollapsed, openCommandPalette, setAgentCollapsed])
+  }, [agentCollapsed, openCommandPalette, openPane, setAgentCollapsed])
 
   return (
     <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">

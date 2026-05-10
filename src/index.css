@@ -50,7 +50,7 @@
   --color-help: var(--color-neutral-400);
   --color-label: var(--color-neutral-300);
   --color-placeholder: var(--color-neutral-500);
-  --color-highlight: hsl(var(--app-color-hue) 13% 10.78%);
+  --color-highlight: var(--color-neutral-900);
   --color-input: var(--color-neutral-970);
   --color-running: #61afef;
 }

@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, ipcMain, webContents as electronWebContents, type BrowserWindow, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, webContents as electronWebContents, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
 import { desktopBrowserSocketPath } from './instance-runtime'
@@ -46,14 +46,14 @@ function trackWebContents(contents: WebContents): void {
     const chrome = findChromeWebContentsForShortcutSender(contents)
     if (!chrome) return
     event.preventDefault()
-    chrome.send('cloud-code/app-shortcut', {
+    sendAppShortcut(chrome, {
       key: input.key,
       code: input.code,
       metaKey: input.meta,
       ctrlKey: input.control,
       altKey: input.alt,
       shiftKey: input.shift,
-    } satisfies AppShortcutInput)
+    })
   })
   contents.on('console-message', (_event, level, message, line, sourceId) => {
     const kind = chromeWebContentsIds.has(contents.id) ? 'chrome-renderer' : 'tab-renderer'
@@ -67,11 +67,82 @@ function trackWebContents(contents: WebContents): void {
   })
 }
 
+function installAppShortcutMenu(): void {
+  const appShortcuts: Array<{ label: string; accelerator: string; input: AppShortcutInput }> = [
+    { label: 'Command Palette', accelerator: 'CommandOrControl+K', input: shortcutInput('k', 'KeyK') },
+    { label: 'New Browser Tab', accelerator: 'CommandOrControl+T', input: shortcutInput('t', 'KeyT') },
+    { label: 'Toggle Sidebar', accelerator: 'CommandOrControl+B', input: shortcutInput('b', 'KeyB') },
+    { label: 'Toggle Agent Pane', accelerator: 'CommandOrControl+G', input: shortcutInput('g', 'KeyG') },
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === 'darwin'
+      ? [{ role: 'appMenu' as const }]
+      : []),
+    {
+      label: 'Cloud Code',
+      submenu: appShortcuts.map((shortcut) => ({
+        label: shortcut.label,
+        accelerator: shortcut.accelerator,
+        click: () => {
+          sendAppShortcut(findChromeWebContentsForFocusedShortcut(), shortcut.input)
+        },
+      })),
+    },
+    {
+      role: 'editMenu',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ]))
+}
+
+function shortcutInput(key: string, code: string): AppShortcutInput {
+  return {
+    key,
+    code,
+    metaKey: process.platform === 'darwin',
+    ctrlKey: process.platform !== 'darwin',
+    altKey: false,
+    shiftKey: false,
+  }
+}
+
+function sendAppShortcut(chrome: WebContents | null, input: AppShortcutInput): void {
+  if (!chrome || chrome.isDestroyed() || !chromeWebContentsIds.has(chrome.id)) return
+  chrome.send('cloud-code/app-shortcut', input)
+}
+
+function findChromeWebContentsForFocusedShortcut(): WebContents | null {
+  const focusedContents = electronWebContents.getFocusedWebContents()
+  if (focusedContents && !focusedContents.isDestroyed()) {
+    if (chromeWebContentsIds.has(focusedContents.id)) return focusedContents
+    const chrome = findChromeWebContentsForShortcutSender(focusedContents)
+    if (chrome) return chrome
+  }
+
+  const focusedWindowContents = BrowserWindow.getFocusedWindow()?.webContents
+  if (focusedWindowContents && !focusedWindowContents.isDestroyed() && chromeWebContentsIds.has(focusedWindowContents.id)) {
+    return focusedWindowContents
+  }
+
+  return null
+}
+
 function isAppShortcut(input: Electron.Input): boolean {
   if (!input.meta && !input.control) return false
   if (input.alt) return false
   const key = input.key.toLowerCase()
-  return key === 'k' || key === 'b' || key === 'g'
+  return key === 'k' || key === 't' || key === 'b' || key === 'g'
 }
 
 function findChromeWebContentsForShortcutSender(contents: WebContents): WebContents | null {
@@ -160,6 +231,7 @@ process.on('unhandledRejection', (reason) => {
 
 async function main(): Promise<void> {
   await app.whenReady()
+  installAppShortcutMenu()
   installIpcHandlers()
   const config = resolveDesktopConfig({
     ...process.env,

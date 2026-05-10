@@ -18,7 +18,7 @@ export function workspaceTabKey(tab: WorkspaceTab): string {
   if (tab.type === 'shell') return `shell:${tab.envId}:${tab.shellId}`
   if (tab.type === 'file') return `file:${tab.envId}:${tab.sessionId ?? ''}:${tab.path}`
   if (tab.type === 'preview') return `preview:${tab.envId}:${tab.port}`
-  return `browser:${tab.url}`
+  return `browser:${tab.id}`
 }
 
 export function workspaceTabFromPaneContent(
