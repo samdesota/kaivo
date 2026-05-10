@@ -35,6 +35,58 @@ export interface BuildHookOpts {
   backoffMs?: number[]
 }
 
+const browserInteractActionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('click'), elementId: z.string().optional(), id: z.union([z.string(), z.number()]).optional() }),
+  z.object({
+    type: z.literal('type'),
+    elementId: z.string().optional(),
+    id: z.union([z.string(), z.number()]).optional(),
+    text: z.string().optional(),
+    value: z.string().optional(),
+    clear: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal('fill'),
+    elementId: z.string().optional(),
+    id: z.union([z.string(), z.number()]).optional(),
+    text: z.string().optional(),
+    value: z.string().optional(),
+    clear: z.boolean().optional(),
+    fields: z
+      .array(
+        z.object({
+          elementId: z.string().optional(),
+          id: z.union([z.string(), z.number()]).optional(),
+          text: z.string().optional(),
+          value: z.string().optional(),
+          clear: z.boolean().optional(),
+        }),
+      )
+      .optional(),
+  }),
+  z.object({ type: z.literal('scroll'), x: z.number().optional(), y: z.number().optional() }),
+  z.object({ type: z.literal('goto'), url: z.string().min(1) }),
+  z.object({ type: z.literal('back') }),
+  z.object({ type: z.literal('forward') }),
+  z.object({ type: z.literal('wait'), ms: z.number().int().optional(), until: z.enum(['load', 'settle']).optional() }),
+])
+
+const browserPostSnapshotSchema = z
+  .union([
+    z.literal(false),
+    z.object({
+      wait: z
+        .enum(['none', 'load', 'settle'])
+        .optional()
+        .describe('Use "settle" after clicks. Full-navigation waits are not supported because many apps route client-side.'),
+      waitMs: z.number().int().optional(),
+      filter: z.string().optional(),
+      filterFlags: z.string().optional(),
+      viewportOnly: z.boolean().optional(),
+    }),
+  ])
+  .optional()
+
 export function buildHooks(opts: BuildHookOpts = {}): Hooks {
   const creds =
     opts.tokenOverride && opts.appUrlOverride
@@ -206,8 +258,9 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
         },
       }),
       zoottle_browser_interact: tool({
-        description: 'Perform a browser action on a connected tab by element ID or navigation action.',
-        args: { cdpId: z.string().min(1), action: z.any(), postSnapshot: z.any().optional() },
+        description:
+          'Perform a browser action on a connected tab by element ID. After clicks, prefer postSnapshot wait="settle"; do not wait for full navigation because modern apps often route client-side.',
+        args: { cdpId: z.string().min(1), action: browserInteractActionSchema, postSnapshot: browserPostSnapshotSchema },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.interact', normalizeInteractArgs(args), context as unknown as ToolCtxLike, 'mutate')
         },

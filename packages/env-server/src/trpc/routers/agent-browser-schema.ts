@@ -129,6 +129,8 @@ export const postSnapshotSchema = z.union([
     wait: z.enum(['none', 'load', 'settle']).optional(),
     waitMs: z.number().int().min(0).max(MAX_POST_SNAPSHOT_WAIT_MS).optional(),
     filter: z.string().min(1).max(1_000).optional(),
+    filterFlags: z.string().min(1).max(20).optional(),
+    viewportOnly: z.boolean().optional(),
   }),
 ])
 
