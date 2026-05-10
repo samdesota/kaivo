@@ -63,6 +63,8 @@ export type OverlayResponse =
   | { requestId: string; type: 'selected-folder'; path: string }
   | { requestId: string; type: 'open-pane'; content: PaneContent }
   | { requestId: string; type: 'close-tab' }
+  | { requestId: string; type: 'new-session' }
+  | { requestId: string; type: 'new-workspace' }
   | { requestId: string; type: 'confirmed'; confirmed: boolean }
   | { requestId: string; type: 'text-submitted'; value: string }
   | { requestId: string; type: 'error'; message: string }
@@ -193,6 +195,8 @@ function EnvOverlayRequestRenderer({
               onClose={() => respond({ requestId: request.requestId, type: 'closed' })}
               onOpenContent={(content) => respond({ requestId: request.requestId, type: 'open-pane', content })}
               onCloseTab={() => respond({ requestId: request.requestId, type: 'close-tab' })}
+              onNewSession={() => respond({ requestId: request.requestId, type: 'new-session' })}
+              onNewWorkspace={() => respond({ requestId: request.requestId, type: 'new-workspace' })}
             />
           )}
         </EnvContextProvider>

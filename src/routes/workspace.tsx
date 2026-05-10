@@ -320,8 +320,10 @@ function WorkspaceShell({
   dispatchWorkspaceState: WorkspaceUiDispatch
 }) {
   const ctx = useWorkspaceContext()
+  const navigate = useNavigate({ from: '/w/$workspaceId' })
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
+  const [newChatMode, setNewChatMode] = useState<null | 'existing' | 'new'>(null)
   const agentCollapsed = ctx.uiState.agentCollapsed
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
@@ -355,7 +357,21 @@ function WorkspaceShell({
     })
     if (result.type === 'open-pane') openPane(result.content)
     if (result.type === 'close-tab') closeActiveTab()
+    if (result.type === 'new-session') setNewChatMode('existing')
+    if (result.type === 'new-workspace') setNewChatMode('new')
   }, [closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs.length, ctx.workspace.id, openPane])
+
+  const selectCreatedChat = useCallback(async (sessionId: string, workspaceId?: string) => {
+    if (!workspaceId) return
+    if (workspaceId === ctx.workspace.id) {
+      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
+    }
+    await navigate({
+      to: '/w/$workspaceId',
+      params: { workspaceId },
+      search: { chat: sessionId, tab: undefined },
+    })
+  }, [ctx.workspace.id, dispatchWorkspaceState, navigate])
 
   useEffect(() => {
     prewarmOverlayLayer()
@@ -382,6 +398,7 @@ function WorkspaceShell({
   }, [agentCollapsed, openCommandPalette, openPane, setAgentCollapsed])
 
   return (
+    <>
     <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
       {!sidebarHidden && (
         <WorkspaceSidebar
@@ -418,6 +435,20 @@ function WorkspaceShell({
         }
       />
     </div>
+    {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && newChatMode && (
+      <WorkspaceAgentEnvProvider>
+        <NewAgentChatModal
+          open
+          workspaceId={ctx.workspace.id}
+          workspaceName={ctx.workspace.name}
+          initialWorkspaceMode={newChatMode}
+          folderId={newChatMode === 'new' ? null : undefined}
+          onClose={() => setNewChatMode(null)}
+          onCreated={(sessionId, workspaceId) => void selectCreatedChat(sessionId, workspaceId)}
+        />
+      </WorkspaceAgentEnvProvider>
+    )}
+    </>
   )
 }
 

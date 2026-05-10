@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
 import { Button, Field, Input, SegmentedControl } from '../../../components/ui'
+import { OverlayShell } from '../../../components/overlay-shell'
 import { openNewAgentChatOverlayDetailed } from '../../../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
@@ -247,6 +248,10 @@ function NewAgentChatOverlayContent({
     [existingWorktrees, folders],
   )
   const filteredFolders = useMemo(() => filterRecentFolders(searchableFolders, search), [search, searchableFolders])
+  const visibleFolders = useMemo(
+    () => search.trim() ? filteredFolders : filteredFolders.slice(0, 10),
+    [filteredFolders, search],
+  )
   const filteredWorktrees = useMemo(() => filterWorktrees(existingWorktrees, search), [existingWorktrees, search])
   const worktreeGroups = useMemo(() => groupWorktreesByParent(filteredWorktrees), [filteredWorktrees])
   const filteredConfigs = useMemo(() => filterConfigs(configs, search), [configs, search])
@@ -283,12 +288,12 @@ function NewAgentChatOverlayContent({
       return rows
     }
     return [
-      ...filteredFolders.map((folder): ChooserRow => ({
-        key: `folder:${folder.path}`,
-        kind: 'folder',
-        selection: { type: 'folder', path: folder.path },
-        title: folder.label ?? folderName(folder.path),
-        detail: folder.path,
+      ...filteredConfigs.map((config): ChooserRow => ({
+        key: `repoConfig:${config.id}`,
+        kind: 'repoConfig',
+        selection: { type: 'repoConfig', configId: config.id, worktreeName: '' },
+        title: config.name,
+        detail: config.githubFullName ?? config.originUrl ?? config.id,
       })),
       ...filteredWorktrees.map((worktree): ChooserRow => ({
         key: `worktree:${worktree.id}`,
@@ -297,15 +302,15 @@ function NewAgentChatOverlayContent({
         title: worktree.worktreeName,
         detail: worktree.workingDir,
       })),
-      ...filteredConfigs.map((config): ChooserRow => ({
-        key: `repoConfig:${config.id}`,
-        kind: 'repoConfig',
-        selection: { type: 'repoConfig', configId: config.id, worktreeName: '' },
-        title: config.name,
-        detail: config.githubFullName ?? config.originUrl ?? config.id,
+      ...visibleFolders.map((folder): ChooserRow => ({
+        key: `folder:${folder.path}`,
+        kind: 'folder',
+        selection: { type: 'folder', path: folder.path },
+        title: folder.label ?? folderName(folder.path),
+        detail: folder.path,
       })),
     ]
-  }, [filteredConfigs, filteredFolders, filteredWorktrees, pathDirs, pathBrowse.data, pathMode])
+  }, [filteredConfigs, filteredWorktrees, pathDirs, pathBrowse.data, pathMode, visibleFolders])
   const clonePreview = selectedConfig && selection?.type === 'repoConfig'
     ? `repos/${slugify(selectedConfig.name)}/${slugify(selection.worktreeName || 'work-tree')}`
     : null
@@ -370,25 +375,30 @@ function NewAgentChatOverlayContent({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-      role="dialog"
-      aria-modal="true"
+    <OverlayShell
+      onClose={onClose}
+      panelClassName="flex max-h-[min(78vh,1000px)] flex-col"
+      footer={step === 'choose'
+        ? (
+          <>
+            <span>↑↓ navigate</span>
+            <span>↵ select</span>
+            <span>→ open folder</span>
+            <span>esc close</span>
+          </>
+        )
+        : undefined}
     >
-      <div className="mb-10 flex max-h-[min(84vh,1000px)] w-full max-w-xl flex-col rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
         {step === 'choose' ? (
           <>
-            <div className="shrink-0 border-b border-neutral-800 bg-input">
+            <div className="shrink-0 border-b border-neutral-800 bg-neutral-950">
               <input
                 ref={searchRef}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 onKeyDown={handleSearchKeyDown}
                 placeholder="Search folders, work trees, repo configs, or type a path…"
-                className="w-full bg-input px-4 py-3 text-sm text-content-strong outline-none placeholder:text-placeholder"
+                className="w-full bg-neutral-950 px-4 py-3 text-sm text-content-strong outline-none placeholder:text-placeholder"
               />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto pb-2 pt-2">
@@ -438,14 +448,15 @@ function NewAgentChatOverlayContent({
                 </section>
               ) : (
                 <div className="space-y-2">
-                  {filteredFolders.length > 0 && (
-                    <ResultSection label="Recent folders">
-                      {filteredFolders.map((folder, index) => (
-                        <button key={folder.path} onClick={() => choose({ type: 'folder', path: folder.path })} className={compactChoiceClass(highlightedIndex === index)}>
+                  {filteredConfigs.length > 0 && (
+                    <ResultSection label="Clone from repo config">
+                      {filteredConfigs.map((config, index) => (
+                        <button key={config.id} onClick={() => choose({ type: 'repoConfig', configId: config.id, worktreeName: '' })} className={compactChoiceClass(highlightedIndex === index)}>
                           <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                            <span className="shrink-0 truncate text-content-strong">{folder.label ?? folderName(folder.path)}</span>
-                            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={folder.path}>{folder.path}</span>
+                            <span className="shrink-0 truncate text-content-strong">{config.name}</span>
+                            <span className="min-w-0 flex-1 truncate text-[10px] text-help" title={config.githubFullName ?? config.originUrl ?? config.id}>{config.githubFullName ?? config.originUrl ?? config.id}</span>
                           </span>
+                          <span className="ml-2 text-sm text-ui-muted">+</span>
                         </button>
                       ))}
                     </ResultSection>
@@ -456,7 +467,7 @@ function NewAgentChatOverlayContent({
                         <div key={group.parent}>
                           <SectionLabel label={group.parent} />
                           {group.worktrees.map((worktree) => {
-                            const rowIndex = filteredFolders.length + filteredWorktrees.findIndex((item) => item.id === worktree.id)
+                            const rowIndex = filteredConfigs.length + filteredWorktrees.findIndex((item) => item.id === worktree.id)
                             return (
                             <button key={worktree.id} onClick={() => choose({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName })} className={compactChoiceClass(highlightedIndex === rowIndex, 'row')}>
                               <span className="min-w-0 flex-1 text-left">
@@ -470,15 +481,14 @@ function NewAgentChatOverlayContent({
                       ))}
                     </ResultSection>
                   )}
-                  {filteredConfigs.length > 0 && (
-                    <ResultSection label="Clone from repo config">
-                      {filteredConfigs.map((config, index) => (
-                        <button key={config.id} onClick={() => choose({ type: 'repoConfig', configId: config.id, worktreeName: '' })} className={compactChoiceClass(highlightedIndex === filteredFolders.length + filteredWorktrees.length + index)}>
+                  {visibleFolders.length > 0 && (
+                    <ResultSection label="Recent folders">
+                      {visibleFolders.map((folder, index) => (
+                        <button key={folder.path} onClick={() => choose({ type: 'folder', path: folder.path })} className={compactChoiceClass(highlightedIndex === filteredConfigs.length + filteredWorktrees.length + index)}>
                           <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                            <span className="shrink-0 truncate text-content-strong">{config.name}</span>
-                            <span className="min-w-0 flex-1 truncate text-[10px] text-help" title={config.githubFullName ?? config.originUrl ?? config.id}>{config.githubFullName ?? config.originUrl ?? config.id}</span>
+                            <span className="shrink-0 truncate text-content-strong">{folder.label ?? folderName(folder.path)}</span>
+                            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-help" title={folder.path}>{folder.path}</span>
                           </span>
-                          <span className="ml-2 text-sm text-ui-muted">+</span>
                         </button>
                       ))}
                     </ResultSection>
@@ -545,8 +555,7 @@ function NewAgentChatOverlayContent({
           </>
         )}
         {error && <div className="mx-4 shrink-0 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>}
-      </div>
-    </div>
+    </OverlayShell>
   )
 }
 

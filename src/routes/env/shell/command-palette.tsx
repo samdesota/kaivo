@@ -4,6 +4,7 @@ import { envTrpc } from '../../../env-trpc'
 import { trpc } from '../../../trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
+import { OverlayShell } from '../../../components/overlay-shell'
 import { type PaneContent } from './tab-state'
 
 interface PaletteItem {
@@ -40,6 +41,8 @@ export function CommandPalette({
   onClose,
   onOpenContent,
   onCloseTab,
+  onNewSession,
+  onNewWorkspace,
   hasActiveTab,
   activeSessionId,
   workspaceId,
@@ -48,6 +51,8 @@ export function CommandPalette({
   onClose: () => void
   onOpenContent: (content: PaneContent) => void
   onCloseTab: () => void
+  onNewSession?: () => void
+  onNewWorkspace?: () => void
   hasActiveTab: boolean
   /** Currently focused agent session — its workingDir becomes the cwd
    * for any shell created here. */
@@ -109,6 +114,24 @@ export function CommandPalette({
   const items: PaletteItem[] = useMemo(() => {
     const out: PaletteItem[] = []
 
+    if (workspaceId) {
+      out.push({
+        id: 'action:new-session',
+        label: 'New session',
+        detail: 'Create a chat in the current workspace',
+        kind: 'action',
+        haystack: 'new session chat current workspace agent',
+        run: () => onNewSession?.(),
+      })
+    }
+    out.push({
+      id: 'action:new-workspace',
+      label: 'New workspace',
+      detail: 'Create a workspace from a new chat',
+      kind: 'action',
+      haystack: 'new workspace chat create project',
+      run: () => onNewWorkspace?.(),
+    })
     out.push({
       id: 'action:new-shell',
       label: 'New shell',
@@ -180,7 +203,7 @@ export function CommandPalette({
     }
 
     return out
-  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, queryClient, createShellAsync, activeCwd, workspaceInput])
+  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, onNewSession, onNewWorkspace, queryClient, createShellAsync, activeCwd, workspaceInput])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -212,14 +235,17 @@ export function CommandPalette({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 px-4 pt-[12vh]"
-      onClick={onClose}
+    <OverlayShell
+      onClose={onClose}
+      footer={(
+        <>
+          <span>↑↓ navigate</span>
+          <span>↵ open</span>
+          <span>esc close</span>
+          <span className="ml-auto">{filtered.length} result{filtered.length === 1 ? '' : 's'}</span>
+        </>
+      )}
     >
-      <div
-        className="w-full max-w-xl overflow-hidden rounded-lg border border-neutral-700 bg-neutral-950 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
         <input
           ref={inputRef}
           autoFocus
@@ -245,7 +271,7 @@ export function CommandPalette({
             }
           }}
           placeholder="Search shells, previews, actions…"
-          className="w-full border-b border-neutral-800 bg-input px-4 py-3 text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none"
+          className="w-full border-b border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none"
         />
         <ul className="max-h-[50vh] overflow-y-auto py-1">
           {filtered.length === 0 ? (
@@ -274,14 +300,7 @@ export function CommandPalette({
             ))
           )}
         </ul>
-        <div className="flex items-center gap-3 border-t border-neutral-800 px-4 py-1.5 text-[10px] text-neutral-500">
-          <span>↑↓ navigate</span>
-          <span>↵ open</span>
-          <span>esc close</span>
-          <span className="ml-auto">{filtered.length} result{filtered.length === 1 ? '' : 's'}</span>
-        </div>
-      </div>
-    </div>
+    </OverlayShell>
   )
 }
 

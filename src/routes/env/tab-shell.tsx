@@ -7,7 +7,7 @@ import { RightPane } from './shell/right-pane'
 import { ShellChrome } from './shell/shell-chrome'
 import { type PaneContent, useRightPaneState } from './shell/tab-state'
 import type { EnvRef } from '../../lib/env-client'
-import { openCommandPaletteOverlay } from '../../lib/overlay-layer-controller'
+import { openCommandPaletteOverlay, openNewAgentChatOverlay } from '../../lib/overlay-layer-controller'
 
 interface OpenPaneOptions {
   title?: string
@@ -47,6 +47,13 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
     })
     if (result.type === 'open-pane') openContent(result.content)
     if (result.type === 'close-tab' && state.activeTabId) dispatch({ type: 'close', tabId: state.activeTabId })
+    if (result.type === 'new-workspace') {
+      await openNewAgentChatOverlay({
+        initialWorkspaceMode: 'new',
+        env: envContext.env,
+        envToken: envContext.envToken,
+      })
+    }
   }
 
   useEffect(() => {

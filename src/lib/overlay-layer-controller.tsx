@@ -26,6 +26,8 @@ type EnvOverlayInput = {
 export type CommandPaletteOverlayResult =
   | { type: 'open-pane'; content: PaneContent }
   | { type: 'close-tab' }
+  | { type: 'new-session' }
+  | { type: 'new-workspace' }
   | { type: 'closed' }
 
 let detachedOverlayId: string | null = null
@@ -83,6 +85,8 @@ export async function openCommandPaletteOverlay(
   })
   if (response.type === 'open-pane') return { type: 'open-pane', content: response.content }
   if (response.type === 'close-tab') return { type: 'close-tab' }
+  if (response.type === 'new-session') return { type: 'new-session' }
+  if (response.type === 'new-workspace') return { type: 'new-workspace' }
   if (response.type === 'closed') return { type: 'closed' }
   throw new Error(`unexpected overlay response: ${response.type}`)
 }
