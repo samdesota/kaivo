@@ -18,6 +18,16 @@ let browserAgentBridge: BrowserAgentBridge | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 
+function chromeUserAgent(): string {
+  const chromeVersion = process.versions.chrome
+  const platformToken = process.platform === 'darwin'
+    ? 'Macintosh; Intel Mac OS X 10_15_7'
+    : process.platform === 'win32'
+      ? 'Windows NT 10.0; Win64; x64'
+      : 'X11; Linux x86_64'
+  return `Mozilla/5.0 (${platformToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`
+}
+
 type AppShortcutInput = {
   key: string
   code?: string
@@ -255,6 +265,7 @@ async function main(): Promise<void> {
   webframeApp = await createApp({
     historyStore: createMemoryHistoryStore(),
     tabStore: createMemoryTabStore(),
+    tabUserAgent: chromeUserAgent(),
   })
   writeLog('main', 'info', 'desktop app starting', { stateDir, config })
   browserAgentBridge = await startBrowserAgentBridge({
