@@ -476,6 +476,9 @@ class OpenCodeSupervisor {
     const xdgConfigHome = path.join(config.CC_STATE_DIR, 'xdg', 'config')
     const dir = path.join(xdgConfigHome, 'opencode')
     await fs.mkdir(dir, { recursive: true })
+    const gpt55ContextLimit = config.CC_OPENCODE_GPT55_CONTEXT_LIMIT
+    const gpt55OutputLimit = config.CC_OPENCODE_GPT55_OUTPUT_LIMIT
+    const gpt55InputLimit = config.CC_OPENCODE_GPT55_COMPACT_LIMIT ?? Math.max(1, gpt55ContextLimit - gpt55OutputLimit)
     const cfg = {
       plugin: [config.CC_OPENCODE_PLUGIN_PATH, OPENAI_OAUTH_PLUGIN],
       agent: {
@@ -497,8 +500,9 @@ class OpenCodeSupervisor {
             'gpt-5.5': {
               name: 'GPT 5.5 (OAuth)',
               limit: {
-                context: 1_050_000,
-                output: 128_000,
+                context: gpt55ContextLimit,
+                input: gpt55InputLimit,
+                output: gpt55OutputLimit,
               },
               modalities: {
                 input: ['text', 'image'],
