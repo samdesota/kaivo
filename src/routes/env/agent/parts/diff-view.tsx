@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Lock, Unlock } from 'lucide-react'
 import type { BundledLanguage, ThemedToken } from 'shiki'
 import { useOpenState } from './open-state'
-import { DisclosureBody, DisclosureHeader } from './disclosure'
+import { DisclosureBody } from './disclosure'
 
 type LineKind = 'hunk' | 'add' | 'del' | 'meta' | 'ctx'
 
@@ -62,7 +63,7 @@ export function DiffView({ diff }: { diff: string }) {
   }
 
   return (
-    <div className="max-h-[32rem] overflow-auto font-mono text-[11px] leading-5">
+    <div className="font-mono text-[11px] leading-5">
       {files.map((file) => (
         <DiffFileSection key={file.id} file={file} tokens={tokens[file.id]} />
       ))}
@@ -72,38 +73,127 @@ export function DiffView({ diff }: { diff: string }) {
 
 function DiffFileSection({ file, tokens }: { file: DiffFile; tokens?: ThemedToken[][] }) {
   const [open, setOpen] = useOpenState(`diff-file:${file.id}`, true)
+  const [scrollLocked, setScrollLocked] = useState(true)
+  const [hasScrollableContent, setHasScrollableContent] = useState(false)
+
+  useEffect(() => {
+    setScrollLocked(true)
+    setHasScrollableContent(false)
+  }, [file.id])
 
   return (
     <section className="border-b border-neutral-900/60 last:border-b-0">
       <div className="sticky top-0 z-10 backdrop-blur">
-        <DisclosureHeader open={open} onToggle={() => setOpen((v) => !v)}>
-          <span className="min-w-0 flex-1 truncate text-content-default" title={file.path}>
-            {file.path}
+        <div className="flex min-w-0 w-full items-center gap-2 rounded py-0.5 text-left hover:bg-neutral-900/40">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          >
+            <span className="inline-flex w-3 justify-center font-mono text-ui-muted">
+              {open ? '▾' : '▸'}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-content-default" title={file.path}>
+              {file.path}
+            </span>
+            {file.language !== 'text' && <span className="text-[10px] text-ui-muted">{file.language}</span>}
+          </button>
+          <span className="flex shrink-0 items-center gap-1.5 pr-1">
+            <LineDiffCount added={file.added} deleted={file.deleted} />
+            {hasScrollableContent && (
+              <button
+                type="button"
+                title={scrollLocked ? 'Scroll locked' : 'Scroll unlocked'}
+                aria-label={scrollLocked ? 'Scroll locked' : 'Scroll unlocked'}
+                onClick={() => setScrollLocked((locked) => !locked)}
+                className="rounded p-0.5 text-ui-muted hover:bg-neutral-800 hover:text-content-default"
+              >
+                {scrollLocked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+              </button>
+            )}
           </span>
-          {file.language !== 'text' && <span className="text-[10px] text-ui-muted">{file.language}</span>}
-          <LineDiffCount added={file.added} deleted={file.deleted} />
-        </DisclosureHeader>
+        </div>
       </div>
       {open && (
         <DisclosureBody>
-          {file.lines.length > 0 ? (
-            <div className="py-1">
-              {file.lines.map((line, index) => (
-                <DiffLineView
-                  key={index}
-                  line={line}
-                  tokens={tokens?.[index]}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="py-1 font-mono text-[11px] text-help">
-              {file.action === 'Delete' ? 'File deleted.' : 'No line changes shown.'}
-            </div>
-          )}
+          <LockedDiffScroll
+            scrollLocked={scrollLocked}
+            setScrollLocked={setScrollLocked}
+            onScrollableContentChange={setHasScrollableContent}
+          >
+            {file.lines.length > 0 ? (
+              <div className="py-1">
+                {file.lines.map((line, index) => (
+                  <DiffLineView
+                    key={index}
+                    line={line}
+                    tokens={tokens?.[index]}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="py-1 font-mono text-[11px] text-help">
+                {file.action === 'Delete' ? 'File deleted.' : 'No line changes shown.'}
+              </div>
+            )}
+          </LockedDiffScroll>
         </DisclosureBody>
       )}
     </section>
+  )
+}
+
+function LockedDiffScroll({
+  children,
+  scrollLocked,
+  setScrollLocked,
+  onScrollableContentChange,
+}: {
+  children: ReactNode
+  scrollLocked: boolean
+  setScrollLocked: (locked: boolean) => void
+  onScrollableContentChange: (hasScrollableContent: boolean) => void
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    function updateScrollableContent() {
+      if (!el) return
+      onScrollableContentChange(
+        el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1,
+      )
+    }
+
+    updateScrollableContent()
+    if (typeof ResizeObserver === 'undefined') return
+    const resizeObserver = new ResizeObserver(updateScrollableContent)
+    resizeObserver.observe(el)
+    for (const child of Array.from(el.children)) resizeObserver.observe(child)
+    return () => resizeObserver.disconnect()
+  }, [children, onScrollableContentChange])
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el || !scrollLocked) return
+    el.scrollTop = 0
+    el.scrollLeft = 0
+  }, [scrollLocked])
+
+  return (
+    <div>
+      <div
+        ref={scrollRef}
+        onClick={() => {
+          if (scrollLocked) setScrollLocked(false)
+        }}
+        className={`max-h-[32rem] ${scrollLocked ? 'overflow-hidden' : 'overflow-auto'}`}
+      >
+        {children}
+      </div>
+    </div>
   )
 }
 
@@ -244,7 +334,7 @@ function tokenStyle(token: ThemedToken) {
 function LineDiffCount({ added, deleted }: { added: number; deleted: number }) {
   if (added === 0 && deleted === 0) return null
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px] tabular-nums">
+    <span className="flex shrink-0 items-center gap-1.5 text-[10px] tabular-nums">
       {added > 0 && <span className="text-emerald-300">+{added}</span>}
       {deleted > 0 && <span className="text-red-300">-{deleted}</span>}
     </span>
