@@ -9,6 +9,7 @@ import {
 import { TextPart } from './text-part'
 import { ReasoningPart } from './reasoning-part'
 import { DiffView } from './diff-view'
+import { DisclosureBody, DisclosureHeader } from './disclosure'
 
 interface ToolState {
   status?: 'pending' | 'running' | 'completed' | 'error' | string
@@ -76,56 +77,29 @@ export function ToolPart({
 }
 
 function ApplyPatchToolPart({
-  partId,
   state,
 }: {
   partId: string
   state: ToolState
 }) {
-  const [open, setOpen] = useOpenState(`tool:${partId}`, true)
   const patchText = typeof state.input?.patchText === 'string' ? state.input.patchText : ''
-  const changedFiles = patchText ? patchFileCount(patchText) : 0
 
   return (
     <div className="text-xs">
-      <ToolHeader open={open} onToggle={() => setOpen((v) => !v)} status={state.status}>
-        <span className="font-mono text-content-default">apply_patch</span>
-        {changedFiles > 0 && (
-          <span className="truncate text-[11px] text-ui-default">
-            {changedFiles} file{changedFiles === 1 ? '' : 's'}
-          </span>
-        )}
-        <span className="ml-auto text-[10px] text-ui-muted">{state.status ?? 'idle'}</span>
-      </ToolHeader>
-      {open && (
-        <ToolBody>
-          {patchText ? (
-            <div className="max-h-[32rem] overflow-hidden rounded border border-neutral-800 bg-black/80">
-              <DiffView diff={patchText} />
-            </div>
-          ) : (
-            <div className="text-[11px] text-help">
-              {state.status === 'pending' ? 'Waiting for patch…' : 'No patch available.'}
-            </div>
-          )}
-          {state.error && (
-            <div className="mt-2 rounded border border-red-900 bg-red-950/50 p-2 font-mono text-[11px] text-red-300">
-              {state.error}
-            </div>
-          )}
-        </ToolBody>
+      {patchText ? (
+        <DiffView diff={patchText} />
+      ) : (
+        <div className="text-[11px] text-help">
+          {state.status === 'pending' ? 'Waiting for patch…' : 'No patch available.'}
+        </div>
+      )}
+      {state.error && (
+        <div className="mt-2 rounded border border-red-900 bg-red-950/50 p-2 font-mono text-[11px] text-red-300">
+          {state.error}
+        </div>
       )}
     </div>
   )
-}
-
-function patchFileCount(patchText: string): number {
-  const files = new Set<string>()
-  for (const line of patchText.split('\n')) {
-    const match = /^\*\*\* (?:Add|Delete|Update) File: (.+)$/.exec(line)
-    if (match?.[1]) files.add(match[1])
-  }
-  return files.size
 }
 
 function StatusDot({ status }: { status?: string }) {
@@ -233,25 +207,15 @@ function ToolHeader({
   children: React.ReactNode
 }) {
   return (
-    <button
-      onClick={onToggle}
-      className="flex w-full items-center gap-2 rounded py-0.5 text-left hover:bg-neutral-900/40"
-    >
-      <span className="inline-flex w-3 justify-center font-mono text-ui-muted">
-        {open ? '▾' : '▸'}
-      </span>
+    <DisclosureHeader open={open} onToggle={onToggle}>
       <StatusDot status={status} />
       {children}
-    </button>
+    </DisclosureHeader>
   )
 }
 
 function ToolBody({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="ml-[5px] border-l border-neutral-800 pl-3 pt-1">
-      {children}
-    </div>
-  )
+  return <DisclosureBody>{children}</DisclosureBody>
 }
 
 function PtyToolPart({
