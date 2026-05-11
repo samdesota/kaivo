@@ -10,7 +10,7 @@ import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { Composer } from './composer'
 import { QuestionBanner } from './parts/question-banner'
-import { PermissionBanner } from './parts/permission-banner'
+import { PermissionRow } from './parts/permission-banner'
 import { TodosPanel } from './todos-panel'
 import { flattenParts, type PermissionRequest, type TranscriptState } from './transcript-store'
 import { PartRenderer } from './parts'
@@ -243,37 +243,13 @@ function PermissionApprovalTray({
   const [err, setErr] = useState<string | null>(null)
   const busy = approve.isPending || reject.isPending
 
-  async function approveOne(req: PermissionRequest, always: boolean) {
-    if (busy) return
-    setErr(null)
-    onOptimisticDismiss([req.id])
-    try {
-      await approve.mutateAsync({ sessionId, permissionId: req.id, always })
-    } catch (e) {
-      onRestoreDismissed([req.id])
-      setErr(extractTrpcMessage(e))
-    }
-  }
-
-  async function rejectOne(req: PermissionRequest) {
-    if (busy) return
-    setErr(null)
-    onOptimisticDismiss([req.id])
-    try {
-      await reject.mutateAsync({ sessionId, permissionId: req.id })
-    } catch (e) {
-      onRestoreDismissed([req.id])
-      setErr(extractTrpcMessage(e))
-    }
-  }
-
-  async function approveAll() {
+  async function approveAllRequests(always: boolean) {
     if (busy) return
     const ids = requests.map((req) => req.id)
     setErr(null)
     onOptimisticDismiss(ids)
     try {
-      await Promise.all(requests.map((req) => approve.mutateAsync({ sessionId, permissionId: req.id, always: false })))
+      await Promise.all(requests.map((req) => approve.mutateAsync({ sessionId, permissionId: req.id, always })))
     } catch (e) {
       onRestoreDismissed(ids)
       setErr(extractTrpcMessage(e))
@@ -296,46 +272,40 @@ function PermissionApprovalTray({
   if (requests.length === 0) return null
 
   return (
-    <div className="shrink-0 border-t border-amber-500/30 bg-neutral-975 p-1.5">
-      <div className="mb-1 px-1">
-        <div className="text-[11px] font-medium text-amber-200">
-          {requests.length} permission approval{requests.length === 1 ? '' : 's'} required
-        </div>
-      </div>
-      <div className="max-h-40 space-y-1 overflow-auto pr-1">
+    <div className="shrink-0 border-l-2 border-l-purple-400/60 border-t border-t-neutral-800 bg-neutral-975">
+      <div className="max-h-40 divide-y divide-neutral-800/60 overflow-auto">
         {requests.map((req) => (
-          <PermissionBanner
-            key={req.id}
-            req={req}
-            compact
-            busy={busy}
-            onApprove={(always) => approveOne(req, always)}
-            onReject={() => rejectOne(req)}
-          />
+          <PermissionRow key={req.id} req={req} />
         ))}
       </div>
-      <div className="mt-1.5 flex justify-end gap-1.5 border-t border-amber-500/20 pt-1.5">
+      <div className="flex items-center gap-1.5 border-t border-neutral-800/60 px-2 py-1.5">
         <button
           type="button"
-          onClick={() => void approveAll()}
+          onClick={() => void approveAllRequests(false)}
           disabled={busy}
-          className="rounded bg-amber-500 px-1.5 py-0 text-[10px] font-medium text-black hover:bg-amber-400 disabled:opacity-60"
+          className="rounded bg-neutral-800 px-2 py-0.5 text-[11px] font-medium text-neutral-100 hover:bg-neutral-700 disabled:opacity-50"
         >
-          {approve.isPending ? 'Approving…' : 'Approve all'}
+          Allow all
+        </button>
+        <button
+          type="button"
+          onClick={() => void approveAllRequests(true)}
+          disabled={busy}
+          className="rounded px-2 py-0.5 text-[11px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-50"
+        >
+          Allow all and don't ask again
         </button>
         <button
           type="button"
           onClick={() => void rejectAll()}
           disabled={busy}
-          className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0 text-[10px] text-neutral-200 hover:bg-neutral-800 disabled:opacity-60"
+          className="ml-auto rounded px-2 py-0.5 text-[11px] text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300 disabled:opacity-50"
         >
-          {reject.isPending ? 'Rejecting…' : 'Reject all'}
+          Reject all
         </button>
       </div>
       {err && (
-        <div className="mt-2 rounded border border-red-900 bg-red-950/50 px-2 py-1 text-[11px] text-red-300">
-          {err}
-        </div>
+        <div className="px-2 pb-1.5 text-[11px] text-red-400">{err}</div>
       )}
     </div>
   )
@@ -693,11 +663,9 @@ function SessionPane({
         <Composer
           sessionId={sessionId}
           pendingApprovalReason={
-            visiblePermissionCount > 0
-              ? `Waiting on ${visiblePermissionCount} permission approval${visiblePermissionCount === 1 ? '' : 's'}.`
-              : activeQuestions.length > 0
-                ? `Agent is asking ${activeQuestions.length} question${activeQuestions.length === 1 ? '' : 's'}.`
-                : null
+            activeQuestions.length > 0
+              ? `Agent is asking ${activeQuestions.length} question${activeQuestions.length === 1 ? '' : 's'}.`
+              : null
           }
           running={running}
           stopPending={abort.isPending}

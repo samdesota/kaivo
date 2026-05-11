@@ -1046,6 +1046,15 @@ function WorkspaceSidebarChatCount({
   )
 }
 
+function notificationBorderColor(kind: string): string {
+  switch (kind) {
+    case 'permission': return 'bg-purple-400'
+    case 'question': return 'bg-sky-400'
+    case 'error': return 'bg-red-400'
+    default: return 'bg-running'
+  }
+}
+
 function WorkspaceSidebarNotifications({
   workspaceNames,
   activeWorkspaceId,
@@ -1125,7 +1134,7 @@ function WorkspaceSidebarNotifications({
               key={notification.id}
               className="group relative flex cursor-pointer items-start gap-1 px-2 py-1.5"
             >
-              <span className="absolute inset-y-0 right-0 w-0.5 bg-running" aria-hidden="true" />
+              <span className={'absolute inset-y-0 right-0 w-0.5 ' + notificationBorderColor(notification.kind)} aria-hidden="true" />
               <button
                 type="button"
                 onClick={() => void openNotification(notification)}
