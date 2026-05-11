@@ -73,6 +73,7 @@ export function BottomAnchoredLazyList<T>({
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
+    if (hasActiveSelectionIn(el)) return
     el.scrollTop = el.scrollHeight
     recordScrollState(el)
   }, [recordScrollState])
@@ -105,7 +106,7 @@ export function BottomAnchoredLazyList<T>({
       const contentGrew = target.scrollHeight > lastScrollHeight.current
       const scrolledUp = target.scrollTop < lastScrollTop.current
 
-      if (stickToBottom.current && contentGrew && !scrolledUp) {
+      if (stickToBottom.current && contentGrew && !scrolledUp && !hasActiveSelectionIn(target)) {
         scrollToBottom()
       } else {
         stickToBottom.current = atBottom
@@ -127,7 +128,7 @@ export function BottomAnchoredLazyList<T>({
     if (!el || !content || typeof ResizeObserver === 'undefined') return
 
     const resizeObserver = new ResizeObserver(() => {
-      if (stickToBottom.current) scrollToBottom()
+      if (stickToBottom.current && !hasActiveSelectionIn(el)) scrollToBottom()
     })
     resizeObserver.observe(el)
     resizeObserver.observe(content)
@@ -158,5 +159,16 @@ export function BottomAnchoredLazyList<T>({
         })}
       </div>
     </div>
+  )
+}
+
+function hasActiveSelectionIn(el: HTMLElement): boolean {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed) return false
+  return Boolean(
+    selection.anchorNode &&
+    selection.focusNode &&
+    el.contains(selection.anchorNode) &&
+    el.contains(selection.focusNode)
   )
 }
