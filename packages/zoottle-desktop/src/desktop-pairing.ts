@@ -11,6 +11,7 @@ export async function ensureDesktopPairing(config: InstanceRuntimeConfig): Promi
   const [existing, envHealth] = await Promise.all([getRegisteredEnv(config, envId), getEnvHealth(config)])
   if (envHealth) assertMatchingEnvHealth(config, envHealth)
   if (existing?.envToken && envHealth?.identityReady && await tokenIsValid(config.env.url, existing.envToken, config.instanceId)) {
+    await registerEnv(config, envId, existing.envToken)
     return { envId, envToken: existing.envToken, reused: true }
   }
 

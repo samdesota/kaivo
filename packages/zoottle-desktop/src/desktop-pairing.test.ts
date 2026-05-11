@@ -72,6 +72,39 @@ describe('ensureDesktopPairing', () => {
     expect(fetchMock).toHaveBeenCalledWith(`${config.env.url}/auth/check`, expect.anything())
   })
 
+  it('refreshes local env registration when reusing a valid token', async () => {
+    const config = resolveInstanceRuntimeConfig(
+      { NODE_ENV: 'development', CC_INSTANCE_ID: 'pairing-a', CC_ENV_PORT: '49999' },
+      { cwd: '/tmp/cloud-code-a', homeDir: '/tmp/home' },
+    )
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url === `${config.app.url}/internal/local-env/local-${config.instanceId}`) {
+        return jsonResponse({ envToken: 'existing-token' })
+      }
+      if (url === `${config.env.url}/healthz`) {
+        return jsonResponse({ ok: true, instanceId: config.instanceId, identityReady: true })
+      }
+      if (url === `${config.env.url}/auth/check`) {
+        return jsonResponse({ ok: true, instanceId: config.instanceId })
+      }
+      if (url === `${config.app.url}/internal/local-env/register`) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { url?: string; envToken?: string }
+        expect(body.url).toBe(config.env.url)
+        expect(body.envToken).toBe('existing-token')
+        return jsonResponse({ ok: true })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+
+    await expect(ensureDesktopPairing(config)).resolves.toEqual({
+      envId: `local-${config.instanceId}`,
+      envToken: 'existing-token',
+      reused: true,
+    })
+    expect(fetchMock).toHaveBeenCalledWith(`${config.app.url}/internal/local-env/register`, expect.anything())
+  })
+
   it('refuses mismatched env instances and pairs the matching one', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-desktop-pairing-test-'))
     const envPort = await freePort()

@@ -13,6 +13,22 @@ interface BrowserPaneProps {
 }
 
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 }
+type BrowserSlotRect = typeof HIDDEN_RECT
+
+function browserSlotRectForElement(slot: HTMLElement, active: boolean): BrowserSlotRect {
+  if (!active) return HIDDEN_RECT
+  const rect = slot.getBoundingClientRect()
+  return {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  }
+}
+
+function sameBrowserSlotRect(a: BrowserSlotRect | null, b: BrowserSlotRect): boolean {
+  return Boolean(a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height)
+}
 
 export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount = true, onBrowserTabId, onUrlChange, onTitleChange }: BrowserPaneProps) {
   const slotRef = useRef<HTMLDivElement | null>(null)
@@ -40,22 +56,33 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     if (!browserApi.isAvailable()) return
     const slot = slotRef.current
     if (!slot) return
+    let animationFrame = 0
+    let lastRect: BrowserSlotRect | null = null
 
     function updateSlot() {
-      const rect = active ? slot!.getBoundingClientRect() : HIDDEN_RECT
+      const rect = browserSlotRectForElement(slot!, active)
+      if (sameBrowserSlotRect(lastRect, rect)) return
+      lastRect = rect
       slotReadyRef.current = browserApi.setSlot({
         paneId,
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        rect,
       }).catch((error) => {
         console.info('Native browser slot update failed', error)
       })
     }
 
+    function watchSlotPosition() {
+      updateSlot()
+      animationFrame = window.requestAnimationFrame(watchSlotPosition)
+    }
+
     updateSlot()
+    animationFrame = window.requestAnimationFrame(watchSlotPosition)
     const observer = new ResizeObserver(updateSlot)
     observer.observe(slot)
     window.addEventListener('resize', updateSlot)
     return () => {
+      window.cancelAnimationFrame(animationFrame)
       observer.disconnect()
       window.removeEventListener('resize', updateSlot)
       void browserApi.setSlot({ paneId, rect: HIDDEN_RECT }).catch((error) => {
