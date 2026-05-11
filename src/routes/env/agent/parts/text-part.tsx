@@ -18,14 +18,14 @@ export function TextPart({
 
   if (!isAssistant) {
     return (
-      <div className="mb-1 border-t border-neutral-800/50 pt-2 text-sm leading-relaxed whitespace-pre-wrap text-content-muted">
+      <div className="mb-1 min-w-0 border-t border-neutral-800/50 pt-2 text-sm leading-relaxed whitespace-pre-wrap text-content-muted [overflow-wrap:anywhere]">
         {text}
       </div>
     )
   }
 
   return (
-    <div className="prose-agent text-sm leading-relaxed text-content-strong">
+    <div className="prose-agent min-w-0 text-sm leading-relaxed text-content-strong [overflow-wrap:anywhere]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={createMarkdownComponents(onOpenBrowserPane)}>
         {text}
       </ReactMarkdown>
@@ -118,7 +118,7 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
       return <code className={p.className}>{p.children}</code>
     },
     pre: (p: { children?: ReactNode }) => (
-      <pre className="my-2 overflow-x-auto rounded border border-neutral-800 bg-neutral-950 p-2 text-[12px] leading-snug text-header-3">
+      <pre className="my-2 max-w-full overflow-x-auto rounded border border-neutral-800 bg-neutral-950 p-2 text-[12px] leading-snug text-header-3 [overflow-wrap:normal]">
         {p.children}
       </pre>
     ),

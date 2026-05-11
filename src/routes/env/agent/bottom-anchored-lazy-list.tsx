@@ -135,8 +135,8 @@ export function BottomAnchoredLazyList<T>({
   }, [scrollToBottom, visibleItems.length])
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-auto">
-      <div ref={contentRef} className="w-full">
+    <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div ref={contentRef} className="min-w-0 w-full">
         {visibleStart > 0 && (
           <div className="flex justify-center px-4 py-3">
             <button
@@ -154,7 +154,7 @@ export function BottomAnchoredLazyList<T>({
         )}
         {visibleItems.map((item, offset) => {
           const index = visibleStart + offset
-          return <div key={itemKey(item, index)}>{renderItem(item, index, index === items.length - 1)}</div>
+          return <div key={itemKey(item, index)} className="min-w-0">{renderItem(item, index, index === items.length - 1)}</div>
         })}
       </div>
     </div>
