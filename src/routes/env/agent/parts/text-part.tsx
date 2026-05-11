@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Part } from '../transcript-store'
-import { isValidElement, useState, type MouseEvent, type ReactNode } from 'react'
+import { isValidElement, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 
 export function TextPart({
   part,
@@ -15,6 +15,14 @@ export function TextPart({
   const text = (part as { text?: string }).text ?? ''
   const running = !(part as { time?: { end?: number } }).time?.end
   const isAssistant = role !== 'user'
+  const openBrowserPaneRef = useRef(onOpenBrowserPane)
+  useEffect(() => {
+    openBrowserPaneRef.current = onOpenBrowserPane
+  }, [onOpenBrowserPane])
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents((url) => openBrowserPaneRef.current?.(url)),
+    [],
+  )
 
   if (!isAssistant) {
     return (
@@ -26,7 +34,7 @@ export function TextPart({
 
   return (
     <div className="prose-agent min-w-0 text-sm leading-relaxed text-content-strong [overflow-wrap:anywhere]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={createMarkdownComponents(onOpenBrowserPane)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {text}
       </ReactMarkdown>
       {running && (
