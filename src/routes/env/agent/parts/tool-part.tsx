@@ -108,11 +108,6 @@ function ApplyPatchToolPart({
               {state.status === 'pending' ? 'Waiting for patch…' : 'No patch available.'}
             </div>
           )}
-          {state.output && (
-            <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-neutral-800 bg-neutral-950 p-2 font-mono text-[11px] text-ui-default">
-              {state.output}
-            </pre>
-          )}
           {state.error && (
             <div className="mt-2 rounded border border-red-900 bg-red-950/50 p-2 font-mono text-[11px] text-red-300">
               {state.error}
