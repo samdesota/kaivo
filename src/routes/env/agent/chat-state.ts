@@ -9,6 +9,7 @@ import {
   type TranscriptState,
 } from './transcript-store'
 import { chatDebug } from './chat-debug'
+import { recordAgentRunFinished, recordAgentRunStarted } from '../../../lib/agent-notification-sounds'
 
 export interface ChatTranscriptEvent {
   seq?: number
@@ -308,9 +309,13 @@ export class ChatStateStore {
       optimisticCount: entry.optimisticMessages.size,
     })
     if (evt.type === 'session.busy') {
-      if ((evt.payload as { sessionID?: string })?.sessionID && !evt.parentSessionId) entry.running = true
+      if ((evt.payload as { sessionID?: string })?.sessionID && !evt.parentSessionId) {
+        if (!entry.running) recordAgentRunStarted(sessionId)
+        entry.running = true
+      }
     } else if (evt.type === 'session.idle' || evt.type === 'session.error') {
       if ((evt.payload as { sessionID?: string })?.sessionID && !evt.parentSessionId) {
+        if (entry.running) recordAgentRunFinished(sessionId)
         entry.running = false
         entry.optimisticMessages.clear()
         entry.state = removeAllOptimisticMessages(entry.state)

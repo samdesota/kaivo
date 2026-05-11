@@ -78,6 +78,7 @@ import {
   type SidebarDropProjection,
 } from './workspace/sidebar-dnd-state'
 import { trpcQueryKey } from '../lib/trpc-plain'
+import { playAgentNotificationSound, readAgentNotificationSoundPrefs, readLastAgentRunDurationMs, useAgentNotificationSoundPrefs } from '../lib/agent-notification-sounds'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 
@@ -1023,11 +1024,29 @@ function WorkspaceSidebarNotifications({
 }) {
   const navigate = useNavigate()
   const notifications = useAgentNotificationsStore()
+  const [soundPrefs] = useAgentNotificationSoundPrefs()
+  const seenNotificationIds = useRef<Set<string>>(new Set())
+  const initializedSoundNotifications = useRef(false)
   const activeNotificationIds = notifications.records
     .filter((notification) => notification.sessionId === activeSessionId)
     .map((notification) => notification.id)
     .join('\0')
   const rows = notifications.records.filter((notification) => notification.sessionId !== activeSessionId)
+
+  useEffect(() => {
+    if (!initializedSoundNotifications.current) {
+      seenNotificationIds.current = new Set(notifications.records.map((notification) => notification.id))
+      initializedSoundNotifications.current = true
+      return
+    }
+    for (const notification of notifications.records) {
+      if (seenNotificationIds.current.has(notification.id)) continue
+      seenNotificationIds.current.add(notification.id)
+      if (shouldPlayAgentFinishedSound(notification, activeWorkspaceId, activeSessionId)) {
+        void playAgentNotificationSound(readAgentNotificationSoundPrefs().soundId).catch(() => undefined)
+      }
+    }
+  }, [activeSessionId, activeWorkspaceId, notifications.records, soundPrefs])
 
   useEffect(() => {
     if (activeSessionId && activeNotificationIds) void notifications.dismissForSession(activeSessionId)
@@ -1100,6 +1119,16 @@ function WorkspaceSidebarNotifications({
       </div>
     </div>
   )
+}
+
+function shouldPlayAgentFinishedSound(notification: AgentNotificationRecord, activeWorkspaceId: string, activeSessionId: string | null): boolean {
+  if (notification.kind !== 'finished') return false
+  const prefs = readAgentNotificationSoundPrefs()
+  if (prefs.soundId === 'off') return false
+  const notLookingAtSession = notification.workspaceId !== activeWorkspaceId || notification.sessionId !== activeSessionId || document.visibilityState !== 'visible'
+  if (notLookingAtSession) return true
+  const durationMs = readLastAgentRunDurationMs(notification.sessionId)
+  return durationMs !== null && durationMs >= prefs.longRunThresholdSeconds * 1000
 }
 
 const sidebarAnimateLayoutChanges: AnimateLayoutChanges = (args) =>

@@ -8,6 +8,7 @@ import { openConfirmOverlay } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { ProvidersSection } from './settings/providers'
 import { COLOR_HUE_BOUNDS, COLOR_SATURATION_BOUNDS, FONT_SIZE_BOUNDS, useFontSize, useThemeColor } from '../lib/ui-prefs'
+import { AGENT_NOTIFICATION_SOUND_PRESETS, playAgentNotificationSound, useAgentNotificationSoundPrefs } from '../lib/agent-notification-sounds'
 import { RepoConfigCreateButton, RepoConfigsManager } from './repo-config-manager'
 import { SettingsPanel } from './settings/panel'
 
@@ -118,6 +119,7 @@ export function SettingsPage() {
           {activePage === 'agent' && (
             <>
               <AgentDefaultModelSection />
+              <AgentNotificationSoundSection />
               <ProvidersSection />
             </>
           )}
@@ -340,6 +342,60 @@ function AgentDefaultModelSection() {
           <FormError>{error}</FormError>
         </div>
       )}
+    </SettingsPanel>
+  )
+}
+
+function AgentNotificationSoundSection() {
+  const [prefs, setPrefs] = useAgentNotificationSoundPrefs()
+  const [testError, setTestError] = useState<string | null>(null)
+  return (
+    <SettingsPanel
+      id="agent-notification-sound"
+      title="Completion sound"
+      description="Play a short local sound when an agent finishes while you are away from the chat, or when a visible run takes longer than the threshold."
+    >
+      <div className="max-w-xl space-y-3 text-xs">
+        <label className="flex items-center gap-3">
+          <span className="w-32 text-label">Sound</span>
+          <select
+            value={prefs.soundId}
+            onChange={(e) => setPrefs({ ...prefs, soundId: e.target.value as typeof prefs.soundId })}
+            className="h-7 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 text-content-default outline-none focus:border-neutral-500"
+          >
+            {AGENT_NOTIFICATION_SOUND_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>{preset.label}</option>
+            ))}
+          </select>
+          <Button
+            onClick={() => {
+              setTestError(null)
+              void playAgentNotificationSound(prefs.soundId).catch((err) => setTestError(extractTrpcMessage(err)))
+            }}
+            disabled={prefs.soundId === 'off'}
+            className="h-7 bg-neutral-800 px-2.5 py-1 text-xs text-header-3 hover:bg-neutral-700 disabled:opacity-50"
+          >
+            Test
+          </Button>
+        </label>
+        <label className="flex items-center gap-3">
+          <span className="w-32 text-label">Long-run threshold</span>
+          <Input
+            type="number"
+            min={0}
+            max={3600}
+            step={5}
+            value={prefs.longRunThresholdSeconds}
+            onChange={(e) => setPrefs({ ...prefs, longRunThresholdSeconds: Number(e.target.value) })}
+            className="h-7 w-24 px-2 py-1 font-mono text-xs"
+          />
+          <span className="text-help">seconds</span>
+        </label>
+        <p className="text-help">
+          The visible active chat stays quiet for short runs. Set the threshold to 0 to play for every finished run.
+        </p>
+        {testError && <FormError>{testError}</FormError>}
+      </div>
     </SettingsPanel>
   )
 }
