@@ -18,7 +18,7 @@ export function TextPart({
 
   if (!isAssistant) {
     return (
-      <div className="whitespace-pre-wrap text-sm leading-relaxed text-content-default">
+      <div className="mb-1 border-t border-neutral-800/50 pt-2 text-sm leading-relaxed whitespace-pre-wrap text-content-muted">
         {text}
       </div>
     )
