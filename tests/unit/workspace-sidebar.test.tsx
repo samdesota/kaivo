@@ -39,6 +39,20 @@ const notificationListData = vi.hoisted(() => [] as Array<{
   summary: string
   createdAt: Date
 }>)
+const agentSessionListData = vi.hoisted(() => [] as Array<{
+  id: string
+  workspaceId: string | null
+  status: 'active' | 'archived'
+  lastActivityAt: Date | string
+}>)
+const agentRuntimeData = vi.hoisted(() => [] as Array<{
+  sessionId: string
+  workspaceId: string | null
+  running: boolean
+  pendingAttentionCount: number
+  lastActivityAt: Date
+  updatedAt: Date
+}>)
 
 vi.mock('../../src/routes/workspace/context', () => ({
   useWorkspaceContext: () => ctx,
@@ -78,7 +92,7 @@ vi.mock('../../src/env-trpc', () => ({
       deleteWorktree: { useMutation: () => ({ isPending: false, mutateAsync: vi.fn() }) },
     },
     agent: {
-      sessionList: { useQuery: () => ({ data: [] }) },
+      sessionList: { useQuery: () => ({ data: agentSessionListData }) },
       workspaceChatSummary: { useQuery: () => ({ data: [] }) },
       sessionStart: { useMutation: () => ({ isPending: false, mutateAsync: vi.fn() }) },
     },
@@ -101,6 +115,12 @@ vi.mock('../../src/routes/workspace/notifications-store', () => ({
     records: notificationListData,
     dismiss: notificationDismissMock,
     dismissForSession: notificationDismissForSessionMock,
+  }),
+}))
+
+vi.mock('../../src/routes/workspace/agent-runtime-store', () => ({
+  useAgentRuntimeStore: (workspaceId: string) => ({
+    records: agentRuntimeData.filter((record) => record.workspaceId === workspaceId),
   }),
 }))
 
@@ -153,6 +173,8 @@ beforeEach(() => {
   notificationDismissMock.mockReset()
   notificationDismissForSessionMock.mockReset()
   notificationListData.length = 0
+  agentSessionListData.length = 0
+  agentRuntimeData.length = 0
   window.localStorage.clear()
   window.scrollTo = vi.fn()
 })
@@ -200,6 +222,51 @@ describe('WorkspaceSidebar', () => {
 
     expect(window.localStorage.getItem('cloud-code.workspaceChatExpanded')).toBeNull()
     expect(screen.queryByText('No chats')).toBeNull()
+  })
+
+  it('renders realtime running state from agent runtime records', async () => {
+    ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
+    agentSessionListData.push({
+      id: 'session-1',
+      workspaceId: 'workspace-tools',
+      status: 'active',
+      lastActivityAt: '2026-05-10T12:00:00.000Z',
+    })
+    agentRuntimeData.push({
+      sessionId: 'session-1',
+      workspaceId: 'workspace-tools',
+      running: true,
+      pendingAttentionCount: 0,
+      lastActivityAt: new Date('2026-05-10T12:01:00.000Z'),
+      updatedAt: new Date('2026-05-10T12:01:00.000Z'),
+    })
+
+    renderSidebar()
+
+    expect(await screen.findByLabelText('Chat running')).toBeTruthy()
+  })
+
+  it('renders finished-chat dot for inactive workspace with unread runtime activity', async () => {
+    ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
+    window.localStorage.setItem('cloud-code.workspaceChatReadAt', JSON.stringify({ 'workspace-tools': new Date('2026-05-10T12:00:00.000Z').getTime() }))
+    agentSessionListData.push({
+      id: 'session-1',
+      workspaceId: 'workspace-tools',
+      status: 'active',
+      lastActivityAt: '2026-05-10T12:00:00.000Z',
+    })
+    agentRuntimeData.push({
+      sessionId: 'session-1',
+      workspaceId: 'workspace-tools',
+      running: false,
+      pendingAttentionCount: 0,
+      lastActivityAt: new Date('2026-05-10T12:01:00.000Z'),
+      updatedAt: new Date('2026-05-10T12:01:00.000Z'),
+    })
+
+    renderSidebar()
+
+    expect(await screen.findByLabelText('New chat response')).toBeTruthy()
   })
 
   it('renders chat finish notifications with workspace names', async () => {

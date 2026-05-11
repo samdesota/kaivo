@@ -6,6 +6,7 @@ import { agentSessions, agentTranscripts, type AgentSessionStatus } from '../db/
 import { logger } from '../logger.js'
 import { recentFolderService } from '../recent-folders/service.js'
 import { getMeta, setDefaultModel as setEnvDefaultModel } from '../envmeta/service.js'
+import { AGENT_SESSION_RUNTIME_TABLE, getAgentRuntimeRealtime } from './runtime-realtime.js'
 import {
   OpenCodeError,
   hasOpenAIOAuthMarker,
@@ -495,6 +496,13 @@ class AgentService {
     }
 
     this.ensureSubscription(input.directory ?? '')
+    this.upsertAgentRuntime({
+      id,
+      workspaceId: input.workspaceId ?? null,
+      opencodeSessionId: ocSession.id,
+      status: 'active',
+      lastActivityAt: now.toISOString(),
+    }, { running: Boolean(input.prompt), lastActivityAt: now })
 
     return {
       id,
@@ -517,6 +525,7 @@ class AgentService {
       .set({ title, lastActivityAt: now.toISOString() })
       .where(eq(agentSessions.id, row.id))
       .run()
+    this.upsertAgentRuntime(row, { lastActivityAt: now })
     return {
       id: row.id,
       workspaceId: row.workspaceId ?? null,
@@ -710,6 +719,11 @@ class AgentService {
       .set({ status: input.status, lastActivityAt: now.toISOString() })
       .where(eq(agentSessions.id, row.id))
       .run()
+    if (input.status === 'archived') {
+      getAgentRuntimeRealtime().delete(AGENT_SESSION_RUNTIME_TABLE, row.id)
+    } else {
+      this.upsertAgentRuntime({ ...row, status: input.status }, { lastActivityAt: now })
+    }
     return {
       id: row.id,
       workspaceId: row.workspaceId ?? null,
@@ -937,6 +951,7 @@ class AgentService {
       body: JSON.stringify({ answers: input.answers }),
     })
     this.pendingQuestions.get(ctx.row.opencodeSessionId)?.delete(input.requestId)
+    this.upsertAgentRuntime(ctx.row)
   }
 
   async sessionRejectQuestion(input: {
@@ -948,6 +963,7 @@ class AgentService {
       method: 'POST',
     })
     this.pendingQuestions.get(ctx.row.opencodeSessionId)?.delete(input.requestId)
+    this.upsertAgentRuntime(ctx.row)
   }
 
   private async questionList(): Promise<PendingQuestion[]> {
@@ -1016,6 +1032,7 @@ class AgentService {
       throwOnError: true,
     })
     this.pending.get(row.opencodeSessionId)?.delete(input.permissionId)
+    this.upsertAgentRuntime(row)
   }
 
   async transcriptReplay(sessionId: string, sinceSeq = 0): Promise<TranscriptEvent[]> {
@@ -1272,6 +1289,7 @@ class AgentService {
     } else if (
       type === 'permission.updated' ||
       type === 'permission.replied' ||
+      type === 'session.busy' ||
       type === 'session.idle' ||
       type === 'session.error' ||
       type === 'question.asked' ||
@@ -1285,6 +1303,12 @@ class AgentService {
     }
 
     if (!ocSessionId) return
+    const runtimeRunning =
+      type === 'session.busy' || type === 'message.part.updated'
+        ? true
+        : type === 'session.idle' || type === 'session.error'
+          ? false
+          : undefined
 
     if (!this.parentByChild.has(ocSessionId)) {
       if (type === 'message.part.updated') this.runningOpencodeSessions.add(ocSessionId)
@@ -1360,6 +1384,7 @@ class AgentService {
       if (q.requestID) this.pendingQuestions.get(ocSessionId)?.delete(q.requestID)
       if (q.requestID) this.blockingNotificationKeys.delete(`${ocSessionId}:question:${q.requestID}`)
     }
+    this.upsertAgentRuntimeForOpencode(ocSessionId, { running: runtimeRunning, lastActivityAt: new Date() })
 
     const evt = await this.recordReplayEvent(ocSessionId, {
       type: type as TranscriptEvent['type'],
@@ -1380,6 +1405,12 @@ class AgentService {
     type: TranscriptEvent['type'],
     payload: Record<string, unknown>,
   ): TranscriptEvent {
+    const running = type === 'session.busy' || type === 'message.part.updated'
+      ? true
+      : type === 'session.idle' || type === 'session.error'
+        ? false
+        : undefined
+    this.upsertAgentRuntimeForOpencode(opencodeSessionId, { running, lastActivityAt: new Date() })
     const evt = this.recordReplayEvent(opencodeSessionId, {
       type,
       sessionId: opencodeSessionId,
@@ -1639,6 +1670,48 @@ class AgentService {
     const row = rows[0]
     if (!row) throw new AgentError('not_found', `agent session ${id} not found`)
     return row
+  }
+
+  private upsertAgentRuntimeForOpencode(opencodeSessionId: string, patch: { running?: boolean; lastActivityAt?: Date } = {}): void {
+    const row = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+      .limit(1)
+      .all()[0]
+    if (row) this.upsertAgentRuntime(row, patch)
+  }
+
+  private upsertAgentRuntime(row: {
+    id: string
+    workspaceId: string | null
+    opencodeSessionId: string
+    status: AgentSessionStatus
+    lastActivityAt: string
+  }, patch: { running?: boolean; lastActivityAt?: Date } = {}): void {
+    if (row.status === 'archived') {
+      getAgentRuntimeRealtime().delete(AGENT_SESSION_RUNTIME_TABLE, row.id)
+      return
+    }
+    const realtime = getAgentRuntimeRealtime()
+    const existing = realtime
+      .snapshot(AGENT_SESSION_RUNTIME_TABLE)
+      .rows
+      .find((candidate) => candidate.sessionId === row.id) as { running?: boolean; lastActivityAt?: string } | undefined
+    const now = new Date()
+    const lastActivityAt = patch.lastActivityAt?.toISOString() ?? existing?.lastActivityAt ?? row.lastActivityAt
+    realtime.upsert(AGENT_SESSION_RUNTIME_TABLE, {
+      sessionId: row.id,
+      workspaceId: row.workspaceId ?? null,
+      running: patch.running ?? existing?.running ?? false,
+      pendingAttentionCount: this.pendingAttentionCount(row.opencodeSessionId),
+      lastActivityAt,
+      updatedAt: now.toISOString(),
+    })
+  }
+
+  private pendingAttentionCount(opencodeSessionId: string): number {
+    return (this.pending.get(opencodeSessionId)?.size ?? 0) + (this.pendingQuestions.get(opencodeSessionId)?.size ?? 0)
   }
 
   private async sessionContext(sessionId: string) {

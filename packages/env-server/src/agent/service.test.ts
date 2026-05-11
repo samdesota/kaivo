@@ -392,4 +392,43 @@ describe('agent service workspace sessions', () => {
       summary: 'bash: npm test',
     })
   })
+
+  it('updates agent runtime realtime rows from session and pending events', async () => {
+    const { agentService } = await import('./service.js')
+    const { AGENT_SESSION_RUNTIME_TABLE, getAgentRuntimeRealtime } = await import('./runtime-realtime.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a', title: 'Runtime task' })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'message.part.updated',
+      properties: { part: { id: 'part-1', type: 'text', text: 'Working', sessionID: session.opencodeSessionId } },
+    })
+    expect(getAgentRuntimeRealtime().snapshot(AGENT_SESSION_RUNTIME_TABLE).rows[0]).toMatchObject({
+      sessionId: session.id,
+      workspaceId: 'workspace-a',
+      running: true,
+      pendingAttentionCount: 0,
+    })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: session.opencodeSessionId, questions: [] },
+    })
+    expect(getAgentRuntimeRealtime().snapshot(AGENT_SESSION_RUNTIME_TABLE).rows[0]).toMatchObject({
+      running: true,
+      pendingAttentionCount: 1,
+    })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'question.replied',
+      properties: { sessionID: session.opencodeSessionId, requestID: 'question-1' },
+    })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'session.idle',
+      properties: { sessionID: session.opencodeSessionId },
+    })
+    expect(getAgentRuntimeRealtime().snapshot(AGENT_SESSION_RUNTIME_TABLE).rows[0]).toMatchObject({
+      running: false,
+      pendingAttentionCount: 0,
+    })
+  })
 })

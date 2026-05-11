@@ -9,6 +9,7 @@ import { agentRouter } from './routers/agent.js'
 import { agentShellRouter } from './routers/agent-shell.js'
 import { agentBrowserRouter } from './routers/agent-browser.js'
 import { agentUiRouter } from './routers/agent-ui.js'
+import { agentRuntimeRouter } from './routers/agent-runtime.js'
 import { previewRouter } from './routers/preview.js'
 import { syncRouter } from './routers/sync.js'
 
@@ -23,6 +24,7 @@ export const appRouter = router({
   agentShell: agentShellRouter,
   agentBrowser: agentBrowserRouter,
   agentUi: agentUiRouter,
+  agentRuntime: agentRuntimeRouter,
   preview: previewRouter,
   sync: syncRouter,
 })

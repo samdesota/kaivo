@@ -65,6 +65,7 @@ import { idleRenameEditState, nextRenameValue, renameEditReducer } from './works
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
 import { useAgentNotificationsStore, type AgentNotificationRecord } from './workspace/notifications-store'
+import { useAgentRuntimeStore } from './workspace/agent-runtime-store'
 import {
   projectSidebarDropFromRows,
   flattenSidebarTree,
@@ -945,7 +946,13 @@ export function WorkspaceSidebar({
               {showChatRollup && (
                 <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-10">
                   <WorkspaceAgentEnvProvider>
-                    <WorkspaceSidebarChatCount workspaceId={workspace.id} readVersion={chatReadVersion} />
+                    <WorkspaceSidebarChatCount
+                      workspaceId={workspace.id}
+                      active={active}
+                      activeSessionId={ctx.uiState.activeAgentSessionId}
+                      readVersion={chatReadVersion}
+                      onMarkRead={() => setChatReadVersion((version) => version + 1)}
+                    />
                   </WorkspaceAgentEnvProvider>
                 </span>
               )}
@@ -987,23 +994,51 @@ export function WorkspaceSidebar({
   }
 }
 
-function WorkspaceSidebarChatCount({ workspaceId, readVersion: _readVersion }: { workspaceId: string; readVersion: number }) {
-  const summary = envTrpc.agent.workspaceChatSummary.useQuery({ workspaceIds: [workspaceId] }, { refetchInterval: 5_000 })
-  const row = (summary.data ?? [])[0]
-  if (!row) return null
-  const latestActivityAt = row.latestActivityAt ? new Date(row.latestActivityAt).getTime() : 0
+function WorkspaceSidebarChatCount({
+  workspaceId,
+  active,
+  activeSessionId,
+  readVersion: _readVersion,
+  onMarkRead,
+}: {
+  workspaceId: string
+  active: boolean
+  activeSessionId: string | null
+  readVersion: number
+  onMarkRead: () => void
+}) {
+  const sessions = envTrpc.agent.sessionList.useQuery({ workspaceId }, { refetchOnWindowFocus: false })
+  const runtime = useAgentRuntimeStore(workspaceId)
+  const activeSessions = (sessions.data ?? []).filter((session) => session.status !== 'archived')
+  const sessionIds = new Set(activeSessions.map((session) => session.id))
+  for (const record of runtime.records) sessionIds.add(record.sessionId)
+  const latestSessionActivityAt = activeSessions.reduce((latest, session) => {
+    const time = session.lastActivityAt ? new Date(session.lastActivityAt).getTime() : 0
+    return Math.max(latest, time)
+  }, 0)
+  const latestRuntimeActivityAt = runtime.records.reduce((latest, record) => Math.max(latest, record.lastActivityAt.getTime()), 0)
+  const latestActivityAt = Math.max(latestSessionActivityAt, latestRuntimeActivityAt)
+  const runningCount = runtime.records.filter((record) => record.running).length
+  const pendingAttentionCount = runtime.records.filter((record) => record.pendingAttentionCount > 0).length
   const readAt = readWorkspaceChatsAt(workspaceId)
-  const newResponseCount = row.runningCount === 0 && readAt > 0 && latestActivityAt > readAt ? 1 : 0
+  useEffect(() => {
+    if (!active || latestActivityAt <= readAt) return
+    markWorkspaceChatsRead(workspaceId)
+    onMarkRead()
+  }, [active, activeSessionId, latestActivityAt, onMarkRead, readAt, workspaceId])
+  if (!sessions.data && runtime.records.length === 0) return null
+  const chatCount = sessionIds.size
+  const newResponseCount = !active && runningCount === 0 && readAt > 0 && latestActivityAt > readAt ? 1 : 0
   const glyph = workspaceRollupGlyph(workspaceRollupState({
-    chatCount: row.chatCount,
-    runningCount: row.runningCount,
-    pendingAttentionCount: row.pendingAttentionCount,
+    chatCount,
+    runningCount,
+    pendingAttentionCount,
     newResponseCount,
   }))
-  if (row.chatCount <= 1 && !glyph) return null
+  if (chatCount <= 1 && !glyph) return null
   return (
     <span className="flex shrink-0 items-center gap-1">
-      {row.chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{row.chatCount}</span>}
+      {chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{chatCount}</span>}
       {glyph === '.' && <span className="h-1 w-1 rounded-full bg-running" aria-label="New chat response" />}
       {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-running border-t-transparent" aria-label="Chat running" />}
       {glyph === '!' && <span className="w-3 text-center text-[10px] font-semibold text-amber-300" aria-label="Chat needs attention">!</span>}
