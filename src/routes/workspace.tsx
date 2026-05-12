@@ -41,7 +41,6 @@ import { emptyFileEditorState, type FileEditorState } from './env/file-editor-st
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
 import { BrowserTabContent } from './env/tabs/browser-tab'
-import { PreviewTabContent } from './env/tabs/preview-tab'
 import type { PaneContent } from './env/shell/tab-state'
 import {
   createWorkspaceEnvClientResolver,
@@ -461,7 +460,7 @@ function WorkspaceEmptyPaneCta({ onOpenPalette }: { onOpenPalette: () => void })
         onClick={onOpenPalette}
         className="group flex items-center gap-3 text-xs text-neutral-600 transition-colors hover:text-neutral-300"
       >
-        <span>Open a shell, file, preview, or browser pane</span>
+        <span>Open a shell, file, or browser pane</span>
         <span className="rounded border border-neutral-800 bg-neutral-900/60 px-1.5 py-0.5 text-[12px] uppercase tracking-wide text-neutral-400 group-hover:bg-neutral-900 group-hover:text-neutral-200">
           ⌘K
         </span>
@@ -1802,7 +1801,6 @@ function WorkspaceShellTabTitleSync({
 function workspaceTabLabel(tab: WorkspaceTab): string {
   if (tab.type === 'shell') return `shell ${tab.shellId}`
   if (tab.type === 'file') return tab.path
-  if (tab.type === 'preview') return `preview :${tab.port}`
   return tab.url
 }
 
@@ -1847,27 +1845,18 @@ function WorkspaceTabContent({
       </div>
     )
   }
-  if (tab.type === 'browser') {
-    return (
-      <div className="h-full min-h-0 w-full">
-        <BrowserTabContent
-          paneId={tab.id}
-          url={tab.url}
-          browserTabId={tab.browserTabId}
-          active
-          onBrowserTabId={onBrowserTabId}
-          onUrlChange={onUrlChange}
-          onTitleChange={onTitleChange}
-          closeOnUnmount={false}
-        />
-      </div>
-    )
-  }
   return (
     <div className="h-full min-h-0 w-full">
-      <WorkspaceEnvTargetProvider>
-        <PreviewTabContent port={tab.port} />
-      </WorkspaceEnvTargetProvider>
+      <BrowserTabContent
+        paneId={tab.id}
+        url={tab.url}
+        browserTabId={tab.browserTabId}
+        active
+        onBrowserTabId={onBrowserTabId}
+        onUrlChange={onUrlChange}
+        onTitleChange={onTitleChange}
+        closeOnUnmount={false}
+      />
     </div>
   )
 }

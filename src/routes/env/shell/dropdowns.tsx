@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
@@ -15,12 +15,6 @@ interface ShellRow {
   cwd: string
   ownerKind?: string
   title?: string | null
-}
-
-interface PortRow {
-  port: number
-  process?: string | null
-  address: string
 }
 
 interface ShellsDropdownProps {
@@ -103,65 +97,6 @@ export function ShellsDropdown({ onOpen, align = 'left', side = 'bottom', worksp
           )}
           {error && (
             <div className="px-3 py-2 text-[10px] text-red-400">{error}</div>
-          )}
-        </div>
-      )}
-    </Popover>
-  )
-}
-
-interface PreviewsDropdownProps {
-  onOpen: (content: PaneContent) => void
-  align?: 'left' | 'right'
-}
-
-export function PreviewsDropdown({ onOpen, align = 'left' }: PreviewsDropdownProps) {
-  const [ports, setPorts] = useState<PortRow[]>([])
-  const snapshot = envTrpc.preview.portsSnapshot.useQuery()
-
-  useEffect(() => {
-    if (snapshot.data) setPorts(snapshot.data as PortRow[])
-  }, [snapshot.data])
-
-  envTrpc.preview.ports.useSubscription(undefined, {
-    onData: (evt: unknown) => {
-      const e = evt as { ports?: PortRow[] }
-      if (Array.isArray(e?.ports)) setPorts(e.ports)
-    },
-    onError: () => {},
-  })
-
-  return (
-    <Popover label="Previews" count={ports.length} align={align}>
-      {(close) => (
-        <div className="p-1">
-          {ports.length === 0 ? (
-            <div className="px-3 py-4 text-xs text-neutral-500">No listening ports.</div>
-          ) : (
-            <ul className="space-y-1">
-              {ports.map((p) => (
-                <li
-                  key={`${p.port}-${p.process ?? ''}`}
-                  className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-900"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-mono text-neutral-200">:{p.port}</div>
-                    <div className="truncate text-[10px] text-neutral-500">
-                      {p.process ?? 'unknown'} · {p.address}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      onOpen({ type: 'preview', port: p.port })
-                      close()
-                    }}
-                    className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
-                  >
-                    open
-                  </button>
-                </li>
-              ))}
-            </ul>
           )}
         </div>
       )}

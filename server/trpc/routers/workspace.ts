@@ -6,7 +6,6 @@ import { WorkspaceError, workspaceService } from '../../workspace/service.js'
 const workspaceTabSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string().min(1), type: z.literal('shell'), envId: z.string().min(1), shellId: z.string().min(1), title: z.string(), titleSource: z.enum(['auto', 'explicit']).optional() }),
   z.object({ id: z.string().min(1), type: z.literal('file'), envId: z.string().min(1), path: z.string().min(1), sessionId: z.string().min(1).optional(), title: z.string() }),
-  z.object({ id: z.string().min(1), type: z.literal('preview'), envId: z.string().min(1), port: z.number().int().min(1).max(65535), title: z.string() }),
   z.object({ id: z.string().min(1), type: z.literal('browser'), url: z.string().min(1), browserTabId: z.string().min(1).optional(), title: z.string() }),
 ])
 

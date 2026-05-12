@@ -3,7 +3,6 @@ import { useEffect, useReducer, useRef } from 'react'
 export type PaneContent =
   | { type: 'shell'; shellId: string }
   | { type: 'file'; path: string; absolute?: boolean }
-  | { type: 'preview'; port: number }
   | { type: 'browser'; url?: string; browserTabId?: string }
 
 export interface Tab {
@@ -39,7 +38,6 @@ export function defaultTitle(c: PaneContent): string {
     const parts = c.path.split('/').filter(Boolean)
     return parts[parts.length - 1] ?? c.path
   }
-  if (c.type === 'preview') return `:${c.port}`
   if (c.type === 'browser') return browserTitle(c)
   return 'Tab'
 }
@@ -49,7 +47,6 @@ function sameContent(a: PaneContent, b: PaneContent): boolean {
   if (a.type === 'shell' && b.type === 'shell') return a.shellId === b.shellId
   if (a.type === 'file' && b.type === 'file')
     return a.path === b.path && !!a.absolute === !!b.absolute
-  if (a.type === 'preview' && b.type === 'preview') return a.port === b.port
   if (a.type === 'browser' && b.type === 'browser') {
     if (a.browserTabId && b.browserTabId) return a.browserTabId === b.browserTabId
     return (a.url ?? '') === (b.url ?? '')
@@ -194,7 +191,6 @@ function loadStored(envId: string): RightPaneState | null {
       const c = tt.content
       if (c.type === 'shell' && typeof c.shellId === 'string') return true
       if (c.type === 'file' && typeof c.path === 'string') return true
-      if (c.type === 'preview' && typeof c.port === 'number') return true
       if (c.type === 'browser') {
         return (
           (c.url === undefined || typeof c.url === 'string') &&

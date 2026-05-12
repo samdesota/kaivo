@@ -28,7 +28,6 @@ describe('ShellChrome', () => {
           <>
             <button>⌘K</button>
             <button>Shells</button>
-            <button>Previews</button>
             <a href="/settings">Settings</a>
           </>
         }
@@ -39,7 +38,6 @@ describe('ShellChrome', () => {
     expect(screen.getByText('local · running')).toBeTruthy()
     expect(screen.getByRole('button', { name: '⌘K' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Shells' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Previews' })).toBeTruthy()
     expect(screen.getByText('Settings')).toBeTruthy()
   })
 })

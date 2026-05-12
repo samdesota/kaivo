@@ -1,13 +1,11 @@
 export type PaneContent =
   | { type: 'shell'; shellId: string }
   | { type: 'file'; path: string; absolute?: boolean }
-  | { type: 'preview'; port: number }
   | { type: 'browser'; url?: string; browserTabId?: string }
 
 export type WorkspaceTab =
   | { id: string; type: 'shell'; envId: string; shellId: string; title: string; titleSource?: 'auto' | 'explicit' }
   | { id: string; type: 'file'; envId: string; path: string; sessionId?: string; title: string }
-  | { id: string; type: 'preview'; envId: string; port: number; title: string }
   | { id: string; type: 'browser'; url: string; browserTabId?: string; title: string }
 
 export function makeWorkspaceTabId(type: string, envId?: string): string {
@@ -17,7 +15,6 @@ export function makeWorkspaceTabId(type: string, envId?: string): string {
 export function workspaceTabKey(tab: WorkspaceTab): string {
   if (tab.type === 'shell') return `shell:${tab.envId}:${tab.shellId}`
   if (tab.type === 'file') return `file:${tab.envId}:${tab.sessionId ?? ''}:${tab.path}`
-  if (tab.type === 'preview') return `preview:${tab.envId}:${tab.port}`
   return `browser:${tab.id}`
 }
 
@@ -33,9 +30,6 @@ export function workspaceTabFromPaneContent(
   }
   if (content.type === 'file') {
     return { id, type: 'file', envId: envId!, path: content.path, title: options?.title ?? content.path.split('/').pop() ?? content.path }
-  }
-  if (content.type === 'preview') {
-    return { id, type: 'preview', envId: envId!, port: content.port, title: options?.title ?? `preview :${content.port}` }
   }
   if (!content.url) return null
   return { id, type: 'browser', url: content.url, browserTabId: content.browserTabId, title: options?.title ?? content.url }

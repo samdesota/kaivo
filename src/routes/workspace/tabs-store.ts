@@ -70,9 +70,6 @@ export function recordToWorkspaceTab(record: WorkspaceTabRecord): WorkspaceTab |
   if (record.type === 'file' && record.envId && record.path) {
     return { id: record.id, type: 'file', envId: record.envId, path: record.path, sessionId: record.sessionId ?? undefined, title: record.title }
   }
-  if (record.type === 'preview' && record.envId && record.port !== null) {
-    return { id: record.id, type: 'preview', envId: record.envId, port: record.port, title: record.title }
-  }
   if (record.type === 'browser' && record.url) {
     return { id: record.id, type: 'browser', url: record.url, browserTabId: record.browserTabId ?? undefined, title: record.title }
   }
@@ -91,7 +88,7 @@ function workspaceTabToRecord(workspaceId: string, tab: WorkspaceTab, position: 
     shellId: tab.type === 'shell' ? tab.shellId : null,
     path: tab.type === 'file' ? tab.path : null,
     sessionId: tab.type === 'file' ? (tab.sessionId ?? null) : null,
-    port: tab.type === 'preview' ? tab.port : null,
+    port: null,
     url: tab.type === 'browser' ? tab.url : null,
     browserTabId: tab.type === 'browser' ? (tab.browserTabId ?? null) : null,
     updatedAt: new Date(),

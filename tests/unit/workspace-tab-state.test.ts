@@ -3,9 +3,9 @@ import { workspaceTabKey, type WorkspaceTab } from '../../shared/workspace-pane'
 import { emptyWorkspaceUiState, updateFileEditorStateForTab, workspaceUiReducer } from '../../src/routes/workspace/tab-state'
 
 describe('workspace tab state', () => {
-  it('treats the same preview port in different envs as distinct', () => {
-    const a: WorkspaceTab = { id: 'a', type: 'preview', envId: 'env-a', port: 3000, title: 'env-a :3000' }
-    const b: WorkspaceTab = { id: 'b', type: 'preview', envId: 'env-b', port: 3000, title: 'env-b :3000' }
+  it('treats the same file path in different envs as distinct', () => {
+    const a: WorkspaceTab = { id: 'a', type: 'file', envId: 'env-a', path: '/tmp/a.ts', title: 'env-a a.ts' }
+    const b: WorkspaceTab = { id: 'b', type: 'file', envId: 'env-b', path: '/tmp/a.ts', title: 'env-b a.ts' }
 
     expect(workspaceTabKey(a)).not.toBe(workspaceTabKey(b))
     let state = workspaceUiReducer(emptyWorkspaceUiState(), { type: 'openTab', tab: a })
@@ -13,15 +13,12 @@ describe('workspace tab state', () => {
     expect(state.workspaceTabs.map((tab) => tab.id)).toEqual(['a', 'b'])
   })
 
-  it('workspace tab identity keys include envId for shell, file, and preview tabs', () => {
+  it('workspace tab identity keys include envId for shell and file tabs', () => {
     expect(workspaceTabKey({ id: 's', type: 'shell', envId: 'env-a', shellId: 'shell-1', title: 'shell' })).toBe(
       'shell:env-a:shell-1',
     )
     expect(workspaceTabKey({ id: 'f', type: 'file', envId: 'env-a', path: '/tmp/a.ts', title: 'a.ts' })).toBe(
       'file:env-a::/tmp/a.ts',
-    )
-    expect(workspaceTabKey({ id: 'p', type: 'preview', envId: 'env-a', port: 3000, title: ':3000' })).toBe(
-      'preview:env-a:3000',
     )
   })
 

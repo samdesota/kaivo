@@ -6,7 +6,6 @@ import { browserApi } from '../../../lib/browser-api'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { FileTabContent } from '../tabs/file-tab'
 import { BrowserTabContent } from '../tabs/browser-tab'
-import { PreviewTabContent } from '../tabs/preview-tab'
 import { ShellTabContent } from '../tabs/shell-tab'
 import {
   type PaneContent,
@@ -169,7 +168,6 @@ function TabContent({
 }) {
   if (content.type === 'shell') return <ShellTabContent shellId={content.shellId} workspaceId={workspaceId} />
   if (content.type === 'file') return <FileTabContent path={content.path} absolute={content.absolute} />
-  if (content.type === 'preview') return <PreviewTabContent port={content.port} />
   if (content.type === 'browser') {
     return (
       <BrowserTabContent
@@ -197,7 +195,6 @@ function truncateTabTitle(title: string): string {
 function tabTitleDetail(c: PaneContent): string {
   if (c.type === 'shell') return c.shellId
   if (c.type === 'file') return c.path
-  if (c.type === 'preview') return `port ${c.port}`
   if (c.type === 'browser') return c.url ?? c.browserTabId ?? 'browser'
   return ''
 }

@@ -126,7 +126,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
     shellId: tab.type === 'shell' ? tab.shellId : null,
     path: tab.type === 'file' ? tab.path : null,
     sessionId: tab.type === 'file' ? (tab.sessionId ?? null) : null,
-    port: tab.type === 'preview' ? tab.port : null,
+    port: null,
     url: tab.type === 'browser' ? tab.url : null,
     browserTabId: tab.type === 'browser' ? (tab.browserTabId ?? null) : null,
     updatedAt,
@@ -139,9 +139,6 @@ function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
   }
   if (row.type === 'file' && row.envId && row.path) {
     return { id: row.id, type: 'file', envId: row.envId, path: row.path, sessionId: row.sessionId ?? undefined, title: row.title }
-  }
-  if (row.type === 'preview' && row.envId && row.port !== null) {
-    return { id: row.id, type: 'preview', envId: row.envId, port: row.port, title: row.title }
   }
   if (row.type === 'browser' && row.url) {
     return { id: row.id, type: 'browser', url: row.url, browserTabId: row.browserTabId ?? undefined, title: row.title }
