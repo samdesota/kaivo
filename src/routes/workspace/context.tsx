@@ -5,6 +5,7 @@ import type { WorkspaceUiState } from './tab-state'
 export type WorkspaceRecord = {
   id: string
   name: string
+  folderId?: string | null
   createdAt: Date
   updatedAt: Date
   lastOpenedAt: Date | null

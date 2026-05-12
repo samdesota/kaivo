@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { config } from '../config.js'
 import { logger } from '../logger.js'
@@ -36,6 +37,12 @@ export interface ReadResult {
 export interface FsEvent {
   type: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
   path: string
+}
+
+export interface GitTrackedFileResult {
+  root: string
+  path: string
+  relativePath: string
 }
 
 const MAX_READ_BYTES = 5 * 1024 * 1024
@@ -110,6 +117,41 @@ export async function listDirectory(dirPath: string): Promise<FsEntry[]> {
     return a.name.localeCompare(b.name)
   })
   return out
+}
+
+export async function searchGitTrackedFiles(roots: string[], query: string, limit = 120): Promise<GitTrackedFileResult[]> {
+  const q = query.trim().toLowerCase()
+  const uniqueRoots = Array.from(new Set(roots.map((root) => path.resolve(root))))
+  const out: GitTrackedFileResult[] = []
+  for (const root of uniqueRoots) {
+    if (out.length >= limit) break
+    try {
+      const files = await gitLsFiles(root)
+      for (const relativePath of files) {
+        if (out.length >= limit) break
+        if (q && !relativePath.toLowerCase().includes(q) && !path.basename(relativePath).toLowerCase().includes(q)) continue
+        out.push({ root, relativePath, path: path.join(root, relativePath) })
+      }
+    } catch {
+      // Non-git or inaccessible roots are skipped; callers can show an empty state if all roots fail.
+    }
+  }
+  return out
+}
+
+function gitLsFiles(root: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['ls-files'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code !== 0) reject(new FsError('unsupported', stderr.trim() || 'not a git repository'))
+      else resolve(stdout.split('\n').map((line) => line.trim()).filter(Boolean))
+    })
+  })
 }
 
 export async function readFile(
@@ -286,6 +328,8 @@ export interface BrowseResult {
   parent: string | null
   /** Subdirectories of `path`, sorted: visible first, then hidden, name asc. */
   dirs: BrowseEntry[]
+  /** Files in `path`, sorted: visible first, then hidden, name asc. */
+  files: BrowseEntry[]
 }
 
 /**
@@ -325,26 +369,35 @@ export async function browseHome(absPath?: string): Promise<BrowseResult> {
     throw err
   }
   const dirs: BrowseEntry[] = []
+  const files: BrowseEntry[] = []
   for (const e of entries) {
-    if (!e.isDirectory() && !e.isSymbolicLink()) continue
+    if (!e.isDirectory() && !e.isFile() && !e.isSymbolicLink()) continue
     // For symlinks, stat to confirm the target is a directory; skip
     // dangling links so the picker doesn't show clickable dead entries.
     if (e.isSymbolicLink()) {
       try {
         const st = await fs.stat(path.join(real, e.name))
-        if (!st.isDirectory()) continue
+        if (st.isDirectory()) {
+          dirs.push({ name: e.name, path: path.join(real, e.name) })
+        } else if (st.isFile()) {
+          files.push({ name: e.name, path: path.join(real, e.name) })
+        }
       } catch {
         continue
       }
+      continue
     }
-    dirs.push({ name: e.name, path: path.join(real, e.name) })
+    if (e.isDirectory()) dirs.push({ name: e.name, path: path.join(real, e.name) })
+    else files.push({ name: e.name, path: path.join(real, e.name) })
   }
-  dirs.sort((a, b) => {
+  const sortBrowseEntries = (a: BrowseEntry, b: BrowseEntry) => {
     const aHidden = a.name.startsWith('.')
     const bHidden = b.name.startsWith('.')
     if (aHidden !== bHidden) return aHidden ? 1 : -1
     return a.name.localeCompare(b.name)
-  })
+  }
+  dirs.sort(sortBrowseEntries)
+  files.sort(sortBrowseEntries)
   const parent = path.dirname(real)
   return {
     path: real,
@@ -352,5 +405,6 @@ export async function browseHome(absPath?: string): Promise<BrowseResult> {
     defaultPath: realDefault,
     parent: parent === real ? null : parent,
     dirs,
+    files,
   }
 }

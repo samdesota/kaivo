@@ -55,6 +55,10 @@
   --color-running: #61afef;
 }
 
+@keyframes universal-menu-loading-dim {
+  to { opacity: 0.62; }
+}
+
 :root {
   /* Overridable via the Settings → Appearance control. Drives base
      html font-size, so all rem-based Tailwind sizes scale together. */

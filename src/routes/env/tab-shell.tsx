@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { AgentSessionView } from './agent/session-view'
 import { EnvContextProvider, useEnv, type EnvContextValue } from './env-context'
 import { ShellsDropdown } from './shell/dropdowns'
@@ -7,7 +7,8 @@ import { RightPane } from './shell/right-pane'
 import { ShellChrome } from './shell/shell-chrome'
 import { type PaneContent, useRightPaneState } from './shell/tab-state'
 import type { EnvRef } from '../../lib/env-client'
-import { openCommandPaletteOverlay, openNewAgentChatOverlay } from '../../lib/overlay-layer-controller'
+import { openUniversalMenuOverlay } from '../../lib/overlay-layer-controller'
+import type { UniversalMenuContextItem } from './universal-menu/universal-menu'
 
 interface OpenPaneOptions {
   title?: string
@@ -23,6 +24,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   const [state, dispatch] = useRightPaneState(env.id)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const envContext = useEnv()
+  const navigate = useNavigate()
 
   const openContent = (content: PaneContent, options?: OpenPaneOptions) => {
     dispatch({ type: 'open', content, title: options?.title, activate: options?.activate ?? true })
@@ -39,21 +41,25 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   const hasTabs = state.tabs.length > 0
 
   async function openCommandPalette() {
-    const result = await openCommandPaletteOverlay({
+    const result = await openUniversalMenuOverlay({
       env: envContext.env,
       envToken: envContext.envToken,
       activeSessionId,
       hasActiveTab: hasTabs,
+      contextItems: state.tabs.flatMap((tab): UniversalMenuContextItem[] => {
+        if (tab.content.type === 'shell') {
+          return [{ id: `tab:${tab.id}`, kind: 'shell', label: tab.title, detail: `shell ${tab.content.shellId}`, content: tab.content }]
+        }
+        if (tab.content.type === 'browser') {
+          return [{ id: `tab:${tab.id}`, kind: 'browser-tab', label: tab.title, detail: tab.content.url ?? tab.content.browserTabId ?? 'Browser', content: tab.content }]
+        }
+        return []
+      }),
     })
     if (result.type === 'open-pane') openContent(result.content)
+    if (result.type === 'switch-workspace') void navigate({ to: '/w/$workspaceId', params: { workspaceId: result.workspaceId }, search: { chat: undefined, tab: undefined } })
     if (result.type === 'close-tab' && state.activeTabId) dispatch({ type: 'close', tabId: state.activeTabId })
-    if (result.type === 'new-workspace') {
-      await openNewAgentChatOverlay({
-        initialWorkspaceMode: 'new',
-        env: envContext.env,
-        envToken: envContext.envToken,
-      })
-    }
+    if (result.type === 'open-settings') void navigate({ to: '/settings' })
   }
 
   useEffect(() => {
@@ -61,9 +67,9 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         void openCommandPalette()
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 't') {
         e.preventDefault()
-        openContent({ type: 'browser', url: 'https://www.google.com' })
+        void openCommandPalette()
       }
     }
     window.addEventListener('keydown', onKey)
