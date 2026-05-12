@@ -30,6 +30,14 @@ const reasoningEfforts: Array<{ value: ReasoningEffort; label: string }> = [
   { value: 'xhigh', label: 'XHigh' },
 ]
 
+function fastBaseModelID(modelID: string): string {
+  return modelID.endsWith('-fast') ? modelID.slice(0, -'-fast'.length) : modelID
+}
+
+function fastModelID(modelID: string): string {
+  return `${fastBaseModelID(modelID)}-fast`
+}
+
 export function ModelEffortPicker({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
@@ -67,7 +75,23 @@ export function ModelEffortPicker({ sessionId }: { sessionId: string }) {
   const effortLabel = selectedEffort
     ? reasoningEfforts.find((effort) => effort.value === selectedEffort)?.label ?? selectedEffort
     : 'default'
-  const buttonTitle = `${currentModelLabel} · ${effortLabel} effort`
+  const currentProviderID = curr?.providerID ?? lst?.defaultProviderID ?? null
+  const currentModelID = curr?.modelID ?? lst?.defaultModelID ?? null
+  const fastOption = useMemo(() => {
+    if (!currentProviderID || !currentModelID || !lst?.models) return null
+    const baseModelID = fastBaseModelID(currentModelID)
+    const nextFastModelID = fastModelID(currentModelID)
+    const hasBase = lst.models.some((m) => m.providerID === currentProviderID && m.modelID === baseModelID)
+    const hasFast = lst.models.some((m) => m.providerID === currentProviderID && m.modelID === nextFastModelID)
+    if (!hasBase || !hasFast) return null
+    return {
+      providerID: currentProviderID,
+      baseModelID,
+      fastModelID: nextFastModelID,
+      enabled: currentModelID === nextFastModelID,
+    }
+  }, [currentModelID, currentProviderID, lst?.models])
+  const buttonTitle = `${currentModelLabel} · ${effortLabel} effort${fastOption?.enabled ? ' · fast' : ''}`
 
   const filtered = useMemo(
     () => (lst?.models ?? []).filter((m) => m.label.toLowerCase().includes(filter.toLowerCase())),
@@ -88,8 +112,13 @@ export function ModelEffortPicker({ sessionId }: { sessionId: string }) {
     await invalidateCurrentModel()
   }
 
+  async function toggleFastMode() {
+    if (!fastOption) return
+    await pickModel(fastOption.providerID, fastOption.enabled ? fastOption.baseModelID : fastOption.fastModelID)
+  }
+
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative flex items-center gap-1">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex max-w-[22rem] items-center gap-1.5 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-900 hover:text-neutral-100"
@@ -106,6 +135,24 @@ export function ModelEffortPicker({ sessionId }: { sessionId: string }) {
         <span className="font-mono text-content-strong">{effortLabel}</span>
         <span className="text-ui-muted">▾</span>
       </button>
+      {fastOption && (
+        <button
+          type="button"
+          aria-pressed={fastOption.enabled}
+          onClick={() => void toggleFastMode()}
+          disabled={setModel.isPending}
+          className={
+            'flex items-center gap-1 rounded border px-2 py-1 text-[11px] transition-colors disabled:opacity-50 ' +
+            (fastOption.enabled
+              ? 'border-amber-500/50 bg-amber-500/15 text-amber-200 hover:bg-amber-500/20'
+              : 'border-neutral-800 bg-neutral-900/60 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100')
+          }
+          title={fastOption.enabled ? 'Disable fast mode for this session' : 'Enable fast mode for this session'}
+        >
+          <span className="h-2 w-2 rounded-full border border-current bg-current opacity-80" />
+          Fast
+        </button>
+      )}
       {open && (
         <div className="absolute bottom-full left-0 z-30 mb-1 grid w-[500px] max-w-[calc(100vw-2rem)] grid-cols-[minmax(0,1fr)_9rem] overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
           <div className="min-w-0 border-r border-neutral-800">

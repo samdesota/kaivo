@@ -259,7 +259,7 @@ describe('agent service workspace sessions', () => {
     expect(await agentService.transcriptReplay(session.id, 1)).toEqual([])
   })
 
-  it('normalizes Anthropic fast-tier session model selections to standard tier', async () => {
+  it('preserves fast-tier session model selections', async () => {
     const { agentService } = await import('./service.js')
     const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
 
@@ -270,11 +270,11 @@ describe('agent service workspace sessions', () => {
 
     await expect(agentService.getSessionModel(session.id)).resolves.toMatchObject({
       providerID: 'anthropic',
-      modelID: 'claude-opus-4-6',
+      modelID: 'claude-opus-4-6-fast',
     })
     expect(agentRows[0]).toMatchObject({
       selectedProviderId: 'anthropic',
-      selectedModelId: 'claude-opus-4-6',
+      selectedModelId: 'claude-opus-4-6-fast',
     })
   })
 

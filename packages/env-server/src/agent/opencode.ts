@@ -479,6 +479,24 @@ class OpenCodeSupervisor {
     const gpt55ContextLimit = config.CC_OPENCODE_GPT55_CONTEXT_LIMIT
     const gpt55OutputLimit = config.CC_OPENCODE_GPT55_OUTPUT_LIMIT
     const gpt55InputLimit = config.CC_OPENCODE_GPT55_COMPACT_LIMIT ?? Math.max(1, gpt55ContextLimit - gpt55OutputLimit)
+    const gpt55Model = {
+      limit: {
+        context: gpt55ContextLimit,
+        input: gpt55InputLimit,
+        output: gpt55OutputLimit,
+      },
+      modalities: {
+        input: ['text', 'image'],
+        output: ['text'],
+      },
+      variants: {
+        none: { reasoningEffort: 'none' },
+        low: { reasoningEffort: 'low' },
+        medium: { reasoningEffort: 'medium' },
+        high: { reasoningEffort: 'high' },
+        xhigh: { reasoningEffort: 'xhigh' },
+      },
+    }
     const cfg = {
       plugin: [config.CC_OPENCODE_PLUGIN_PATH, OPENAI_OAUTH_PLUGIN],
       agent: {
@@ -499,22 +517,11 @@ class OpenCodeSupervisor {
           models: {
             'gpt-5.5': {
               name: 'GPT 5.5 (OAuth)',
-              limit: {
-                context: gpt55ContextLimit,
-                input: gpt55InputLimit,
-                output: gpt55OutputLimit,
-              },
-              modalities: {
-                input: ['text', 'image'],
-                output: ['text'],
-              },
-              variants: {
-                none: { reasoningEffort: 'none' },
-                low: { reasoningEffort: 'low' },
-                medium: { reasoningEffort: 'medium' },
-                high: { reasoningEffort: 'high' },
-                xhigh: { reasoningEffort: 'xhigh' },
-              },
+              ...gpt55Model,
+            },
+            'gpt-5.5-fast': {
+              name: 'GPT 5.5 Fast (OAuth)',
+              ...gpt55Model,
             },
           },
         },
