@@ -14,6 +14,7 @@ export function BorderedTabStrip({
   onSelect,
   onClose,
   onContextMenu,
+  focused = false,
   className,
 }: {
   items: BorderedTabItem[]
@@ -21,6 +22,7 @@ export function BorderedTabStrip({
   onSelect: (id: string) => void
   onClose?: (id: string) => void
   onContextMenu?: (id: string, event: MouseEvent) => void
+  focused?: boolean
   className?: string
 }) {
   return (
@@ -40,10 +42,17 @@ export function BorderedTabStrip({
             aria-selected={active}
             onContextMenu={onContextMenu ? (event) => onContextMenu(item.id, event) : undefined}
             className={cn(
-              'group flex min-w-[100px] max-w-[250px] shrink-0 items-stretch border-l border-neutral-800 transition-colors first:border-l-0 last:border-r',
+              'group relative flex min-w-[100px] max-w-[250px] shrink-0 items-stretch border-l border-neutral-800 transition-colors first:border-l-0 last:border-r',
               active ? 'bg-highlight text-neutral-200' : 'text-neutral-400 hover:bg-highlight hover:text-neutral-200',
             )}
           >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-neutral-400 transition-opacity',
+                focused && active ? 'opacity-100' : 'opacity-0',
+              )}
+            />
             <button
               type="button"
               onClick={() => onSelect(item.id)}

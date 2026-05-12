@@ -29,11 +29,15 @@ export function SessionTabs({
   sessionId,
   onSelect,
   onOpenNewChat,
+  focused = false,
+  closeActiveSignal = 0,
 }: {
   workspaceId?: string
   sessionId: string | null
   onSelect: (sessionId: string) => void
   onOpenNewChat?: () => void | Promise<void>
+  focused?: boolean
+  closeActiveSignal?: number
 }) {
   const sessionListInput = workspaceId ? { workspaceId } : undefined
   const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, {
@@ -43,6 +47,7 @@ export function SessionTabs({
   const close = envTrpc.agent.sessionClose.useMutation()
   const reopen = envTrpc.agent.sessionReopen.useMutation()
   const agentTabs = useWorkspaceAgentTabsStore(workspaceId)
+  const handledCloseActiveSignalRef = useRef(closeActiveSignal)
 
   const sessionsData = sessions.data as SessionSummary[] | undefined
   const { active, archived } = useMemo(() => {
@@ -90,6 +95,14 @@ export function SessionTabs({
     }
   }
 
+  useEffect(() => {
+    if (handledCloseActiveSignalRef.current === closeActiveSignal) return
+    handledCloseActiveSignalRef.current = closeActiveSignal
+    if (!closeActiveSignal || !sessionId) return
+    void onClose(sessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeActiveSignal])
+
   async function onReopen(id: string) {
     try {
       await reopen.mutateAsync({ sessionId: id })
@@ -115,6 +128,7 @@ export function SessionTabs({
         activeId={sessionId}
         onSelect={onSelect}
         onClose={(id) => void onClose(id)}
+        focused={focused}
       />
       {!workspaceId && <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />}
       {archived.length > 0 && (
