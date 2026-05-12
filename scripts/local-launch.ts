@@ -420,6 +420,7 @@ async function waitForUrl(service: LaunchServiceName, url: string, options: Requ
 }
 
 async function isPortAvailable(port: number, _service: RuntimePortName): Promise<boolean> {
+  void _service
   return new Promise((resolve) => {
     const server = net.createServer()
     server.unref()

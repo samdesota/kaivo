@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+// This exercises the adjacent webframe checkout when present; Vitest resolves it
+// in the local monorepo, while this repo's TypeScript project does not own it.
+// @ts-expect-error external sibling package source
 import { selectFaviconCandidate } from '../../../webframe/src/favicon'
 
 describe('webframe favicon candidate selection', () => {
