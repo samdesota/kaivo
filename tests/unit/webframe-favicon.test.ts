@@ -1,11 +1,24 @@
+import fs from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
-// This exercises the adjacent webframe checkout when present; Vitest resolves it
-// in the local monorepo, while this repo's TypeScript project does not own it.
-// @ts-expect-error external sibling package source
-import { selectFaviconCandidate } from '../../../webframe/src/favicon'
 
-describe('webframe favicon candidate selection', () => {
+type SelectFaviconCandidate = (input: {
+  pageUrl: string
+  candidates: string[]
+  previous?: string
+}) => string | undefined
+
+const webframeFaviconPath = new URL('../../../webframe/src/favicon.ts', import.meta.url)
+const describeIfWebframePresent = fs.existsSync(webframeFaviconPath) ? describe : describe.skip
+
+describeIfWebframePresent('webframe favicon candidate selection', () => {
+  async function loadSelectFaviconCandidate(): Promise<SelectFaviconCandidate> {
+    const mod = await import(pathToFileURL(webframeFaviconPath.pathname).href)
+    return (mod as { selectFaviconCandidate: SelectFaviconCandidate }).selectFaviconCandidate
+  }
+
   it('prefers valid same-origin larger candidates', () => {
+    return loadSelectFaviconCandidate().then((selectFaviconCandidate) => {
     expect(selectFaviconCandidate({
       pageUrl: 'https://example.com/page',
       candidates: [
@@ -14,9 +27,11 @@ describe('webframe favicon candidate selection', () => {
         'https://example.com/favicon-192.png',
       ],
     })).toBe('https://example.com/favicon-192.png')
+    })
   })
 
   it('keeps the previous favicon on empty or invalid events', () => {
+    return loadSelectFaviconCandidate().then((selectFaviconCandidate) => {
     expect(selectFaviconCandidate({
       pageUrl: 'https://example.com/page',
       candidates: [],
@@ -28,5 +43,6 @@ describe('webframe favicon candidate selection', () => {
       candidates: ['about:blank', 'file:///tmp/favicon.png', ''],
       previous: 'https://example.com/favicon.ico',
     })).toBe('https://example.com/favicon.ico')
+    })
   })
 })
