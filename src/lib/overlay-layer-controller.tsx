@@ -5,8 +5,9 @@ import { browserApi } from './browser-api'
 import { makeTrpcClient, trpc } from '../trpc'
 import { OVERLAY_CHANNEL, OverlayLayerApp, type OverlayRequest, type OverlayResponse } from '../routes/internal/overlay-layer'
 import type { PaneContent } from '../routes/env/shell/tab-state'
-import type { NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
+import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
 import type { WorkspaceResourceRecord } from '../routes/workspace/resources-store'
+import type { UniversalMenuContextItem } from '../routes/env/universal-menu/universal-menu'
 
 /**
  * Desktop modals must be opened through this controller so they render in the
@@ -18,6 +19,7 @@ type NewAgentChatInput = {
   workspaceId?: string
   workspaceName?: string
   initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  initialSelection?: NewAgentChatSelection
   folderId?: string | null
   env: EnvRef & { label: string }
   envToken: string
@@ -35,6 +37,16 @@ export type CommandPaletteOverlayResult =
   | { type: 'close-tab' }
   | { type: 'new-session' }
   | { type: 'new-workspace' }
+  | { type: 'closed' }
+
+export type UniversalMenuOverlayResult =
+  | { type: 'open-pane'; content: PaneContent }
+  | { type: 'created-agent-chat'; sessionId: string; workspaceId?: string }
+  | { type: 'switch-workspace'; workspaceId: string }
+  | { type: 'close-tab' }
+  | { type: 'toggle-agent-pane' }
+  | { type: 'toggle-sidebar' }
+  | { type: 'open-settings' }
   | { type: 'closed' }
 
 let detachedOverlayId: string | null = null
@@ -94,6 +106,34 @@ export async function openCommandPaletteOverlay(
   if (response.type === 'close-tab') return { type: 'close-tab' }
   if (response.type === 'new-session') return { type: 'new-session' }
   if (response.type === 'new-workspace') return { type: 'new-workspace' }
+  if (response.type === 'closed') return { type: 'closed' }
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openUniversalMenuOverlay(
+  input: EnvOverlayInput & {
+    workspaceId?: string
+    workspaceName?: string
+    workspaceFolderId?: string | null
+    activeSessionId?: string | null
+    hasActiveTab: boolean
+    contextItems?: UniversalMenuContextItem[]
+    canToggleAgentPane?: boolean
+    canToggleSidebar?: boolean
+  },
+): Promise<UniversalMenuOverlayResult> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'universal-menu',
+    ...input,
+  })
+  if (response.type === 'open-pane') return { type: 'open-pane', content: response.content }
+  if (response.type === 'created-agent-chat') return { type: 'created-agent-chat', sessionId: response.sessionId, workspaceId: response.workspaceId }
+  if (response.type === 'switch-workspace') return { type: 'switch-workspace', workspaceId: response.workspaceId }
+  if (response.type === 'close-tab') return { type: 'close-tab' }
+  if (response.type === 'toggle-agent-pane') return { type: 'toggle-agent-pane' }
+  if (response.type === 'toggle-sidebar') return { type: 'toggle-sidebar' }
+  if (response.type === 'open-settings') return { type: 'open-settings' }
   if (response.type === 'closed') return { type: 'closed' }
   throw new Error(`unexpected overlay response: ${response.type}`)
 }

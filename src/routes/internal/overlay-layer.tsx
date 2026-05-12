@@ -4,10 +4,11 @@ import type { EnvRef } from '../../lib/env-client'
 import { envTrpc, makeManagedEnvReactClient } from '../../env-trpc'
 import { EnvContextProvider } from '../env/env-context'
 import { NewAgentChatOverlay } from '../env/agent/new-agent-chat-modal'
-import type { NewAgentChatWorkspaceMode } from '../env/agent/new-agent-chat-state'
+import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../env/agent/new-agent-chat-state'
 import { FolderPickerModal } from '../env/agent/folder-picker-modal'
 import { CommandPalette } from '../env/shell/command-palette'
 import type { PaneContent } from '../env/shell/tab-state'
+import { UniversalMenu, type UniversalMenuContextItem } from '../env/universal-menu/universal-menu'
 import { Modal } from '../../components/ui'
 import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
@@ -30,6 +31,7 @@ export type OverlayRequest = {
   workspaceId?: string
   workspaceName?: string
   initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  initialSelection?: NewAgentChatSelection
   folderId?: string | null
   env: EnvRef & { label: string }
   envToken: string
@@ -48,6 +50,19 @@ export type OverlayRequest = {
   workspaceId?: string
   activeSessionId?: string | null
   hasActiveTab: boolean
+} | {
+  requestId: string
+  type: 'universal-menu'
+  env: EnvRef & { label: string }
+  envToken: string
+  workspaceId?: string
+  workspaceName?: string
+  workspaceFolderId?: string | null
+  activeSessionId?: string | null
+  hasActiveTab: boolean
+  contextItems?: UniversalMenuContextItem[]
+  canToggleAgentPane?: boolean
+  canToggleSidebar?: boolean
 } | {
   requestId: string
   type: 'confirm'
@@ -94,11 +109,15 @@ export type OverlayResponse =
   | { requestId: string; type: 'ready' }
   | { requestId: string; type: 'closed' }
   | { requestId: string; type: 'created-agent-chat'; sessionId: string; workspaceId?: string }
+  | { requestId: string; type: 'switch-workspace'; workspaceId: string }
   | { requestId: string; type: 'selected-folder'; path: string }
   | { requestId: string; type: 'open-pane'; content: PaneContent }
   | { requestId: string; type: 'close-tab' }
   | { requestId: string; type: 'new-session' }
   | { requestId: string; type: 'new-workspace' }
+  | { requestId: string; type: 'toggle-agent-pane' }
+  | { requestId: string; type: 'toggle-sidebar' }
+  | { requestId: string; type: 'open-settings' }
   | { requestId: string; type: 'confirmed'; confirmed: boolean }
   | { requestId: string; type: 'text-submitted'; value: string }
   | { requestId: string; type: 'repo-config-closed'; changed: boolean }
@@ -162,6 +181,7 @@ function isOverlayRequest(message: OverlayRequest | OverlayResponse | { type: 'c
   return message.type === 'new-agent-chat'
     || message.type === 'folder-picker'
     || message.type === 'command-palette'
+    || message.type === 'universal-menu'
     || message.type === 'confirm'
     || message.type === 'text-input'
     || message.type === 'repo-config'
@@ -200,7 +220,7 @@ function EnvOverlayRequestRenderer({
   request,
   respond,
 }: {
-  request: Extract<OverlayRequest, { type: 'new-agent-chat' | 'folder-picker' | 'command-palette' | 'workspace-cleanup' }>
+  request: Extract<OverlayRequest, { type: 'new-agent-chat' | 'folder-picker' | 'command-palette' | 'universal-menu' | 'workspace-cleanup' }>
   respond: (response: OverlayResponse) => void
 }) {
   const queryClient = useMemo(() => new QueryClient(), [request.requestId])
@@ -223,6 +243,7 @@ function EnvOverlayRequestRenderer({
               workspaceId={request.workspaceId}
               workspaceName={request.workspaceName}
               initialWorkspaceMode={request.initialWorkspaceMode}
+              initialSelection={request.initialSelection}
               folderId={request.folderId}
               onClose={() => respond({ requestId: request.requestId, type: 'closed' })}
               onCreated={(sessionId, workspaceId) => respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })}
@@ -248,6 +269,25 @@ function EnvOverlayRequestRenderer({
               onCloseTab={() => respond({ requestId: request.requestId, type: 'close-tab' })}
               onNewSession={() => respond({ requestId: request.requestId, type: 'new-session' })}
               onNewWorkspace={() => respond({ requestId: request.requestId, type: 'new-workspace' })}
+            />
+          )}
+          {request.type === 'universal-menu' && (
+            <UniversalMenu
+              open
+              workspaceId={request.workspaceId}
+              workspaceName={request.workspaceName}
+              workspaceFolderId={request.workspaceFolderId}
+              activeSessionId={request.activeSessionId}
+              hasActiveTab={request.hasActiveTab}
+              contextItems={request.contextItems}
+              onClose={() => respond({ requestId: request.requestId, type: 'closed' })}
+              onOpenContent={(content) => respond({ requestId: request.requestId, type: 'open-pane', content })}
+              onCreatedChat={(sessionId: string, workspaceId?: string) => respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })}
+              onSwitchWorkspace={(workspaceId: string) => respond({ requestId: request.requestId, type: 'switch-workspace', workspaceId })}
+              onCloseTab={() => respond({ requestId: request.requestId, type: 'close-tab' })}
+              onToggleAgentPane={request.canToggleAgentPane ? () => respond({ requestId: request.requestId, type: 'toggle-agent-pane' }) : undefined}
+              onToggleSidebar={request.canToggleSidebar ? () => respond({ requestId: request.requestId, type: 'toggle-sidebar' }) : undefined}
+              onOpenSettings={() => respond({ requestId: request.requestId, type: 'open-settings' })}
             />
           )}
           {request.type === 'workspace-cleanup' && (

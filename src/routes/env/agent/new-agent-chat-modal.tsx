@@ -41,6 +41,7 @@ export function NewAgentChatOverlayLauncher({
   workspaceId,
   workspaceName = 'Current workspace',
   initialWorkspaceMode = 'existing',
+  initialSelection,
   folderId,
   onClose,
   onCreated,
@@ -49,6 +50,7 @@ export function NewAgentChatOverlayLauncher({
   workspaceId?: string
   workspaceName?: string
   initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  initialSelection?: NewAgentChatSelection
   folderId?: string | null
   onClose: () => void
   onCreated: (sessionId: string, workspaceId?: string) => void
@@ -67,6 +69,7 @@ export function NewAgentChatOverlayLauncher({
       workspaceId,
       workspaceName,
       initialWorkspaceMode,
+      initialSelection,
       folderId,
       env: envContext.env,
       envToken: envContext.envToken,
@@ -77,7 +80,7 @@ export function NewAgentChatOverlayLauncher({
       console.warn('new agent chat overlay failed', error)
       onClose()
     })
-  }, [envContext.env, envContext.envToken, folderId, initialWorkspaceMode, onClose, onCreated, open, workspaceId, workspaceName])
+  }, [envContext.env, envContext.envToken, folderId, initialSelection, initialWorkspaceMode, onClose, onCreated, open, workspaceId, workspaceName])
 
   return null
 }
@@ -88,6 +91,7 @@ export function NewAgentChatOverlay({
   workspaceId?: string
   workspaceName?: string
   initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  initialSelection?: NewAgentChatSelection
   folderId?: string | null
   onClose: () => void
   onCreated: (sessionId: string, workspaceId?: string) => void
@@ -103,6 +107,7 @@ function NewAgentChatOverlayContent({
   workspaceId,
   workspaceName = 'Current workspace',
   initialWorkspaceMode = 'existing',
+  initialSelection,
   folderId,
   onClose,
   onCreated,
@@ -110,6 +115,7 @@ function NewAgentChatOverlayContent({
   workspaceId?: string
   workspaceName?: string
   initialWorkspaceMode?: NewAgentChatWorkspaceMode
+  initialSelection?: NewAgentChatSelection
   folderId?: string | null
   onClose: () => void
   onCreated: (sessionId: string, workspaceId?: string) => void
@@ -123,9 +129,9 @@ function NewAgentChatOverlayContent({
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
   const queryClient = useQueryClient()
-  const [selection, setSelection] = useState<NewAgentChatSelection | null>(null)
+  const [selection, setSelection] = useState<NewAgentChatSelection | null>(initialSelection ?? null)
   const [error, setError] = useState<string | null>(null)
-  const [step, setStep] = useState<'choose' | 'details'>('choose')
+  const [step, setStep] = useState<'choose' | 'details'>(initialSelection ? 'details' : 'choose')
   const [search, setSearch] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [workspaceMode, setWorkspaceMode] = useState<NewAgentChatWorkspaceMode>(initialWorkspaceMode)

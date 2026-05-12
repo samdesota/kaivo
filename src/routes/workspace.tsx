@@ -30,7 +30,7 @@ import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
 import { browserTabIconForUrl, faviconOriginForUrl, fetchFaviconDataUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
-import { openCommandPaletteOverlay, openConfirmOverlay, openNewAgentChatOverlay, openTextInputOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
+import { openConfirmOverlay, openNewAgentChatOverlay, openTextInputOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
 import { paneTabIconForType } from '../components/tab-icon'
@@ -39,6 +39,7 @@ import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { NewSessionPopover } from './env/agent/session-tabs'
 import { NewAgentChatOverlayLauncher } from './env/agent/new-agent-chat-modal'
+import type { UniversalMenuContextItem } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -347,21 +348,6 @@ function WorkspaceShell({
     const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
     if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
   }, [ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState])
-  const openCommandPalette = useCallback(async () => {
-    const target = ctx.localEnvTarget
-    if (!target?.available || !target.token) return
-    const result = await openCommandPaletteOverlay({
-      env: target.env,
-      envToken: target.token,
-      workspaceId: ctx.workspace.id,
-      activeSessionId: ctx.uiState.activeAgentSessionId,
-      hasActiveTab: ctx.uiState.workspaceTabs.length > 0,
-    })
-    if (result.type === 'open-pane') openPane(result.content)
-    if (result.type === 'close-tab') closeActiveTab()
-    if (result.type === 'new-session') setNewChatMode('existing')
-    if (result.type === 'new-workspace') setNewChatMode('new')
-  }, [closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs.length, ctx.workspace.id, openPane])
 
   const selectCreatedChat = useCallback(async (sessionId: string, workspaceId?: string) => {
     if (!workspaceId) return
@@ -375,6 +361,40 @@ function WorkspaceShell({
     })
   }, [ctx.workspace.id, dispatchWorkspaceState, navigate])
 
+  const openCommandPalette = useCallback(async () => {
+    const target = ctx.localEnvTarget
+    if (!target?.available || !target.token) return
+    const result = await openUniversalMenuOverlay({
+      env: target.env,
+      envToken: target.token,
+      workspaceId: ctx.workspace.id,
+      workspaceName: ctx.workspace.name,
+      workspaceFolderId: ctx.workspace.folderId,
+      activeSessionId: ctx.uiState.activeAgentSessionId,
+      hasActiveTab: ctx.uiState.workspaceTabs.length > 0,
+      contextItems: ctx.uiState.workspaceTabs.flatMap((tab): UniversalMenuContextItem[] => {
+        if (tab.type === 'shell') {
+          return [{ id: `tab:${tab.id}`, kind: 'shell', label: tab.title, detail: `shell ${tab.shellId}`, content: { type: 'shell', shellId: tab.shellId } }]
+        }
+        if (tab.type === 'browser') {
+          return [{ id: `tab:${tab.id}`, kind: 'browser-tab', label: tab.title, detail: tab.url ?? tab.browserTabId ?? 'Browser', content: { type: 'browser', url: tab.url, browserTabId: tab.browserTabId } }]
+        }
+        return []
+      }),
+      canToggleAgentPane: true,
+      canToggleSidebar: true,
+    })
+    if (result.type === 'open-pane') openPane(result.content)
+    if (result.type === 'created-agent-chat') void selectCreatedChat(result.sessionId, result.workspaceId)
+    if (result.type === 'switch-workspace') {
+      void navigate({ to: '/w/$workspaceId', params: { workspaceId: result.workspaceId }, search: { chat: undefined, tab: undefined } })
+    }
+    if (result.type === 'close-tab') closeActiveTab()
+    if (result.type === 'toggle-agent-pane') setAgentCollapsed(!agentCollapsed)
+    if (result.type === 'toggle-sidebar') setSidebarHidden((v) => !v)
+    if (result.type === 'open-settings') void navigate({ to: '/settings' })
+  }, [agentCollapsed, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openPane, selectCreatedChat, setAgentCollapsed])
+
   useEffect(() => {
     prewarmOverlayLayer()
   }, [])
@@ -384,9 +404,9 @@ function WorkspaceShell({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         void openCommandPalette()
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 't') {
         e.preventDefault()
-        openPane({ type: 'browser', url: 'https://www.google.com' })
+        void openCommandPalette()
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
@@ -397,7 +417,7 @@ function WorkspaceShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [agentCollapsed, openCommandPalette, openPane, setAgentCollapsed])
+  }, [agentCollapsed, openCommandPalette, setAgentCollapsed])
 
   return (
     <>

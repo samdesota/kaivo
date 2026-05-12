@@ -8,6 +8,7 @@ import {
   browseHome,
   listDirectory,
   readFile,
+  searchGitTrackedFiles,
   watchFilePath,
   watchWorkspace,
   writeFile,
@@ -98,6 +99,16 @@ export const fsRouter = router({
     .query(async ({ input }) => {
       try {
         return await browseHome(input.path)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  searchGitTrackedFiles: authedProcedure
+    .input(z.object({ roots: z.array(z.string().min(1).max(4096)).max(50), query: z.string().max(400).optional(), limit: z.number().int().positive().max(500).optional() }))
+    .query(async ({ input }) => {
+      try {
+        return await searchGitTrackedFiles(input.roots, input.query ?? '', input.limit)
       } catch (err) {
         throw toTrpcError(err)
       }

@@ -5,11 +5,13 @@ export function OverlayShell({
   footer,
   onClose,
   panelClassName = '',
+  footerClassName = '',
 }: {
   children: ReactNode
   footer?: ReactNode
   onClose: () => void
   panelClassName?: string
+  footerClassName?: string
 }) {
   return (
     <div
@@ -25,7 +27,7 @@ export function OverlayShell({
         onMouseDown={(event) => event.stopPropagation()}
       >
         {children}
-        {footer && <div className="flex items-center gap-3 border-t border-neutral-800 px-4 py-1.5 text-[10px] text-neutral-500">{footer}</div>}
+        {footer && <div className={`flex items-center gap-3 border-t border-neutral-800 px-4 py-1.5 text-[10px] text-neutral-500 ${footerClassName}`}>{footer}</div>}
       </div>
     </div>
   )
