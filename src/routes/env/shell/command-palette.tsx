@@ -11,7 +11,7 @@ interface PaletteItem {
   id: string
   label: string
   detail?: string
-  kind: 'shell' | 'preview' | 'action'
+  kind: 'shell' | 'action'
   haystack: string
   run: () => void | Promise<void>
 }
@@ -21,11 +21,6 @@ interface ShellRow {
   cwd: string
   ownerKind?: string
   title?: string | null
-}
-interface PortRow {
-  port: number
-  process?: string | null
-  address: string
 }
 interface ShellCreateResult {
   id: string
@@ -90,10 +85,6 @@ export function CommandPalette({
 
   const workspaceInput = useMemo(() => workspaceId ? { workspaceId } : undefined, [workspaceId])
   const shells = envTrpc.shell.list.useQuery(workspaceInput, {
-    enabled: open,
-    staleTime: 5_000,
-  })
-  const ports = envTrpc.preview.portsSnapshot.useQuery(undefined, {
     enabled: open,
     staleTime: 5_000,
   })
@@ -191,25 +182,14 @@ export function CommandPalette({
       })
     }
 
-    for (const p of (ports.data as PortRow[] | undefined) ?? []) {
-      out.push({
-        id: `preview:${p.port}`,
-        label: `:${p.port}`,
-        detail: `${p.process ?? 'unknown'} · ${p.address}`,
-        kind: 'preview',
-        haystack: `preview port ${p.port} ${p.process ?? ''} ${p.address}`,
-        run: () => onOpenContent({ type: 'preview', port: p.port }),
-      })
-    }
-
     return out
-  }, [shells.data, ports.data, hasActiveTab, onOpenContent, onCloseTab, onNewSession, onNewWorkspace, queryClient, createShellAsync, activeCwd, workspaceInput])
+  }, [shells.data, hasActiveTab, onOpenContent, onCloseTab, onNewSession, onNewWorkspace, queryClient, createShellAsync, activeCwd, workspaceInput])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) {
       const actions = items.filter((i) => i.kind === 'action')
-      const live = items.filter((i) => i.kind === 'shell' || i.kind === 'preview')
+      const live = items.filter((i) => i.kind === 'shell')
       return [...actions, ...live].slice(0, 200)
     }
     const scored: Array<{ item: PaletteItem; score: number }> = []
@@ -270,13 +250,13 @@ export function CommandPalette({
               void pick(active)
             }
           }}
-          placeholder="Search shells, previews, actions…"
+          placeholder="Search shells and actions…"
           className="w-full border-b border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none"
         />
         <ul className="max-h-[50vh] overflow-y-auto py-1">
           {filtered.length === 0 ? (
             <li className="px-4 py-3 text-xs text-neutral-500">
-              {shells.isLoading || ports.isLoading ? 'Loading…' : 'No matches.'}
+              {shells.isLoading ? 'Loading…' : 'No matches.'}
             </li>
           ) : (
             filtered.map((it, i) => (
@@ -308,9 +288,7 @@ function KindBadge({ kind }: { kind: PaletteItem['kind'] }) {
   const cls =
     kind === 'shell'
       ? 'border-emerald-700 text-emerald-400'
-      : kind === 'preview'
-        ? 'border-sky-700 text-sky-400'
-        : 'border-neutral-700 text-neutral-300'
+      : 'border-neutral-700 text-neutral-300'
   return (
     <span
       className={`inline-block rounded border px-1 py-[1px] text-[9px] uppercase tracking-wide ${cls}`}

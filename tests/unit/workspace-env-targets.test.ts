@@ -89,13 +89,13 @@ describe('workspace env targets', () => {
 
     expect(
       unavailableReasonForWorkspaceTab(
-        { id: 'tab-1', type: 'preview', envId: 'dead-1', port: 3000, title: ':3000' },
+        { id: 'tab-1', type: 'file', envId: 'dead-1', path: '/tmp/a.ts', title: 'a.ts' },
         targets,
       ),
     ).toMatch(/unreachable/)
     expect(
       unavailableReasonForWorkspaceTab(
-        { id: 'tab-2', type: 'preview', envId: 'local-1', port: 3000, title: ':3000' },
+        { id: 'tab-2', type: 'file', envId: 'local-1', path: '/tmp/a.ts', title: 'a.ts' },
         targets,
       ),
     ).toBeNull()

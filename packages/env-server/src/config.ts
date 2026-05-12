@@ -37,6 +37,14 @@ const schema = z.object({
   // Opencode binary; must be in PATH or an absolute path.
   CC_OPENCODE_BIN: z.string().default('opencode'),
 
+  // OpenCode uses a separate model input limit as the practical
+  // auto-compaction ceiling. Keep GPT-5.5's default near the full 1M
+  // context window while leaving room for max output, and allow local
+  // overrides for cost/latency tuning.
+  CC_OPENCODE_GPT55_CONTEXT_LIMIT: z.coerce.number().int().positive().default(1_050_000),
+  CC_OPENCODE_GPT55_OUTPUT_LIMIT: z.coerce.number().int().positive().default(128_000),
+  CC_OPENCODE_GPT55_COMPACT_LIMIT: z.coerce.number().int().positive().optional(),
+
   // `file://` URI or absolute path to the Zoottle opencode plugin. In
   // container mode the Dockerfile bakes it to /opt; in local mode
   // install.sh writes it under the state dir.

@@ -602,7 +602,7 @@ function SessionPane({
           </div>
         )}
         <OpenStateProvider>
-          <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1">
             {loading ? (
               <div className="flex flex-1 items-center justify-center text-xs text-neutral-500">Loading…</div>
             ) : error ? (
@@ -626,7 +626,7 @@ function SessionPane({
                   const padBottom = isLast ? 12 : 0
                   return (
                     <div
-                      className="px-4"
+                      className="min-w-0 px-4"
                       style={{ paddingTop: padTop, paddingBottom: padBottom }}
                     >
                       <PartRenderer

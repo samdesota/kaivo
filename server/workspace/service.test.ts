@@ -689,7 +689,7 @@ describe('workspace router', () => {
 
     const first = await workspaceService.openPane(workspace.id, {
       envId: 'env-1',
-      content: { type: 'preview', port: 5173 },
+      content: { type: 'file', path: '/tmp/a.ts' },
     })
     await workspaceService.openPane(workspace.id, {
       envId: 'env-1',
@@ -697,7 +697,7 @@ describe('workspace router', () => {
     })
     const second = await workspaceService.openPane(workspace.id, {
       envId: 'env-1',
-      content: { type: 'preview', port: 5173 },
+      content: { type: 'file', path: '/tmp/a.ts' },
     })
 
     expect(second.id).toBe(first.id)

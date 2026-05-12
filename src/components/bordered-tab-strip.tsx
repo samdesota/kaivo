@@ -1,9 +1,11 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { cn } from '../lib/utils'
+import { TabIconView, type TabIcon } from './tab-icon'
 
 export interface BorderedTabItem {
   id: string
   label: ReactNode
+  icon?: TabIcon
   title?: string
   closeTitle?: string
 }
@@ -56,10 +58,11 @@ export function BorderedTabStrip({
             <button
               type="button"
               onClick={() => onSelect(item.id)}
-              className="min-w-0 flex-1 py-1 pl-2 pr-1 text-left text-xs"
+              className="flex min-w-0 flex-1 items-center gap-1.5 py-1 pl-2 pr-1 text-left text-xs"
               title={item.title}
             >
-              <span className="block truncate align-middle">{item.label}</span>
+              {item.icon ? <TabIconView icon={item.icon} /> : null}
+              <span className="block min-w-0 truncate align-middle">{item.label}</span>
             </button>
             {onClose && (
               <button

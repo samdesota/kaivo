@@ -30,6 +30,20 @@ describe('env-server config instance id', () => {
 
     expect(config.CC_INSTANCE_ID).toBe('dev-worktree-a')
   })
+
+  it('supports manual GPT-5.5 compact limit overrides', async () => {
+    vi.resetModules()
+    vi.stubEnv('CC_WORKING_DIR', '/tmp')
+    vi.stubEnv('CC_IDENTITY_URL', 'https://code.438d.xyz')
+    vi.stubEnv('CC_STATE_DIR', tempStateDir())
+    vi.stubEnv('CC_OPENCODE_GPT55_COMPACT_LIMIT', '800000')
+
+    const { config } = await import('./config.js')
+
+    expect(config.CC_OPENCODE_GPT55_CONTEXT_LIMIT).toBe(1_050_000)
+    expect(config.CC_OPENCODE_GPT55_OUTPUT_LIMIT).toBe(128_000)
+    expect(config.CC_OPENCODE_GPT55_COMPACT_LIMIT).toBe(800_000)
+  })
 })
 
 function tempStateDir(): string {

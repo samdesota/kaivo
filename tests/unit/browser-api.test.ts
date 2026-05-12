@@ -4,8 +4,8 @@ import { createBrowserApi, paneSlotName } from '../../src/lib/browser-api.js'
 function makeWindow() {
   const calls: Record<string, ReturnType<typeof vi.fn>> = {
     setSlots: vi.fn(async () => ({ ok: true })),
-    create: vi.fn(async () => ({ id: 'tab-1' })),
-    list: vi.fn(async () => [{ id: 'tab-1', url: 'https://example.com', presentation: 'embedded' }]),
+    create: vi.fn(async () => ({ id: 'tab-1', favicon: 'https://example.com/favicon.ico' })),
+    list: vi.fn(async () => [{ id: 'tab-1', url: 'https://example.com', favicon: 'https://example.com/favicon.ico', presentation: 'embedded' }]),
     move: vi.fn(async () => ({ ok: true })),
     setActive: vi.fn(async () => ({ ok: true })),
     close: vi.fn(async () => ({ ok: true })),
@@ -53,6 +53,7 @@ describe('browser API adapter', () => {
     await expect(api.listTabs()).resolves.toEqual([{
       browserTabId: 'tab-1',
       url: 'https://example.com',
+      favicon: 'https://example.com/favicon.ico',
       presentation: 'embedded',
     }])
     await api.setSlot({ paneId: 'pane-1', rect: { x: 1, y: 2, width: 300, height: 200 } })
@@ -63,6 +64,7 @@ describe('browser API adapter', () => {
 
     await expect(api.createTab({ paneId: 'pane-1', url: 'https://example.com' })).resolves.toEqual({
       browserTabId: 'tab-1',
+      favicon: 'https://example.com/favicon.ico',
     })
     expect(calls.create).toHaveBeenLastCalledWith({
       url: 'https://example.com',
@@ -115,5 +117,52 @@ describe('browser API adapter', () => {
     } finally {
       info.mockRestore()
     }
+  })
+
+  it('maps favicon data from webframe change and created subscriptions', async () => {
+    const { win, calls } = makeWindow()
+    const createdSubscribe = vi.fn(() => ({ unsubscribe: vi.fn() }))
+    ;(win as any).webframe.trpc.tabs.onCreated = { subscribe: createdSubscribe }
+    const api = createBrowserApi(win)
+    const onChange = vi.fn()
+    const onCreated = vi.fn()
+
+    api.onTabChange(onChange)
+    const changeCall = calls.subscribe!.mock.calls[0] as [unknown, { onData: (data: { tabId: string; patch: Record<string, unknown> }) => void }]
+    const changeOpts = changeCall[1]
+    changeOpts.onData({ tabId: 'tab-1', patch: { favicon: 'https://example.com/favicon.ico' } })
+    expect(onChange).toHaveBeenCalledWith({
+      browserTabId: 'tab-1',
+      patch: { favicon: 'https://example.com/favicon.ico' },
+    })
+
+    api.onWindowTabCreated(onCreated)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const createdCall = createdSubscribe.mock.calls[0] as unknown as [unknown, { onData: (data: {
+      tab: { id: string; url: string; title: string; favicon?: string; presentation?: 'embedded' | 'popup' }
+      windowId: string | null
+      openerTabId: string | null
+    }) => void }]
+    const createdOpts = createdCall[1]
+    createdOpts.onData({
+      tab: {
+        id: 'tab-2',
+        url: 'https://example.com/new',
+        title: 'Example',
+        favicon: 'https://example.com/favicon.ico',
+        presentation: 'embedded',
+      },
+      windowId: 'window-1',
+      openerTabId: 'tab-1',
+    })
+    expect(onCreated).toHaveBeenCalledWith({
+      browserTabId: 'tab-2',
+      windowId: 'window-1',
+      openerBrowserTabId: 'tab-1',
+      url: 'https://example.com/new',
+      title: 'Example',
+      favicon: 'https://example.com/favicon.ico',
+      presentation: 'embedded',
+    })
   })
 })

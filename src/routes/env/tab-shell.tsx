@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AgentSessionView } from './agent/session-view'
 import { EnvContextProvider, useEnv, type EnvContextValue } from './env-context'
-import { ShellsDropdown, PreviewsDropdown } from './shell/dropdowns'
+import { ShellsDropdown } from './shell/dropdowns'
 import { RightPane } from './shell/right-pane'
 import { ShellChrome } from './shell/shell-chrome'
 import { type PaneContent, useRightPaneState } from './shell/tab-state'
@@ -104,7 +104,6 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
             ⌘K
           </button>
           <ShellsDropdown onOpen={openContent} />
-          <PreviewsDropdown onOpen={openContent} />
           <Link
             to="/settings"
             className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"

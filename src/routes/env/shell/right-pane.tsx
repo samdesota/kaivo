@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
 import { BorderedTabStrip, type BorderedTabItem } from '../../../components/bordered-tab-strip'
+import { paneTabIconForType } from '../../../components/tab-icon'
 import { browserApi } from '../../../lib/browser-api'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { FileTabContent } from '../tabs/file-tab'
 import { BrowserTabContent } from '../tabs/browser-tab'
-import { PreviewTabContent } from '../tabs/preview-tab'
 import { ShellTabContent } from '../tabs/shell-tab'
 import {
   type PaneContent,
@@ -82,6 +82,7 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
   const tabItems: BorderedTabItem[] = state.tabs.map((t) => ({
     id: t.id,
     label: t.title || defaultTitle(t.content),
+    icon: paneTabIconForType(t.content.type),
     title: tabTitleDetail(t.content),
   }))
 
@@ -169,7 +170,6 @@ function TabContent({
 }) {
   if (content.type === 'shell') return <ShellTabContent shellId={content.shellId} workspaceId={workspaceId} />
   if (content.type === 'file') return <FileTabContent path={content.path} absolute={content.absolute} />
-  if (content.type === 'preview') return <PreviewTabContent port={content.port} />
   if (content.type === 'browser') {
     return (
       <BrowserTabContent
@@ -197,7 +197,6 @@ function truncateTabTitle(title: string): string {
 function tabTitleDetail(c: PaneContent): string {
   if (c.type === 'shell') return c.shellId
   if (c.type === 'file') return c.path
-  if (c.type === 'preview') return `port ${c.port}`
   if (c.type === 'browser') return c.url ?? c.browserTabId ?? 'browser'
   return ''
 }

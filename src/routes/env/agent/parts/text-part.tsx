@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Part } from '../transcript-store'
-import type { MouseEvent, ReactNode } from 'react'
+import { isValidElement, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 
 export function TextPart({
   part,
@@ -15,18 +15,26 @@ export function TextPart({
   const text = (part as { text?: string }).text ?? ''
   const running = !(part as { time?: { end?: number } }).time?.end
   const isAssistant = role !== 'user'
+  const openBrowserPaneRef = useRef(onOpenBrowserPane)
+  useEffect(() => {
+    openBrowserPaneRef.current = onOpenBrowserPane
+  }, [onOpenBrowserPane])
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents((url) => openBrowserPaneRef.current?.(url)),
+    [],
+  )
 
   if (!isAssistant) {
     return (
-      <div className="mb-1 border-t border-neutral-800/50 pt-2 text-sm leading-relaxed whitespace-pre-wrap text-content-muted">
+      <div className="mb-1 min-w-0 border-t border-neutral-800/50 pt-2 text-sm leading-relaxed whitespace-pre-wrap text-content-muted [overflow-wrap:anywhere]">
         {text}
       </div>
     )
   }
 
   return (
-    <div className="prose-agent text-sm leading-relaxed text-content-strong">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={createMarkdownComponents(onOpenBrowserPane)}>
+    <div className="prose-agent min-w-0 text-sm leading-relaxed text-content-strong [overflow-wrap:anywhere]">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {text}
       </ReactMarkdown>
       {running && (
@@ -117,11 +125,7 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
       }
       return <code className={p.className}>{p.children}</code>
     },
-    pre: (p: { children?: ReactNode }) => (
-      <pre className="my-2 overflow-x-auto rounded border border-neutral-800 bg-neutral-950 p-2 text-[12px] leading-snug text-header-3">
-        {p.children}
-      </pre>
-    ),
+    pre: (p: { children?: ReactNode }) => <CodeBlock>{p.children}</CodeBlock>,
     table: (p: { children?: ReactNode }) => (
       <div className="my-2 overflow-x-auto">
         <table className="border-collapse text-xs">{p.children}</table>
@@ -141,4 +145,41 @@ function createMarkdownComponents(onOpenBrowserPane?: (url: string) => void) {
     ),
     em: (p: { children?: ReactNode }) => <em className="italic">{p.children}</em>,
   }
+}
+
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const [copied, setCopied] = useState(false)
+  const text = textFromNode(children).replace(/\n$/, '')
+
+  async function copyCode() {
+    if (!text) return
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1200)
+  }
+
+  return (
+    <div className="group relative my-2">
+      <button
+        type="button"
+        onClick={() => void copyCode()}
+        disabled={!text}
+        className="absolute right-1.5 top-1.5 z-10 rounded border border-neutral-700 bg-neutral-900/95 px-1.5 py-0.5 text-[10px] leading-none text-ui-muted shadow-sm hover:border-neutral-600 hover:text-content-default disabled:opacity-50"
+        title="Copy code"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+      <pre className="m-0 max-w-full overflow-x-auto rounded border border-neutral-800 bg-neutral-950 p-2 pr-14 text-[12px] leading-snug text-header-3 [overflow-wrap:normal]">
+        {children}
+      </pre>
+    </div>
+  )
+}
+
+function textFromNode(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textFromNode).join('')
+  if (isValidElement<{ children?: ReactNode }>(node)) return textFromNode(node.props.children)
+  return ''
 }

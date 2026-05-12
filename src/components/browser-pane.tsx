@@ -10,6 +10,7 @@ interface BrowserPaneProps {
   onBrowserTabId?: (browserTabId: string) => void
   onUrlChange?: (url: string) => void
   onTitleChange?: (title: string) => void
+  onFaviconChange?: (input: { pageUrl: string; faviconUrl: string }) => void
 }
 
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 }
@@ -30,13 +31,14 @@ function sameBrowserSlotRect(a: BrowserSlotRect | null, b: BrowserSlotRect): boo
   return Boolean(a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height)
 }
 
-export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount = true, onBrowserTabId, onUrlChange, onTitleChange }: BrowserPaneProps) {
+export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount = true, onBrowserTabId, onUrlChange, onTitleChange, onFaviconChange }: BrowserPaneProps) {
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
   const createdTabIdRef = useRef<string | null>(null)
   const onBrowserTabIdRef = useRef(onBrowserTabId)
   const onUrlChangeRef = useRef(onUrlChange)
   const onTitleChangeRef = useRef(onTitleChange)
+  const onFaviconChangeRef = useRef(onFaviconChange)
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
   const slotReadyRef = useRef<Promise<void>>(Promise.resolve())
@@ -47,6 +49,7 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   onBrowserTabIdRef.current = onBrowserTabId
   onUrlChangeRef.current = onUrlChange
   onTitleChangeRef.current = onTitleChange
+  onFaviconChangeRef.current = onFaviconChange
 
   useEffect(() => {
     setAddress(url ?? '')
@@ -144,13 +147,17 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     if (!browserApi.isAvailable()) return
     return browserApi.onTabChange((event) => {
       if (event.browserTabId !== browserTabIdRef.current) return
+      const nextPageUrl = typeof event.patch.url === 'string' ? event.patch.url : address || url || ''
       if (typeof event.patch.url === 'string') {
         setAddress(event.patch.url)
         onUrlChangeRef.current?.(event.patch.url)
       }
       if (typeof event.patch.title === 'string') onTitleChangeRef.current?.(event.patch.title)
+      if (typeof event.patch.favicon === 'string') {
+        onFaviconChangeRef.current?.({ pageUrl: nextPageUrl, faviconUrl: event.patch.favicon })
+      }
     })
-  }, [])
+  }, [address, url])
 
   useEffect(() => {
     if (!browserApi.isAvailable()) return

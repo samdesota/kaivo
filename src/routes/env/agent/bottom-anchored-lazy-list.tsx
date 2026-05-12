@@ -73,6 +73,7 @@ export function BottomAnchoredLazyList<T>({
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
+    if (hasActiveSelectionIn(el)) return
     el.scrollTop = el.scrollHeight
     recordScrollState(el)
   }, [recordScrollState])
@@ -105,7 +106,7 @@ export function BottomAnchoredLazyList<T>({
       const contentGrew = target.scrollHeight > lastScrollHeight.current
       const scrolledUp = target.scrollTop < lastScrollTop.current
 
-      if (stickToBottom.current && contentGrew && !scrolledUp) {
+      if (stickToBottom.current && contentGrew && !scrolledUp && !hasActiveSelectionIn(target)) {
         scrollToBottom()
       } else {
         stickToBottom.current = atBottom
@@ -127,7 +128,7 @@ export function BottomAnchoredLazyList<T>({
     if (!el || !content || typeof ResizeObserver === 'undefined') return
 
     const resizeObserver = new ResizeObserver(() => {
-      if (stickToBottom.current) scrollToBottom()
+      if (stickToBottom.current && !hasActiveSelectionIn(el)) scrollToBottom()
     })
     resizeObserver.observe(el)
     resizeObserver.observe(content)
@@ -135,8 +136,8 @@ export function BottomAnchoredLazyList<T>({
   }, [scrollToBottom, visibleItems.length])
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-auto">
-      <div ref={contentRef} className="w-full">
+    <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div ref={contentRef} className="min-w-0 w-full">
         {visibleStart > 0 && (
           <div className="flex justify-center px-4 py-3">
             <button
@@ -154,9 +155,20 @@ export function BottomAnchoredLazyList<T>({
         )}
         {visibleItems.map((item, offset) => {
           const index = visibleStart + offset
-          return <div key={itemKey(item, index)}>{renderItem(item, index, index === items.length - 1)}</div>
+          return <div key={itemKey(item, index)} className="min-w-0">{renderItem(item, index, index === items.length - 1)}</div>
         })}
       </div>
     </div>
+  )
+}
+
+function hasActiveSelectionIn(el: HTMLElement): boolean {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed) return false
+  return Boolean(
+    selection.anchorNode &&
+    selection.focusNode &&
+    el.contains(selection.anchorNode) &&
+    el.contains(selection.focusNode)
   )
 }

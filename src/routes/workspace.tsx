@@ -29,9 +29,11 @@ import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
+import { browserTabIconForUrl, faviconOriginForUrl, fetchFaviconDataUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
 import { openCommandPaletteOverlay, openConfirmOverlay, openNewAgentChatOverlay, openTextInputOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
+import { paneTabIconForType } from '../components/tab-icon'
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
@@ -41,7 +43,6 @@ import { emptyFileEditorState, type FileEditorState } from './env/file-editor-st
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
 import { BrowserTabContent } from './env/tabs/browser-tab'
-import { PreviewTabContent } from './env/tabs/preview-tab'
 import type { PaneContent } from './env/shell/tab-state'
 import {
   createWorkspaceEnvClientResolver,
@@ -475,7 +476,7 @@ function WorkspaceEmptyPaneCta({ onOpenPalette }: { onOpenPalette: () => void })
         onClick={onOpenPalette}
         className="group flex items-center gap-3 text-xs text-neutral-600 transition-colors hover:text-neutral-300"
       >
-        <span>Open a shell, file, preview, or browser pane</span>
+        <span>Open a shell, file, or browser pane</span>
         <span className="rounded border border-neutral-800 bg-neutral-900/60 px-1.5 py-0.5 text-[12px] uppercase tracking-wide text-neutral-400 group-hover:bg-neutral-900 group-hover:text-neutral-200">
           ⌘K
         </span>
@@ -1637,6 +1638,19 @@ function WorkspaceTabPane({
   const ctx = useWorkspaceContext()
   const tabsRef = useRef(ctx.uiState.workspaceTabs)
   const [fileEditorStates, setFileEditorStates] = useState<Record<string, FileEditorState>>({})
+  const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
+  const pendingFaviconWritesRef = useRef(new Set<string>())
+  const faviconOrigins = useMemo(() => Array.from(new Set(
+    ctx.uiState.workspaceTabs
+      .filter((tab): tab is Extract<WorkspaceTab, { type: 'browser' }> => tab.type === 'browser')
+      .map((tab) => faviconOriginForUrl(tab.url))
+      .filter((origin): origin is string => Boolean(origin)),
+  )), [ctx.uiState.workspaceTabs])
+  const faviconCache = trpc.favicon.getByOrigins.useQuery(
+    { origins: faviconOrigins },
+    { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
+  )
+  const upsertFavicon = trpc.favicon.upsert.useMutation()
 
   tabsRef.current = ctx.uiState.workspaceTabs
 
@@ -1671,8 +1685,33 @@ function WorkspaceTabPane({
   const tabItems: BorderedTabItem[] = ctx.uiState.workspaceTabs.map((tab) => ({
     id: tab.id,
     label: tab.title,
+    icon: tab.type === 'browser'
+      ? browserTabIconForUrl({
+        url: tab.url,
+        records: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
+        liveDataUrls: liveFaviconDataUrls,
+      })
+      : paneTabIconForType(tab.type),
     title: workspaceTabLabel(tab),
   }))
+
+  async function handleBrowserFaviconChange(input: { pageUrl: string; faviconUrl: string }) {
+    const origin = faviconOriginForUrl(input.pageUrl)
+    if (!origin) return
+    const key = `${origin}:${input.faviconUrl}`
+    if (pendingFaviconWritesRef.current.has(key)) return
+    pendingFaviconWritesRef.current.add(key)
+    try {
+      const data = await fetchFaviconDataUrl(input.faviconUrl)
+      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: data.dataUrl }))
+      await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl, dataUrl: data.dataUrl })
+      void faviconCache.refetch()
+    } catch (error) {
+      console.info('Favicon cache update failed', error)
+    } finally {
+      pendingFaviconWritesRef.current.delete(key)
+    }
+  }
   const canUseEnvTabs = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
   return (
     <section
@@ -1735,6 +1774,7 @@ function WorkspaceTabPane({
             onTitleChange={(title) =>
               dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
             }
+            onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
           />
         ) : (
           <div className="flex h-full items-center justify-center">Workspace tabs</div>
@@ -1843,7 +1883,6 @@ function WorkspaceShellTabTitleSync({
 function workspaceTabLabel(tab: WorkspaceTab): string {
   if (tab.type === 'shell') return `shell ${tab.shellId}`
   if (tab.type === 'file') return tab.path
-  if (tab.type === 'preview') return `preview :${tab.port}`
   return tab.url
 }
 
@@ -1855,6 +1894,7 @@ function WorkspaceTabContent({
   onBrowserTabId,
   onUrlChange,
   onTitleChange,
+  onFaviconChange,
 }: {
   tab: WorkspaceTab
   onClose: () => void
@@ -1863,6 +1903,7 @@ function WorkspaceTabContent({
   onBrowserTabId: (browserTabId: string) => void
   onUrlChange: (url: string) => void
   onTitleChange: (title: string) => void
+  onFaviconChange: (input: { pageUrl: string; faviconUrl: string }) => void
 }) {
   const ctx = useWorkspaceContext()
   if (tab.type === 'shell') {
@@ -1888,27 +1929,19 @@ function WorkspaceTabContent({
       </div>
     )
   }
-  if (tab.type === 'browser') {
-    return (
-      <div className="h-full min-h-0 w-full">
-        <BrowserTabContent
-          paneId={tab.id}
-          url={tab.url}
-          browserTabId={tab.browserTabId}
-          active
-          onBrowserTabId={onBrowserTabId}
-          onUrlChange={onUrlChange}
-          onTitleChange={onTitleChange}
-          closeOnUnmount={false}
-        />
-      </div>
-    )
-  }
   return (
     <div className="h-full min-h-0 w-full">
-      <WorkspaceEnvTargetProvider>
-        <PreviewTabContent port={tab.port} />
-      </WorkspaceEnvTargetProvider>
+      <BrowserTabContent
+        paneId={tab.id}
+        url={tab.url}
+        browserTabId={tab.browserTabId}
+        active
+        onBrowserTabId={onBrowserTabId}
+          onUrlChange={onUrlChange}
+          onTitleChange={onTitleChange}
+          onFaviconChange={onFaviconChange}
+          closeOnUnmount={false}
+        />
     </div>
   )
 }
