@@ -52,6 +52,8 @@ export function AgentSessionView({
   footerTrailing,
   onOpenNewChat,
   headerLeading,
+  tabsFocused = false,
+  closeActiveTabSignal = 0,
 }: {
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   onOpenPaneRefreshHint?: () => void
@@ -69,6 +71,8 @@ export function AgentSessionView({
   footerTrailing?: ReactNode
   onOpenNewChat?: () => Promise<string | null>
   headerLeading?: ReactNode
+  tabsFocused?: boolean
+  closeActiveTabSignal?: number
 }) {
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
   const sessionListInput = workspaceId ? { workspaceId } : undefined
@@ -172,6 +176,8 @@ export function AgentSessionView({
           workspaceId={workspaceId}
           sessionId={sessionId}
           onSelect={(id) => setSessionId(id)}
+          focused={tabsFocused}
+          closeActiveSignal={closeActiveTabSignal}
         />
         {trailing && <div className="flex items-center px-2">{trailing}</div>}
       </div>

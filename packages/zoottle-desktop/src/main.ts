@@ -81,6 +81,7 @@ function installAppShortcutMenu(): void {
   const appShortcuts: Array<{ label: string; accelerator: string; input: AppShortcutInput }> = [
     { label: 'Command Palette', accelerator: 'CommandOrControl+K', input: shortcutInput('k', 'KeyK') },
     { label: 'New Browser Tab', accelerator: 'CommandOrControl+T', input: shortcutInput('t', 'KeyT') },
+    { label: 'Close Focused Tab', accelerator: 'CommandOrControl+W', input: shortcutInput('w', 'KeyW') },
     { label: 'Toggle Sidebar', accelerator: 'CommandOrControl+B', input: shortcutInput('b', 'KeyB') },
     { label: 'Toggle Agent Pane', accelerator: 'CommandOrControl+G', input: shortcutInput('g', 'KeyG') },
   ]
@@ -152,7 +153,7 @@ function isAppShortcut(input: Electron.Input): boolean {
   if (!input.meta && !input.control) return false
   if (input.alt) return false
   const key = input.key.toLowerCase()
-  return key === 'k' || key === 't' || key === 'b' || key === 'g'
+  return key === 'k' || key === 't' || key === 'w' || key === 'b' || key === 'g'
 }
 
 function findChromeWebContentsForShortcutSender(contents: WebContents): WebContents | null {

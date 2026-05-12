@@ -327,6 +327,8 @@ function WorkspaceShell({
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
   const [newChatMode, setNewChatMode] = useState<null | 'existing' | 'new'>(null)
+  const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
+  const [closeAgentTabSignal, setCloseAgentTabSignal] = useState(0)
   const agentCollapsed = ctx.uiState.agentCollapsed
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
@@ -340,6 +342,7 @@ function WorkspaceShell({
   const openPane = useCallback(
     (content: PaneContent, options?: { title?: string; activate?: boolean }) => {
       openWorkspacePane(content, options)
+      setFocusedTabGroup('workspace')
       if (agentSessionCount === 0) setAgentCollapsed(true)
     },
     [agentSessionCount, openWorkspacePane, setAgentCollapsed],
@@ -413,11 +416,15 @@ function WorkspaceShell({
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
         e.preventDefault()
         setAgentCollapsed(!agentCollapsed)
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w') {
+        e.preventDefault()
+        if (focusedTabGroup === 'agent') setCloseAgentTabSignal((signal) => signal + 1)
+        else closeActiveTab()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [agentCollapsed, openCommandPalette, setAgentCollapsed])
+  }, [agentCollapsed, closeActiveTab, focusedTabGroup, openCommandPalette, setAgentCollapsed])
 
   return (
     <>
@@ -446,11 +453,18 @@ function WorkspaceShell({
             onToggleCollapsed={() => setAgentCollapsed(!agentCollapsed)}
             onSessionListChange={setAgentSessionCount}
             dispatchWorkspaceState={dispatchWorkspaceState}
+            focused={focusedTabGroup === 'agent'}
+            closeActiveTabSignal={closeAgentTabSignal}
+            onFocusTabs={() => setFocusedTabGroup('agent')}
           />
         }
         right={
           ctx.uiState.workspaceTabs.length > 0 ? (
-            <WorkspaceTabPane dispatchWorkspaceState={dispatchWorkspaceState} />
+            <WorkspaceTabPane
+              dispatchWorkspaceState={dispatchWorkspaceState}
+              focused={focusedTabGroup === 'workspace'}
+              onFocusTabs={() => setFocusedTabGroup('workspace')}
+            />
           ) : (
             <WorkspaceEmptyPaneCta onOpenPalette={() => void openCommandPalette()} />
           )
@@ -1458,11 +1472,17 @@ function WorkspaceAgentPane({
   onToggleCollapsed,
   onSessionListChange,
   dispatchWorkspaceState,
+  focused,
+  closeActiveTabSignal,
+  onFocusTabs,
 }: {
   collapsed: boolean
   onToggleCollapsed: () => void
   onSessionListChange: (count: number) => void
   dispatchWorkspaceState: WorkspaceUiDispatch
+  focused: boolean
+  closeActiveTabSignal: number
+  onFocusTabs: () => void
 }) {
   const ctx = useWorkspaceContext()
   const queryClient = useQueryClient()
@@ -1492,14 +1512,14 @@ function WorkspaceAgentPane({
   )
   if (!ctx.localEnvTarget?.available) {
     return (
-      <AgentPaneFrame>
+      <AgentPaneFrame onFocusTabs={onFocusTabs}>
         <AgentPlaceholder message={ctx.localEnvTarget?.unavailableReason ?? 'Local env unavailable'} trailing={collapseButton} />
       </AgentPaneFrame>
     )
   }
   if (!ctx.localEnvTarget.token) {
     return (
-      <AgentPaneFrame>
+      <AgentPaneFrame onFocusTabs={onFocusTabs}>
         <AgentPlaceholder message="Local env token unavailable" trailing={collapseButton} />
       </AgentPaneFrame>
     )
@@ -1507,7 +1527,7 @@ function WorkspaceAgentPane({
   const localEnvTarget = ctx.localEnvTarget
   const localEnvToken = localEnvTarget.token!
   return (
-    <AgentPaneFrame>
+    <AgentPaneFrame onFocusTabs={onFocusTabs}>
       <WorkspaceAgentEnvProvider>
         <AgentSessionView
           workspaceId={ctx.workspace.id}
@@ -1518,6 +1538,8 @@ function WorkspaceAgentPane({
           onOpenPane={openPane}
           onOpenPaneRefreshHint={refreshWorkspacePanes}
           headerTrailing={agentHeaderTrailing}
+          tabsFocused={focused}
+          closeActiveTabSignal={closeActiveTabSignal}
           onOpenNewChat={() =>
             openNewAgentChatOverlay({
               workspaceId: ctx.workspace.id,
@@ -1531,9 +1553,14 @@ function WorkspaceAgentPane({
   )
 }
 
-function AgentPaneFrame({ children }: { children: ReactNode }) {
+function AgentPaneFrame({ children, onFocusTabs }: { children: ReactNode; onFocusTabs: () => void }) {
   return (
-    <section className="relative flex h-full min-h-0 w-full flex-col bg-neutral-975" aria-label="Agent Chats">
+    <section
+      className="relative flex h-full min-h-0 w-full flex-col bg-neutral-975"
+      aria-label="Agent Chats"
+      onPointerDownCapture={onFocusTabs}
+      onFocusCapture={onFocusTabs}
+    >
       {children}
     </section>
   )
@@ -1621,8 +1648,12 @@ function AgentPlaceholder({ message = 'Start a new agent chat', trailing }: { me
 
 function WorkspaceTabPane({
   dispatchWorkspaceState,
+  focused,
+  onFocusTabs,
 }: {
   dispatchWorkspaceState: WorkspaceUiDispatch
+  focused: boolean
+  onFocusTabs: () => void
 }) {
   const ctx = useWorkspaceContext()
   const tabsRef = useRef(ctx.uiState.workspaceTabs)
@@ -1703,7 +1734,12 @@ function WorkspaceTabPane({
   }
   const canUseEnvTabs = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
   return (
-    <section className="flex h-full min-h-0 w-full flex-col bg-neutral-975" aria-label="Workspace Tabs">
+    <section
+      className="flex h-full min-h-0 w-full flex-col bg-neutral-975"
+      aria-label="Workspace Tabs"
+      onPointerDownCapture={onFocusTabs}
+      onFocusCapture={onFocusTabs}
+    >
       <WorkspaceEnvTargetProvider>
         <WorkspaceShellTabTitleSync tabs={ctx.uiState.workspaceTabs} dispatchWorkspaceState={dispatchWorkspaceState} />
       </WorkspaceEnvTargetProvider>
@@ -1716,6 +1752,7 @@ function WorkspaceTabPane({
               activeId={ctx.uiState.activeWorkspaceTabId}
               workspaceId={ctx.workspace.id}
               dispatchWorkspaceState={dispatchWorkspaceState}
+              focused={focused}
             />
           </WorkspaceEnvTargetProvider>
         ) : (
@@ -1727,6 +1764,7 @@ function WorkspaceTabPane({
               const tab = ctx.uiState.workspaceTabs.find((candidate) => candidate.id === tabId)
               if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
             }}
+            focused={focused}
           />
         )}
       </div>
@@ -1772,12 +1810,14 @@ function WorkspaceShellTabStrip({
   activeId,
   workspaceId,
   dispatchWorkspaceState,
+  focused,
 }: {
   items: BorderedTabItem[]
   tabs: WorkspaceTab[]
   activeId: string | null
   workspaceId: string
   dispatchWorkspaceState: WorkspaceUiDispatch
+  focused: boolean
 }) {
   const queryClient = useQueryClient()
   const disposeShell = envTrpc.shell.dispose.useMutation()
@@ -1800,6 +1840,7 @@ function WorkspaceShellTabStrip({
           event.preventDefault()
           setContextMenu({ tabId, x: event.clientX, y: event.clientY })
         }}
+        focused={focused}
       />
       {contextMenu && contextTab?.type === 'shell' && (
         <>
