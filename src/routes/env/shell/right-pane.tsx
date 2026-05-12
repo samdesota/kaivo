@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { envTrpc } from '../../../env-trpc'
 import { BorderedTabStrip, type BorderedTabItem } from '../../../components/bordered-tab-strip'
+import { paneTabIconForType } from '../../../components/tab-icon'
 import { browserApi } from '../../../lib/browser-api'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { FileTabContent } from '../tabs/file-tab'
@@ -81,6 +82,7 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
   const tabItems: BorderedTabItem[] = state.tabs.map((t) => ({
     id: t.id,
     label: t.title || defaultTitle(t.content),
+    icon: paneTabIconForType(t.content.type),
     title: tabTitleDetail(t.content),
   }))
 

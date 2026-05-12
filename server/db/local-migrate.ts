@@ -114,6 +114,16 @@ CREATE INDEX IF NOT EXISTS workspace_resources_workspace_idx
 CREATE INDEX IF NOT EXISTS workspace_resources_resource_idx
   ON workspace_resources(type, resource_key);
 
+CREATE TABLE IF NOT EXISTS favicon_cache (
+  page_origin TEXT PRIMARY KEY,
+  icon_url TEXT NOT NULL,
+  data_url TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+  last_seen_at INTEGER NOT NULL DEFAULT ${nowMs}
+);
+
 CREATE TABLE IF NOT EXISTS agent_notifications (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -509,6 +519,20 @@ function migrateWorkspaceResources(sqlite: Database.Database) {
   `)
 }
 
+function migrateFaviconCache(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS favicon_cache (
+      page_origin TEXT PRIMARY KEY,
+      icon_url TEXT NOT NULL,
+      data_url TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+      last_seen_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+  `)
+}
+
 function migrateWorkspaceFolders(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS workspace_folders (
@@ -665,6 +689,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(workspaceTabTitleSourceMigrationName)
     }
 
+    const faviconCacheMigrationName = '0010_favicon_cache'
+    const faviconCacheMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(faviconCacheMigrationName)
+    if (!faviconCacheMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateFaviconCache(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(faviconCacheMigrationName)
+      })()
+      applied.push(faviconCacheMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -682,6 +718,7 @@ export const localAppTables = [
   'workspace_tabs',
   'workspace_agent_tabs',
   'workspace_resources',
+  'favicon_cache',
   'agent_notifications',
   'sandboxes',
   'github_install',

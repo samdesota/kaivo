@@ -18,6 +18,7 @@ import { envRouter } from './routers/env.js'
 import { logsRouter } from './routers/logs.js'
 import { workspaceRouter } from './routers/workspace.js'
 import { syncRouter } from './routers/sync.js'
+import { faviconRouter } from './routers/favicon.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -39,6 +40,7 @@ export const appRouter = router({
   logs: logsRouter,
   workspace: workspaceRouter,
   sync: syncRouter,
+  favicon: faviconRouter,
 })
 
 export type AppRouter = typeof appRouter

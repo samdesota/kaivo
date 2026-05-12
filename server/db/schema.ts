@@ -67,6 +67,16 @@ export type WorkspaceResourceRow = {
   updatedAt: Date
 }
 
+export type FaviconCacheRow = {
+  pageOrigin: string
+  iconUrl: string
+  dataUrl: string
+  mediaType: string
+  sizeBytes: number
+  updatedAt: Date
+  lastSeenAt: Date
+}
+
 export type AgentNotificationRow = {
   id: string
   workspaceId: string
@@ -197,6 +207,16 @@ export const workspaceResources = sqliteTable('workspace_resources', {
   data: jsonText<Record<string, unknown>>('data').notNull(),
   createdAt: timestamp('created_at').notNull().default(nowMs),
   updatedAt: timestamp('updated_at').notNull().default(nowMs),
+})
+
+export const faviconCache = sqliteTable('favicon_cache', {
+  pageOrigin: text('page_origin').primaryKey(),
+  iconUrl: text('icon_url').notNull(),
+  dataUrl: text('data_url').notNull(),
+  mediaType: text('media_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  updatedAt: timestamp('updated_at').notNull().default(nowMs),
+  lastSeenAt: timestamp('last_seen_at').notNull().default(nowMs),
 })
 
 export const agentNotifications = sqliteTable('agent_notifications', {

@@ -13,7 +13,7 @@ type BridgeRequest = {
   params?: Record<string, unknown>
 }
 
-type TabRecord = { id: string; url?: string; title?: string; active?: boolean; presentation?: 'embedded' | 'popup'; openerTabId?: string }
+type TabRecord = { id: string; url?: string; title?: string; favicon?: string; active?: boolean; presentation?: 'embedded' | 'popup'; openerTabId?: string }
 
 type BrowserConnection = {
   cdpId: string
@@ -27,6 +27,7 @@ type BrowserTabSummary = {
   browserTabId: string
   url: string
   title: string
+  favicon?: string
   active: boolean
   connected: boolean
   connectedByCurrentAgent: boolean
@@ -39,6 +40,7 @@ type BrowserChildTabSummary = {
   browserTabId: string
   url: string
   title: string
+  favicon?: string
   active: boolean
   connected: boolean
   connectedByCurrentAgent: boolean
@@ -193,6 +195,7 @@ async function listTabs(
     browserTabId: tab.id,
     url: tab.url ?? 'about:blank',
     title: tab.title ?? '',
+    favicon: tab.favicon,
     active: Boolean(tab.active),
     connected: registry.isConnected(tab.id),
     connectedByCurrentAgent: registry.isConnectedBy(scope, tab.id),
@@ -645,6 +648,7 @@ function childTabsFor(
       browserTabId: tab.id,
       url: tab.url ?? 'about:blank',
       title: tab.title ?? '',
+      favicon: tab.favicon,
       active: Boolean(tab.active),
       connected: registry.isConnected(tab.id),
       connectedByCurrentAgent: registry.isConnectedBy(scope, tab.id),

@@ -211,6 +211,41 @@ describe('BrowserPane', () => {
     expect(api.reload).not.toHaveBeenCalled()
   })
 
+  it('reports favicon changes with the current page URL', async () => {
+    let onChange: ((event: { browserTabId: string; patch: Record<string, unknown> }) => void) | undefined
+    api.onTabChange.mockImplementation((handler) => {
+      onChange = handler
+      return () => undefined
+    })
+    const onFaviconChange = vi.fn()
+    render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        onFaviconChange={onFaviconChange}
+      />,
+    )
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalledWith({
+      paneId: 'pane-1',
+      browserTabId: 'native-tab-1',
+    }))
+
+    act(() => {
+      onChange?.({
+        browserTabId: 'native-tab-1',
+        patch: { url: 'https://example.org/docs', favicon: 'https://example.org/favicon.ico' },
+      })
+    })
+
+    expect(onFaviconChange).toHaveBeenCalledWith({
+      pageUrl: 'https://example.org/docs',
+      faviconUrl: 'https://example.org/favicon.ico',
+    })
+  })
+
   it('replaces a persisted native tab id when the desktop app restarted without that tab', async () => {
     const onBrowserTabId = vi.fn()
     api.attachTab.mockRejectedValueOnce(new Error('tab not found'))
