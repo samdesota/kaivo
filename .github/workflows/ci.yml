@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   checks:
@@ -28,14 +27,6 @@ jobs:
             package-lock.json
             packages/opencode-plugin/package-lock.json
             packages/env-server/package-lock.json
-            packages/zoottle-desktop/package-lock.json
-
-      - name: Configure GitHub Packages
-        run: |
-          echo "@samdesota:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install root dependencies
         run: npm ci
@@ -44,9 +35,13 @@ jobs:
         run: |
           npm ci --prefix packages/opencode-plugin
           npm ci --prefix packages/env-server
-          npm ci --prefix packages/zoottle-desktop
 
-      - run: npm run typecheck
+      - name: Typecheck
+        run: |
+          npx tsc --noEmit -p tsconfig.server.json
+          npx tsc --noEmit -p tsconfig.client.json
+          npm run typecheck --prefix packages/opencode-plugin
+          npm run typecheck --prefix packages/env-server
       - run: npm run lint
       - run: npm test
 
@@ -64,14 +59,6 @@ jobs:
             package-lock.json
             packages/opencode-plugin/package-lock.json
             packages/env-server/package-lock.json
-            packages/zoottle-desktop/package-lock.json
-
-      - name: Configure GitHub Packages
-        run: |
-          echo "@samdesota:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install root dependencies
         run: npm ci
@@ -80,7 +67,5 @@ jobs:
         run: |
           npm ci --prefix packages/opencode-plugin
           npm ci --prefix packages/env-server
-          npm ci --prefix packages/zoottle-desktop
 
       - run: npm run build
-      - run: npm run build:desktop
