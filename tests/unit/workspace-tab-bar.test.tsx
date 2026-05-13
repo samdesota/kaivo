@@ -64,14 +64,11 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('WorkspaceTabBar', () => {
-  it('clicking + creates a workspace and focuses the inline title input', async () => {
+  it('does not render a create workspace plus button', async () => {
     renderBar()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Create new workspace' }))
-
-    const input = await screen.findByLabelText('Workspace name')
-    expect(input).toBe(document.activeElement)
-    expect((input as HTMLInputElement).value).toBe('Untitled workspace')
+    expect(await screen.findByText('Old workspace')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Create new workspace' })).toBeNull()
   })
 
   it('Enter saves rename and Escape cancels without deleting workspace tab', async () => {

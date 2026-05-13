@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronLeft, ChevronRight, FolderPlus, Plus, Settings, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Settings, X } from 'lucide-react'
 import {
   closestCenter,
   DndContext,
@@ -30,7 +30,7 @@ import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
 import { browserTabIconForUrl, faviconOriginForUrl, fetchFaviconDataUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
-import { openConfirmOverlay, openNewAgentChatOverlay, openTextInputOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
+import { openConfirmOverlay, openNewAgentChatOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
 import { paneTabIconForType } from '../components/tab-icon'
@@ -413,7 +413,7 @@ function WorkspaceShell({
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault()
         setAgentCollapsed(!agentCollapsed)
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w') {
@@ -527,6 +527,9 @@ export function WorkspaceSidebar({
       queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
     },
   })
+  const renameFolder = trpc.workspace.renameFolder.useMutation({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
+  })
   const archive = trpc.workspace.archive.useMutation({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') })
@@ -550,9 +553,12 @@ export function WorkspaceSidebar({
   const [dragPlacement, setDragPlacement] = useState<DropPlacement>('after')
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
   const [localTree, setLocalTree] = useState<WorkspaceSidebarNode[] | null>(null)
+  const [selectedDndIds, setSelectedDndIds] = useState<Set<string>>(() => new Set())
   const [sidebarWidth, setSidebarWidth] = useState(() => readWorkspaceSidebarWidth())
   const [chatReadVersion, setChatReadVersion] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const selectedDndIdsRef = useRef<Set<string>>(new Set())
+  const lastSelectedDndIdRef = useRef<string | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
   const dragPointerOffsetRef = useRef<{ x: number; y: number } | null>(null)
   const lastProjectionRef = useRef<SidebarDropProjection | null>(null)
@@ -575,7 +581,11 @@ export function WorkspaceSidebar({
     if (!edit.editingId) return
     const nextName = nextRenameValue(edit)
     if (nextName) {
-      await rename.mutateAsync({ id: edit.editingId, name: nextName })
+      if (edit.editingKind === 'folder') {
+        await renameFolder.mutateAsync({ id: edit.editingId, name: nextName })
+      } else {
+        await rename.mutateAsync({ id: edit.editingId, name: nextName })
+      }
     }
     dispatchEdit({ type: 'saved' })
   }
@@ -608,6 +618,7 @@ export function WorkspaceSidebar({
   const dndNodes = displayNodes as unknown as SidebarTreeNode[]
   const flatRows = flattenSidebarTree(dndNodes)
   const sortableIds = flatRows.map((row) => sidebarDndId(row.kind, row.id))
+  const selectableIds = useMemo(() => new Set(sortableIds), [sortableIds])
   const sortingStrategy = dropProjection?.placement === 'inside' ? noSortingDisplacementStrategy : verticalListSortingStrategy
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -615,16 +626,105 @@ export function WorkspaceSidebar({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  async function openFolderCreate(parentId: string | null) {
-    const name = await openTextInputOverlay({
-      title: 'New workspace folder',
-      message: 'Create a folder for organizing project workspaces.',
-      label: 'Folder name',
-      confirmLabel: 'Create folder',
-    })
-    if (!name) return
-    await createFolder.mutateAsync({ name, parentId })
+  useEffect(() => {
+    const current = selectedDndIdsRef.current
+    const next = new Set([...current].filter((id) => selectableIds.has(id)))
+    if (next.size === current.size && [...next].every((id) => current.has(id))) return
+    selectedDndIdsRef.current = next
+    setSelectedDndIds(next)
+  }, [selectableIds])
+
+  function setSidebarSelection(next: Set<string>) {
+    selectedDndIdsRef.current = next
+    setSelectedDndIds(next)
   }
+
+  function updateSelection(event: ReactMouseEvent, dndId: string) {
+    const range = event.shiftKey && lastSelectedDndIdRef.current
+    const additive = event.metaKey || event.ctrlKey
+    if (event.shiftKey) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (range) {
+      const start = sortableIds.indexOf(lastSelectedDndIdRef.current!)
+      const end = sortableIds.indexOf(dndId)
+      if (start >= 0 && end >= 0) {
+        const [from, to] = start < end ? [start, end] : [end, start]
+        const next = additive ? new Set(selectedDndIdsRef.current) : new Set<string>()
+        for (const id of sortableIds.slice(from, to + 1)) next.add(id)
+        setSidebarSelection(next)
+        return true
+      }
+    }
+    if (event.shiftKey) {
+      setSidebarSelection(new Set([dndId]))
+      lastSelectedDndIdRef.current = dndId
+      return true
+    }
+    if (additive) {
+      event.preventDefault()
+      event.stopPropagation()
+      const next = new Set(selectedDndIdsRef.current)
+      if (next.has(dndId)) next.delete(dndId)
+      else next.add(dndId)
+      setSidebarSelection(next)
+      lastSelectedDndIdRef.current = dndId
+      return true
+    }
+    setSidebarSelection(new Set())
+    lastSelectedDndIdRef.current = dndId
+    return false
+  }
+
+  async function createFolderFromSelection() {
+    if (createFolder.isPending || edit.editingId) return
+    const effectiveSelection = new Set(selectedDndIdsRef.current)
+    effectiveSelection.add(sidebarDndId('workspace', ctx.workspace.id))
+    const selectedRows = flatRows.filter((row) => effectiveSelection.has(sidebarDndId(row.kind, row.id)))
+    const movableRows = selectedRows.filter((row) => !selectedRows.some((candidate) => (
+      candidate.kind === 'folder' && candidate.id !== row.id && row.ancestorFolderIds.includes(candidate.id)
+    )))
+    const commonParent = movableRows.length > 0 && movableRows.every((row) => row.parentFolderId === movableRows[0]?.parentFolderId)
+      ? movableRows[0]?.parentFolderId ?? null
+      : null
+    const firstSelectedDndId = movableRows[0] ? sidebarDndId(movableRows[0].kind, movableRows[0].id) : null
+    const folder = await createFolder.mutateAsync({ name: 'New folder', parentId: commonParent })
+    const folderDndId = sidebarDndId('folder', folder.id)
+    let serverTree: WorkspaceSidebarNode[] | null = null
+    if (firstSelectedDndId) {
+      serverTree = await moveSidebarNode.mutateAsync({
+        nodeType: 'folder',
+        nodeId: folder.id,
+        parentFolderId: commonParent,
+        beforeNodeId: firstSelectedDndId,
+      }) as WorkspaceSidebarNode[]
+    }
+    for (const row of movableRows) {
+      serverTree = await moveSidebarNode.mutateAsync({
+        nodeType: row.kind,
+        nodeId: row.id,
+        parentFolderId: folder.id,
+        beforeNodeId: null,
+      }) as WorkspaceSidebarNode[]
+    }
+    if (serverTree) queryClient.setQueryData(trpcQueryKey('workspace.listTree'), serverTree)
+    else await queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
+    setSidebarSelection(new Set([folderDndId]))
+    lastSelectedDndIdRef.current = folderDndId
+    dispatchEdit({ type: 'begin', workspaceId: folder.id, name: folder.name, kind: 'folder' })
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key.toLowerCase() !== 'g' || (!event.metaKey && !event.ctrlKey)) return
+      if (isEditableEventTarget(event.target)) return
+      event.preventDefault()
+      void createFolderFromSelection()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
 
   async function deleteFolder(folder: WorkspaceFolderSummary) {
     const node = findSidebarFolderNode(displayNodes, folder.id)
@@ -791,15 +891,6 @@ export function WorkspaceSidebar({
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
-          <button
-            onClick={() => void openFolderCreate(null)}
-            disabled={createFolder.isPending}
-            className="rounded px-0.5 py-0.5 text-neutral-600 hover:bg-neutral-900 hover:text-neutral-200 disabled:opacity-50"
-            aria-label="Create workspace folder"
-            title="New folder"
-          >
-            <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -859,12 +950,15 @@ export function WorkspaceSidebar({
       if (!folder) return null
       const dndId = sidebarDndId('folder', folder.id)
       const folderHasVisibleChildren = !folder.collapsed && flatRows.some((candidate) => candidate.ancestorFolderIds.includes(folder.id))
+      const editing = edit.editingId === folder.id && edit.editingKind === 'folder'
+      const selected = selectedDndIds.has(dndId)
       return (
         <SortableSidebarRow
           key={dndId}
           id={dndId}
           depth={row.depth}
           active={activeDragId === dndId}
+          disabled={Boolean(edit.editingId)}
           guideDepths={row.ancestorFolderIds.map((_, index) => index)}
         >
           <div className="relative mb-0.5">
@@ -884,10 +978,39 @@ export function WorkspaceSidebar({
               </button>
               <div className={
                 'flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 group-hover:bg-highlight group-hover:text-neutral-200 ' +
+                (selected ? 'bg-highlight text-neutral-100 ring-1 ring-neutral-700 ' : '') +
                 (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-highlight text-neutral-100 ring-1 ring-neutral-600 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
               }
-              onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}>
-                <span className="min-w-0 flex-1 truncate px-0.5 font-medium" title={folder.name}>{folder.name}</span>
+              onClick={(e) => {
+                if (updateSelection(e, dndId)) return
+                if (!editing) setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })
+              }}>
+                {editing ? (
+                  <input
+                    ref={inputRef}
+                    value={edit.draft}
+                    onChange={(e) => dispatchEdit({ type: 'change', draft: e.target.value })}
+                    onBlur={() => void saveRename()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void saveRename()
+                      if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
+                    }}
+                    className="min-w-0 flex-1 bg-transparent px-0.5 py-0.5 text-xs font-medium text-neutral-100 outline-none"
+                    aria-label="Folder name"
+                  />
+                ) : (
+                  <span
+                    className="min-w-0 flex-1 truncate px-0.5 font-medium"
+                    title={folder.name}
+                    onDoubleClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      dispatchEdit({ type: 'begin', workspaceId: folder.id, name: folder.name, kind: 'folder' })
+                    }}
+                  >
+                    {folder.name}
+                  </span>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -898,18 +1021,6 @@ export function WorkspaceSidebar({
                   title="New workspace from chat"
                 >
                   <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void openFolderCreate(folder.id)
-                  }}
-                  disabled={createFolder.isPending}
-                  className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
-                  aria-label={`Create folder in ${folder.name}`}
-                  title="New folder"
-                >
-                  <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
                 <button
                   onClick={(e) => {
@@ -932,8 +1043,9 @@ export function WorkspaceSidebar({
     const workspace = findSidebarWorkspace(displayNodes, row.id)
     if (!workspace) return null
     const dndId = sidebarDndId('workspace', workspace.id)
-    const editing = edit.editingId === workspace.id
+    const editing = edit.editingId === workspace.id && edit.editingKind === 'workspace'
     const active = workspace.id === ctx.workspace.id
+    const selected = selectedDndIds.has(dndId)
     const showChatRollup = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
     return (
       <SortableSidebarRow
@@ -941,6 +1053,7 @@ export function WorkspaceSidebar({
         id={dndId}
         depth={row.depth}
         active={activeDragId === dndId}
+        disabled={Boolean(edit.editingId)}
         guideDepths={row.ancestorFolderIds.map((_, index) => index)}
       >
         <div className="relative mb-0.5">
@@ -948,7 +1061,8 @@ export function WorkspaceSidebar({
             <span className="h-4 w-1 shrink-0" aria-hidden="true" />
             <div className={
               'relative flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 transition-colors group-hover:bg-highlight group-hover:text-neutral-200 ' +
-              (active ? 'bg-highlight text-neutral-100' : 'text-neutral-400')
+              (active || selected ? 'bg-highlight text-neutral-100 ' : 'text-neutral-400') +
+              (selected ? 'ring-1 ring-neutral-700 ' : '')
             }>
               {editing ? (
                 <input
@@ -960,7 +1074,7 @@ export function WorkspaceSidebar({
                     if (e.key === 'Enter') void saveRename()
                     if (e.key === 'Escape') dispatchEdit({ type: 'cancel' })
                   }}
-                  className="min-w-0 flex-1 rounded border border-neutral-600 bg-input px-2 py-1 text-xs text-neutral-100 outline-none"
+                  className="min-w-0 flex-1 bg-transparent px-0.5 py-0.5 text-xs font-medium text-neutral-100 outline-none"
                   aria-label="Workspace name"
                 />
               ) : (
@@ -968,6 +1082,9 @@ export function WorkspaceSidebar({
                   to="/w/$workspaceId"
                   params={{ workspaceId: workspace.id }}
                   search={{ chat: undefined, tab: undefined }}
+                  onClick={(e) => {
+                    updateSelection(e, dndId)
+                  }}
                   onDoubleClick={(e) => {
                     e.preventDefault()
                     dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
@@ -991,14 +1108,6 @@ export function WorkspaceSidebar({
                   </WorkspaceAgentEnvProvider>
                 </span>
               )}
-              <button
-                onClick={() => setNewChatContext({ mode: 'existing', workspace })}
-                className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
-                aria-label={`Create chat in ${workspace.name}`}
-                title="New chat in workspace"
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
               <button
                 onClick={(e) => {
                   e.preventDefault()
@@ -1218,18 +1327,21 @@ const noSortingDisplacementStrategy: SortingStrategy = () => null
 function SortableSidebarRow({
   id,
   active,
+  disabled,
   depth,
   guideDepths = [],
   children,
 }: {
   id: string
   active: boolean
+  disabled?: boolean
   depth: number
   guideDepths?: number[]
   children: ReactNode
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
+    disabled,
     animateLayoutChanges: sidebarAnimateLayoutChanges,
     transition: {
       duration: 240,
@@ -1239,8 +1351,8 @@ function SortableSidebarRow({
   return (
     <div
       ref={setNodeRef}
-      {...attributes}
-      {...listeners}
+      {...(disabled ? {} : attributes)}
+      {...(disabled ? {} : listeners)}
       data-sidebar-dnd-id={id}
       className={
         'relative will-change-transform ' +
@@ -1248,7 +1360,7 @@ function SortableSidebarRow({
       }
       style={{
         paddingLeft: depth * 8,
-        cursor: active ? 'grabbing' : 'grab',
+        cursor: disabled ? undefined : active ? 'grabbing' : 'grab',
         transform: DndCss.Transform.toString(transform),
         transition,
       }}
@@ -1424,6 +1536,12 @@ function projectionKey(projection: SidebarDropProjection | null): string | null 
   ].join('|')
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable
+}
+
 function clampSidebarWidth(width: number): number {
   return Math.min(WORKSPACE_SIDEBAR_MAX_WIDTH, Math.max(WORKSPACE_SIDEBAR_MIN_WIDTH, Math.round(width)))
 }
@@ -1499,7 +1617,7 @@ function WorkspaceAgentPane({
     <button
       onClick={onToggleCollapsed}
       className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-neutral-800 bg-neutral-950/90 text-neutral-500 shadow hover:bg-neutral-900 hover:text-neutral-300"
-      title="Collapse agent chat (⌘G)"
+      title="Collapse agent chat (⌘I)"
     >
       <ChevronLeft className="h-3 w-3" aria-hidden="true" />
     </button>
@@ -1570,7 +1688,7 @@ function AgentCollapsedRail({ onExpand }: { onExpand: () => void }) {
   return (
     <button
       onClick={onExpand}
-      title="Expand agent chat (⌘G)"
+      title="Expand agent chat (⌘I)"
       className="flex h-full w-7 shrink-0 flex-col items-center justify-start gap-2 border-r border-neutral-800 bg-neutral-975 py-3 text-[10px] uppercase tracking-wider text-neutral-500 hover:bg-neutral-950 hover:text-neutral-300"
     >
       <span style={{ writingMode: 'vertical-rl' }}>Agent chat</span>
