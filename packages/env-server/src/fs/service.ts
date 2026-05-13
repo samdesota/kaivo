@@ -8,7 +8,7 @@ import { logger } from '../logger.js'
 
 export class FsError extends Error {
   constructor(
-    public code: 'not_found' | 'path_traversal' | 'not_readable' | 'unsupported',
+    public code: 'not_found' | 'path_traversal' | 'not_readable' | 'unsupported' | 'already_exists',
     message: string,
   ) {
     super(message)
@@ -204,6 +204,27 @@ export async function writeFile(
   const abs = opts.absolute ? requireAbsolute(filePath) : resolveWorkspacePath(filePath)
   await fs.mkdir(path.dirname(abs), { recursive: true })
   await fs.writeFile(abs, content, 'utf8')
+}
+
+export async function createDirectory(parentPath: string, name: string): Promise<BrowseEntry> {
+  const trimmed = name.trim()
+  if (!trimmed || trimmed === '.' || trimmed === '..' || trimmed.includes('/') || trimmed.includes('\\')) {
+    throw new FsError('unsupported', 'invalid directory name')
+  }
+  const parent = requireAbsolute(parentPath)
+  const target = path.join(parent, trimmed)
+  try {
+    await fs.mkdir(target)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new FsError('already_exists', 'directory already exists')
+    }
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new FsError('not_found', 'parent directory not found')
+    }
+    throw err
+  }
+  return { name: trimmed, path: target }
 }
 
 function requireAbsolute(p: string): string {

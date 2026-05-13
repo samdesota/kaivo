@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { FilePathLabel } from '../../../components/file-path-label'
 import { OverlayShell } from '../../../components/overlay-shell'
 import { Button, Field, Input } from '../../../components/ui'
 import { paneTabIconForType, TabIconView, type TabIcon } from '../../../components/tab-icon'
@@ -26,6 +27,7 @@ export interface UniversalMenuResult {
   id: string
   kind: UniversalMenuResultKind
   label: string
+  labelNode?: ReactNode
   detail?: string
   detailNode?: ReactNode
   actionHint?: string
@@ -33,8 +35,10 @@ export interface UniversalMenuResult {
   icon?: TabIcon
   parentId?: string
   depth?: number
+  flatHierarchy?: boolean
   haystack: string
   disabled?: boolean
+  keepOpen?: boolean
   run: () => void | Promise<void>
   alternateRun?: () => void | Promise<void>
   drill?: () => void
@@ -230,7 +234,9 @@ export function UniversalMenu({
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
   const [parentFolderId, setParentFolderId] = useState<string | null>(null)
   const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
+  const previousFindFilesResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const envUtils = envTrpc.useUtils()
   const folderProbe = envTrpc.fs.browseHome.useQuery(
     { path: undefined },
     { enabled: open, refetchOnWindowFocus: false, staleTime: 30_000 },
@@ -251,6 +257,7 @@ export function UniversalMenu({
   const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && (scope?.definition.id === 'workspaces' || !!detailsSelection), staleTime: 15_000 })
   const startChat = envTrpc.agent.sessionStart.useMutation()
   const createShell = envTrpc.shell.create.useMutation()
+  const createDirectory = envTrpc.fs.createDirectory.useMutation()
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
@@ -388,6 +395,11 @@ export function UniversalMenu({
         },
         openFile: (path) => onOpenContent?.({ type: 'file', path, absolute: true }),
         drillFolder: drillIntoFolder,
+        createFolder: async (parentPath, name) => {
+          const created = await createDirectory.mutateAsync({ parentPath, name }) as FolderBrowseDir
+          await envUtils.fs.browseHome.invalidate()
+          drillIntoFolder(created.path)
+        },
         openNewWorkspaceChat: (path) => openDetails({ type: 'folder', path }),
       })
       if (folderBrowse.isLoading && previousFileSystemResultsRef.current.length > 0) return previousFileSystemResultsRef.current
@@ -440,7 +452,10 @@ export function UniversalMenu({
       return workspaceScopeResults({ tree: workspaceTree.data as WorkspaceTreeNode[] | undefined, loading: workspaceTree.isLoading, error: workspaceTree.error, query, switchWorkspace: (workspaceId) => onSwitchWorkspace?.(workspaceId) })
     }
     if (scope?.definition.id === 'find-files') {
-      return findFilesScopeResults({ roots: fileRoots, files: gitFiles.data as GitFileRow[] | undefined, loading: gitFiles.isLoading, error: gitFiles.error, query, homePath, openFile: (path) => onOpenContent?.({ type: 'file', path, absolute: true }) })
+      const next = findFilesScopeResults({ roots: fileRoots, files: gitFiles.data as GitFileRow[] | undefined, loading: gitFiles.isLoading, error: gitFiles.error, query, homePath, openFile: (path) => onOpenContent?.({ type: 'file', path, absolute: true }) })
+      if (gitFiles.isLoading && previousFindFilesResultsRef.current.length > 0) return previousFindFilesResultsRef.current
+      if (!gitFiles.isLoading && next.length > 0) previousFindFilesResultsRef.current = next
+      return next
     }
     if (scope) return placeholderScopeResults(scope.definition)
     const trimmed = query.trim().toLowerCase()
@@ -450,7 +465,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [commandResults, contextItems, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [commandResults, contextItems, createDirectory, envUtils.fs.browseHome, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -607,7 +622,7 @@ export function UniversalMenu({
       return
     }
     await result.run()
-    onClose()
+    if (!result.keepOpen) onClose()
   }
 
   async function pickContextual(index: number, event?: { shiftKey?: boolean }) {
@@ -618,7 +633,7 @@ export function UniversalMenu({
       return
     }
     await result.run()
-    onClose()
+    if (!result.keepOpen) onClose()
   }
 
   async function pickAlternate(index: number) {
@@ -837,6 +852,7 @@ function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMen
   const detail = result.actionHint ? (state.active ? result.actionHint : undefined) : result.detail
   const detailNode = result.actionHint ? undefined : result.detailNode
   const depth = result.depth ?? 0
+  const isCreateFolder = result.id.startsWith('open-folder-create:')
   return (
     <div className="relative">
       <button
@@ -844,7 +860,7 @@ function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMen
         disabled={state.disabled}
         onMouseEnter={state.onMouseEnter}
         onClick={(event) => state.onSelect(event)}
-        className={`${rowClassName(state)} !gap-1.5`}
+        className={`${rowClassName(state)} !gap-1.5 ${isCreateFolder ? '!text-neutral-500' : ''}`}
         style={{ paddingLeft: `${16 + depth * 12}px` }}
       >
         {result.kind === 'folder' ? (
@@ -861,6 +877,8 @@ function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMen
           >
             {depth === 0 ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
           </span>
+        ) : isCreateFolder ? (
+          <span className="relative z-10 flex w-3 shrink-0 items-center justify-center text-neutral-600"><Plus className="h-3.5 w-3.5" aria-hidden="true" /></span>
         ) : result.icon ? (
           <span className="relative z-10"><TabIconView icon={result.icon} /></span>
         ) : (
@@ -1034,7 +1052,7 @@ export function UniversalMenuResultRow({ result, state }: { result: UniversalMen
       className={rowClassName(state)}
     >
       {result.icon && <TabIconView icon={result.icon} />}
-      <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+      <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
       {detailNode ? <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
     </button>
   )
@@ -1050,13 +1068,15 @@ export function UniversalMenuHierarchyRow({ result, state }: { result: Universal
       onMouseEnter={state.onMouseEnter}
       onClick={(event) => state.onSelect(event)}
       className={rowClassName(state)}
-      style={{ paddingLeft: `${16 + (result.depth ?? 0) * 18}px` }}
+      style={{ paddingLeft: result.flatHierarchy ? 16 : `${16 + (result.depth ?? 0) * 18}px` }}
     >
-      <span className="flex w-3 shrink-0 items-center justify-center text-neutral-600">
-        {result.disabled ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
-      </span>
+      {!result.flatHierarchy && (
+        <span className="flex w-3 shrink-0 items-center justify-center text-neutral-600">
+          {result.disabled ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
+        </span>
+      )}
       {result.icon && <TabIconView icon={result.icon} />}
-      <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+      <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
       {detailNode ? <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
     </button>
   )
@@ -1115,6 +1135,7 @@ function openFolderScopeResults({
   startChat,
   openFile,
   drillFolder,
+  createFolder,
   openNewWorkspaceChat,
 }: {
   data?: FolderBrowseData
@@ -1125,6 +1146,7 @@ function openFolderScopeResults({
   startChat: (path: string) => Promise<void>
   openFile: (path: string) => void
   drillFolder: (path: string) => void
+  createFolder: (parentPath: string, name: string) => Promise<void>
   openNewWorkspaceChat: (path: string) => void
 }): UniversalMenuResult[] {
   if (loading) return [disabledRow('open-folder-loading', 'Loading folders…')]
@@ -1178,8 +1200,32 @@ function openFolderScopeResults({
     run: () => openFile(file.path),
   })))
 
-  if (dirs.length === 0 && files.length === 0) rows.push(disabledRow('open-folder-no-matches', q ? 'No matching items.' : 'No items.'))
+  const createName = folderNameToCreate(filter, data.dirs)
+  if (createName) {
+    rows.push({
+      id: `open-folder-create:${data.path}/${createName}`,
+      kind: 'action',
+      label: `New folder: ${createName}`,
+      detail: data.path,
+      actionHint: 'create folder',
+      parentId: `open-folder-current:${data.path}`,
+      depth: 1,
+      haystack: `create folder ${createName} ${data.path}`,
+      keepOpen: true,
+      run: () => createFolder(data.path, createName),
+    })
+  }
+
+  if (dirs.length === 0 && files.length === 0 && !createName) rows.push(disabledRow('open-folder-no-matches', q ? 'No matching items.' : 'No items.'))
   return rows
+}
+
+function folderNameToCreate(filter: string, dirs: FolderBrowseDir[]): string | null {
+  const name = filter.trim()
+  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) return null
+  const lower = name.toLowerCase()
+  if (dirs.some((dir) => dir.name.toLowerCase() === lower)) return null
+  return name
 }
 
 function recentFolderScopeResults({
@@ -1280,6 +1326,7 @@ function workTreeScopeResults({
       detailNode: <CompactPath path={displayPath(worktree.workingDir, homePath)} />,
       parentId: groupId,
       depth: 1,
+      flatHierarchy: true,
       icon: paneTabIconForType('file'),
       haystack: `${repoLabel} ${worktree.worktreeName} ${worktree.workingDir}`,
       disabled: !workspaceId,
@@ -1364,24 +1411,29 @@ function findFilesScopeResults({ roots, files, loading, error, query, homePath, 
   if (loading) return [disabledRow('find-files-loading', 'Loading files…')]
   if (error) return [disabledRow('find-files-error', extractTrpcMessage(error))]
   const rows: UniversalMenuResult[] = []
-  const groups = new Set<string>()
+  const filesByRoot = new Map<string, GitFileRow[]>()
   for (const file of files ?? []) {
-    const groupId = `file-root:${file.root}`
-    if (!groups.has(groupId)) {
-      groups.add(groupId)
-      rows.push(groupRow(groupId, basename(file.root), 0, displayPath(file.root, homePath)))
+    const rootFiles = filesByRoot.get(file.root)
+    if (rootFiles) rootFiles.push(file)
+    else filesByRoot.set(file.root, [file])
+  }
+  for (const [root, rootFiles] of filesByRoot) {
+    const groupId = `file-root:${root}`
+    rows.push(groupRow(groupId, basename(root), 0, displayPath(root, homePath)))
+    for (const file of rootFiles) {
+      rows.push({
+        id: `file:${file.root}:${file.relativePath}`,
+        kind: 'file',
+        label: file.relativePath,
+        labelNode: <FilePathLabel path={file.relativePath} />,
+        parentId: groupId,
+        depth: 1,
+        flatHierarchy: true,
+        icon: paneTabIconForType('file'),
+        haystack: `${file.relativePath} ${file.path}`,
+        run: () => openFile(file.path),
+      })
     }
-    rows.push({
-      id: `file:${file.path}`,
-      kind: 'file',
-      label: file.relativePath,
-      detailNode: <CompactPath path={displayPath(file.path, homePath)} />,
-      parentId: groupId,
-      depth: 1,
-      icon: paneTabIconForType('file'),
-      haystack: `${file.relativePath} ${file.path}`,
-      run: () => openFile(file.path),
-    })
   }
   return rows.length ? rows : [disabledRow('find-files-empty', query.trim() ? 'No matching tracked files.' : 'No tracked files found in open chat folders.')]
 }

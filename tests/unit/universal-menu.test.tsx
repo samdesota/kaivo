@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   browseInputs: [] as Array<{ path?: string }>,
   startChat: vi.fn(async () => ({ id: 'session-new' })),
   createShell: vi.fn(async () => ({ id: 'shell-new' })),
+  createDirectory: vi.fn(async ({ parentPath, name }: { parentPath: string; name: string }) => ({ name, path: `${parentPath}/${name}` })),
+  invalidateBrowseHome: vi.fn(async () => undefined),
   cloneConfig: vi.fn(async () => ({ repoId: 'repo-new', workingDir: '/Users/sam/d/standalone/new-tree' })),
   createWorkspace: vi.fn(async () => ({ id: 'workspace-new' })),
   upsertWorkspaceResource: vi.fn(async () => ({ ok: true })),
@@ -39,6 +41,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../src/env-trpc', () => ({
   envTrpc: {
+    useUtils: () => ({ fs: { browseHome: { invalidate: mocks.invalidateBrowseHome } } }),
     agent: {
       sessionList: {
         useQuery: () => ({ data: mocks.sessions, isLoading: false }),
@@ -56,6 +59,9 @@ vi.mock('../../src/env-trpc', () => ({
       },
       searchGitTrackedFiles: {
         useQuery: () => ({ data: mocks.gitFiles, isLoading: false, error: null }),
+      },
+      createDirectory: {
+        useMutation: () => ({ mutateAsync: mocks.createDirectory, isPending: false }),
       },
     },
     repo: {
@@ -128,6 +134,8 @@ beforeEach(() => {
   mocks.browseInputs = []
   mocks.startChat.mockClear()
   mocks.createShell.mockClear()
+  mocks.createDirectory.mockClear()
+  mocks.invalidateBrowseHome.mockClear()
   mocks.cloneConfig.mockClear()
   mocks.createWorkspace.mockClear()
   mocks.upsertWorkspaceResource.mockClear()
@@ -510,6 +518,18 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'file', path: '/Users/sam/d/foo/src/foo.ts', absolute: true })
   })
 
+  it('middle-truncates long find file paths', () => {
+    mocks.sessions = [{ id: 'session-1', workingDir: '/Users/sam/d/foo' }]
+    mocks.gitFiles = [{ root: '/Users/sam/d/foo', relativePath: 'docs/blah/alpha/beta/foo/bar.ts', path: '/Users/sam/d/foo/docs/blah/alpha/beta/foo/bar.ts' }]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: '.bar' } })
+
+    const rows = Array.from(screen.getByTestId('universal-menu-results').querySelectorAll('button')).map((button) => button.textContent ?? '')
+    expect(rows.some((text) => text.includes('docs/blah/.../foo/bar.ts'))).toBe(true)
+    expect(rows.some((text) => text.includes('docs/blah/alpha/beta/foo/bar.ts'))).toBe(false)
+  })
+
   it('hides empty contextual sections', () => {
     render(
       <UniversalMenu
@@ -609,6 +629,72 @@ describe('UniversalMenu baseline shell', () => {
 
     expect(input.value).toBe('/Users/sam/scratch/')
     expect(mocks.startChat).not.toHaveBeenCalled()
+  })
+
+  it('shows create folder as the last path result when the final segment is not an exact folder match', () => {
+    mocks.browse = {
+      ...mocks.browse,
+      data: {
+        path: '/Users/sam/foo',
+        home: '/Users/sam',
+        defaultPath: '/Users/sam/d/cloud-code-tools',
+        parent: '/Users/sam',
+        dirs: [{ name: 'bazooka', path: '/Users/sam/foo/bazooka' }],
+        files: [{ name: 'baz.txt', path: '/Users/sam/foo/baz.txt' }],
+      },
+    }
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'foo/baz' } })
+
+    const rows = Array.from(screen.getByTestId('universal-menu-results').querySelectorAll('button')).map((button) => button.textContent ?? '')
+    expect(rows.some((text) => text.includes('bazooka'))).toBe(true)
+    expect(rows.some((text) => text.includes('baz.txt'))).toBe(true)
+    expect(rows[rows.length - 1]).toContain('New folder: baz')
+  })
+
+  it('creates a folder from the path create option without starting a chat or closing', async () => {
+    const onClose = vi.fn()
+    mocks.browse = {
+      ...mocks.browse,
+      data: {
+        path: '/Users/sam/foo',
+        home: '/Users/sam',
+        defaultPath: '/Users/sam/d/cloud-code-tools',
+        parent: '/Users/sam',
+        dirs: [],
+        files: [],
+      },
+    }
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={onClose} onCloseTab={vi.fn()} />)
+
+    const input = screen.getByLabelText('Universal menu search') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'foo/baz' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(mocks.createDirectory).toHaveBeenCalledWith({ parentPath: '/Users/sam/foo', name: 'baz' }))
+    await waitFor(() => expect(input.value).toBe('foo/baz/'))
+    expect(mocks.startChat).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('does not show create folder when the path segment exactly matches a folder', () => {
+    mocks.browse = {
+      ...mocks.browse,
+      data: {
+        path: '/Users/sam/foo',
+        home: '/Users/sam',
+        defaultPath: '/Users/sam/d/cloud-code-tools',
+        parent: '/Users/sam',
+        dirs: [{ name: 'baz', path: '/Users/sam/foo/baz' }],
+        files: [],
+      },
+    }
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'foo/baz' } })
+
+    expect(screen.queryByText('New folder: baz')).toBeNull()
   })
 
   it('treats path-like command input as File System path input', () => {
