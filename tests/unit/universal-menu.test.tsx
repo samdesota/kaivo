@@ -376,14 +376,15 @@ describe('UniversalMenu baseline shell', () => {
     expect(mocks.startChat).toHaveBeenCalledWith({ workspaceId: 'workspace-1', directory: '/Users/sam/d/baz/foo' })
   })
 
-  it('shows repo configs without active worktrees and opens the create flow from plus', () => {
+  it('shows repo configs as clone rows and opens the create flow', () => {
     const onClose = vi.fn()
     mocks.repoConfigs = [{ id: 'config-1', name: 'standalone', githubFullName: 'sam/standalone' }]
     render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={onClose} onCloseTab={vi.fn()} />)
 
     const input = screen.getByLabelText('Universal menu search')
     fireEvent.change(input, { target: { value: '#standalone' } })
-    fireEvent.click(screen.getByLabelText('Create work tree from sam/standalone'))
+    expect(screen.getByText('Clone repo')).toBeTruthy()
+    fireEvent.click(screen.getByText('sam/standalone'))
 
     expect(screen.getByText('sam/standalone')).toBeTruthy()
     expect(screen.getAllByText('Create chat').length).toBeGreaterThan(0)

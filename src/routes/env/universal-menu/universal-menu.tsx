@@ -895,6 +895,22 @@ function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMen
 
 function renderWorkTreeResult(result: UniversalMenuResult, state: UniversalMenuRenderState): ReactNode {
   const depth = result.depth ?? 0
+  if (result.id.startsWith('worktree-clone:')) {
+    return (
+      <button
+        type="button"
+        disabled={state.disabled}
+        onMouseEnter={state.onMouseEnter}
+        onClick={(event) => state.onSelect(event)}
+        className={rowClassName(state)}
+        style={{ paddingLeft: `${16 + depth * 18}px` }}
+      >
+        <span className="flex w-3 shrink-0 items-center justify-center text-neutral-500"><Plus className="h-3.5 w-3.5" aria-hidden="true" /></span>
+        <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+        {result.detail && <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{result.detail}</span>}
+      </button>
+    )
+  }
   if (result.disabled && result.alternateRun) {
     return (
       <div
@@ -1300,39 +1316,56 @@ function workTreeScopeResults({
   if (configsError) return [disabledRow('worktrees-config-error', extractTrpcMessage(configsError))]
   const q = query.trim().toLowerCase()
   const flat = (worktrees ?? []).filter((worktree) => !q || `${worktree.name} ${worktree.slug} ${worktree.worktreeName} ${worktree.worktreeSlug} ${worktree.githubFullName ?? ''} ${worktree.workingDir}`.toLowerCase().includes(q))
-  const configByLabel = new Map<string, RepoConfigRow | null>()
-  for (const config of configs ?? []) {
-    const label = config.githubFullName ?? config.name
-    if (!q || `${config.name} ${config.githubFullName ?? ''} ${config.originUrl ?? ''}`.toLowerCase().includes(q) || flat.some((worktree) => (worktree.githubFullName ?? worktree.name) === label)) {
-      configByLabel.set(label, config)
-    }
-  }
+  const matchingConfigs = (configs ?? []).filter((config) => !q || `${config.name} ${config.githubFullName ?? ''} ${config.originUrl ?? ''}`.toLowerCase().includes(q))
+  const worktreesByLabel = new Map<string, RepoWorktreeRow[]>()
   for (const worktree of flat) {
     const label = worktree.githubFullName ?? worktree.name
-    if (!configByLabel.has(label)) configByLabel.set(label, null)
+    const repoWorktrees = worktreesByLabel.get(label)
+    if (repoWorktrees) repoWorktrees.push(worktree)
+    else worktreesByLabel.set(label, [worktree])
+  }
+  const configByLabel = new Map<string, RepoConfigRow>()
+  for (const config of configs ?? []) {
+    const label = config.githubFullName ?? config.name
+    configByLabel.set(label, config)
   }
   const rows: UniversalMenuResult[] = []
-  for (const [repoLabel, config] of configByLabel) {
+  if (matchingConfigs.length > 0) {
+    rows.push(groupRow('worktree-clone-section', 'Clone repo', 0))
+    for (const config of matchingConfigs) {
+      const label = config.githubFullName ?? config.name
+      rows.push({
+        id: `worktree-clone:${config.id}`,
+        kind: 'worktree',
+        label,
+        detail: config.originUrl ?? undefined,
+        parentId: 'worktree-clone-section',
+        depth: 1,
+        haystack: `${config.name} ${config.githubFullName ?? ''} ${config.originUrl ?? ''}`,
+        run: () => openNewWorkspaceChat({ type: 'repoConfig', configId: config.id, worktreeName: '' }),
+      })
+    }
+  }
+  for (const [repoLabel, repoWorktrees] of worktreesByLabel) {
+    const config = configByLabel.get(repoLabel)
+    if (q && !repoWorktrees.length && !config) continue
     const groupId = `worktree-repo:${repoLabel}`
-    rows.push({
-      ...groupRow(groupId, repoLabel, 0, config?.originUrl ?? undefined),
-      alternateRun: config ? () => openNewWorkspaceChat({ type: 'repoConfig', configId: config.id, worktreeName: '' }) : undefined,
-    })
-    for (const worktree of flat.filter((item) => (item.githubFullName ?? item.name) === repoLabel)) {
-    rows.push({
-      id: `worktree:${worktree.id}`,
-      kind: 'worktree',
-      label: worktree.worktreeName,
-      detailNode: <CompactPath path={displayPath(worktree.workingDir, homePath)} />,
-      parentId: groupId,
-      depth: 1,
-      flatHierarchy: true,
-      icon: paneTabIconForType('file'),
-      haystack: `${repoLabel} ${worktree.worktreeName} ${worktree.workingDir}`,
-      disabled: !workspaceId,
-      run: () => startChat(worktree.workingDir),
-      alternateRun: () => openNewWorkspaceChat({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName }),
-    })
+    rows.push(groupRow(groupId, repoLabel, 0, config?.originUrl ?? undefined))
+    for (const worktree of repoWorktrees) {
+      rows.push({
+        id: `worktree:${worktree.id}`,
+        kind: 'worktree',
+        label: worktree.worktreeName,
+        detailNode: <CompactPath path={displayPath(worktree.workingDir, homePath)} />,
+        parentId: groupId,
+        depth: 1,
+        flatHierarchy: true,
+        icon: paneTabIconForType('file'),
+        haystack: `${repoLabel} ${worktree.worktreeName} ${worktree.workingDir}`,
+        disabled: !workspaceId,
+        run: () => startChat(worktree.workingDir),
+        alternateRun: () => openNewWorkspaceChat({ type: 'worktree', repoId: worktree.id, path: worktree.workingDir, name: worktree.worktreeName }),
+      })
     }
   }
   return rows.length ? rows : [disabledRow('worktrees-empty', q ? 'No matching work trees or repo configs.' : 'No repo configs or work trees yet.')]
