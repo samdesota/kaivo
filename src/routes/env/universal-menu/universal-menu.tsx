@@ -11,6 +11,13 @@ import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { defaultWorkspaceName, newAgentChatStartInput, resolveWorkspaceName, type NewAgentChatSelection } from '../agent/new-agent-chat-state'
 import { WorkspaceModeControl } from '../agent/new-agent-chat-modal'
+import { findFilesScopeModule } from './scopes/find-files'
+import { recentFoldersScopeModule } from './scopes/recent-folders'
+import { shellsScopeModule } from './scopes/shells'
+import { webScopeModule } from './scopes/web'
+import { worktreesScopeModule } from './scopes/worktrees'
+import { workspacesScopeModule } from './scopes/workspaces'
+import type { UniversalScopeApi } from './types'
 
 export type UniversalMenuResultKind =
   | 'action'
@@ -186,6 +193,15 @@ const scopeControllers: ScopeController[] = [
   { definition: { id: 'workspaces', label: 'Workspaces', key: '>', detail: 'Switch workspace', placeholder: 'Workspace search lands in Task 8' } },
 ]
 
+const componentScopeById = new Map([
+  [findFilesScopeModule.id, findFilesScopeModule],
+  [recentFoldersScopeModule.id, recentFoldersScopeModule],
+  [shellsScopeModule.id, shellsScopeModule],
+  [webScopeModule.id, webScopeModule],
+  [worktreesScopeModule.id, worktreesScopeModule],
+  [workspacesScopeModule.id, workspacesScopeModule],
+])
+
 const scopes = scopeControllers.map((controller) => controller.definition)
 const scopeControllerById = new Map(scopeControllers.map((controller) => [controller.definition.id, controller]))
 const openFolderScope = fileSystemScopeController.definition
@@ -233,9 +249,21 @@ export function UniversalMenu({
   const [detailsError, setDetailsError] = useState<string | null>(null)
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
   const [parentFolderId, setParentFolderId] = useState<string | null>(null)
+  const [scopeApi, setScopeApi] = useState<UniversalScopeApi | null>(null)
+  const scopeApiRef = useRef<UniversalScopeApi | null>(null)
   const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
   const previousFindFilesResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const updateScopeApi = useCallback((api: UniversalScopeApi | null) => {
+    scopeApiRef.current = api
+    setScopeApi((current) => {
+      if (!api || !current) return current === api ? current : api
+      const currentHints = current.footerHints ?? []
+      const nextHints = api.footerHints ?? []
+      if (current.resultCount === api.resultCount && currentHints.length === nextHints.length && currentHints.every((hint, index) => hint === nextHints[index])) return current
+      return api
+    })
+  }, [])
   const envUtils = envTrpc.useUtils()
   const folderProbe = envTrpc.fs.browseHome.useQuery(
     { path: undefined },
@@ -250,11 +278,11 @@ export function UniversalMenu({
     enabled: open && !!workspaceId,
     staleTime: 5_000,
   })
-  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined, { enabled: open && scope?.definition.id === 'recent-folders', staleTime: 5_000 })
-  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open && (scope?.definition.id === 'work-trees' || !!detailsSelection), staleTime: 5_000 })
-  const worktrees = envTrpc.repo.listWorktrees.useQuery(undefined, { enabled: open && scope?.definition.id === 'work-trees', staleTime: 5_000 })
-  const shells = envTrpc.shell.list.useQuery(workspaceId ? { workspaceId } : undefined, { enabled: open && scope?.definition.id === 'shells', staleTime: 5_000 })
-  const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && (scope?.definition.id === 'workspaces' || !!detailsSelection), staleTime: 15_000 })
+  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined, { enabled: false, staleTime: 5_000 })
+  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open && !!detailsSelection, staleTime: 5_000 })
+  const worktrees = envTrpc.repo.listWorktrees.useQuery(undefined, { enabled: false, staleTime: 5_000 })
+  const shells = envTrpc.shell.list.useQuery(workspaceId ? { workspaceId } : undefined, { enabled: false, staleTime: 5_000 })
+  const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && !!detailsSelection, staleTime: 15_000 })
   const startChat = envTrpc.agent.sessionStart.useMutation()
   const createShell = envTrpc.shell.create.useMutation()
   const createDirectory = envTrpc.fs.createDirectory.useMutation()
@@ -273,7 +301,7 @@ export function UniversalMenu({
   )), [contextItems])
   const faviconCache = trpc.favicon.getByOrigins.useQuery(
     { origins: faviconOrigins },
-    { enabled: open && faviconOrigins.length > 0, staleTime: 60_000 },
+    { enabled: open && !scope && faviconOrigins.length > 0, staleTime: 60_000 },
   )
   const fileRoots = useMemo(() => Array.from(new Set(((sessions.data as AgentSessionRow[] | undefined) ?? []).map((session) => session.workingDir).filter((dir): dir is string => Boolean(dir)))), [sessions.data])
   const activeCwd = activeSessionId
@@ -281,7 +309,7 @@ export function UniversalMenu({
     : undefined
   const gitFiles = envTrpc.fs.searchGitTrackedFiles.useQuery(
     { roots: fileRoots, query, limit: 160 },
-    { enabled: open && scope?.definition.id === 'find-files' && fileRoots.length > 0, staleTime: 10_000 },
+    { enabled: false, staleTime: 10_000 },
   )
   const homePath = (folderProbe.data as FolderBrowseData | undefined)?.home ?? undefined
 
@@ -303,7 +331,13 @@ export function UniversalMenu({
     setDetailsError(null)
     setWorkspaceNameDraft({ value: '', edited: false })
     setParentFolderId(null)
+    updateScopeApi(null)
   }, [open])
+
+  useEffect(() => {
+    if (!scope || componentScopeById.has(scope.definition.id)) return
+    updateScopeApi(null)
+  }, [scope?.definition.id, scope, updateScopeApi])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -381,6 +415,7 @@ export function UniversalMenu({
   }, [activeCwd, createShell, enterScope, hasActiveTab, onCloseTab, onOpenContent, onOpenSettings, onToggleAgentPane, onToggleSidebar, workspaceId])
 
   const visibleResults = useMemo(() => {
+    if (scope && componentScopeById.has(scope.definition.id)) return []
     if (scope?.definition.id === 'open-folder') {
       const next = openFolderScopeResults({
         data: folderBrowse.data as FolderBrowseData | undefined,
@@ -536,8 +571,9 @@ export function UniversalMenu({
 
   useEffect(() => {
     if (!scope && !query.trim()) return
-    if (active >= visibleResults.length) setActive(0)
-  }, [active, query, scope, visibleResults.length])
+    const length = scopeApi ? scopeApi.resultCount : visibleResults.length
+    if (active >= length) setActive(0)
+  }, [active, query, scope, scopeApi, visibleResults.length])
 
   useEffect(() => {
     if (scope || query.trim()) return
@@ -550,6 +586,7 @@ export function UniversalMenu({
   }, [folderBrowse.data, openFolderFilter, scope?.definition.id, visibleResults.length])
 
   const currentScopeController = scope ? scopeControllerById.get(scope.definition.id) : undefined
+  const currentScopeComponent = scope ? componentScopeById.get(scope.definition.id) : undefined
 
   useEffect(() => {
     if (!open) return
@@ -566,7 +603,8 @@ export function UniversalMenu({
       }
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        const length = scope || query.trim() ? visibleResults.length : contextualResults.length
+        const activeScopeApi = scopeApiRef.current
+        const length = activeScopeApi ? activeScopeApi.resultCount : scope || query.trim() ? visibleResults.length : contextualResults.length
         setActive((value) => Math.min(Math.max(length - 1, 0), value + 1))
         return
       }
@@ -577,10 +615,16 @@ export function UniversalMenu({
       }
       if (event.key === 'Enter') {
         event.preventDefault()
+        const activeScopeApi = scopeApiRef.current
+        if (activeScopeApi) {
+          void activeScopeApi.selectActive({ shiftKey: event.shiftKey })
+          return
+        }
         if (!scope && !query.trim()) void pickContextual(active, { shiftKey: event.shiftKey })
         else void pick(active, { shiftKey: event.shiftKey })
         return
       }
+      if (scopeApiRef.current?.handleKeyDown?.(event)) return
       const handled = currentScopeController?.handleKeyDown?.(event, {
         activeResult: visibleResults[active],
         browsePath: folderBrowsePlan?.dir ?? (folderBrowse.data as FolderBrowseData | undefined)?.path,
@@ -714,12 +758,13 @@ export function UniversalMenu({
   }
 
   const placeholder = scope ? `Search ${scope.definition.label.toLowerCase()}…` : 'Search commands'
-  const resultCount = scope || query.trim() ? visibleResults.length : contextualCount
-  const footerHints = currentScopeController?.footerHints ?? []
+  const resultCount = scopeApi ? scopeApi.resultCount : scope || query.trim() ? visibleResults.length : contextualCount
+  const footerHints = scopeApi?.footerHints ?? currentScopeController?.footerHints ?? []
   const selectedConfig = detailsSelection?.type === 'repoConfig' ? (repoConfigs.data as RepoConfigRow[] | undefined)?.find((config) => config.id === detailsSelection.configId) : null
   const generatedWorkspaceName = defaultWorkspaceName(detailsSelection).name
   const workspaceNameValue = resolveWorkspaceName(detailsSelection, workspaceNameDraft).name
   const detailsBusy = cloneConfig.isPending || createWorkspace.isPending || upsertWorkspaceResource.isPending || startChat.isPending
+  const ActiveScopeComponent = currentScopeComponent?.Component
 
   if (detailsSelection) {
     return (
@@ -824,6 +869,24 @@ export function UniversalMenu({
             }
             void Promise.resolve(result.run()).then(onClose)
           }}
+        />
+      ) : ActiveScopeComponent ? (
+        <ActiveScopeComponent
+          query={query}
+          activeIndex={active}
+          mouseMoved={mouseMoved}
+          workspaceId={workspaceId}
+          workspaceFolderId={workspaceFolderId}
+          activeSessionId={activeSessionId}
+          contextItems={contextItems}
+          onActiveChange={setActive}
+          onMouseMoved={() => setMouseMoved(true)}
+          onClose={onClose}
+          onOpenContent={onOpenContent}
+          onCreatedChat={onCreatedChat}
+          onSwitchWorkspace={onSwitchWorkspace}
+          openDetails={openDetails}
+          setScopeApi={updateScopeApi}
         />
       ) : (
         <UniversalMenuResultList
