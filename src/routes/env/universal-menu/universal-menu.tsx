@@ -34,6 +34,14 @@ interface HomeProbeData {
   home?: string | null
 }
 
+interface ShellRow {
+  id: string
+  cwd: string
+  title: string | null
+  ownerKind?: string
+  alive?: boolean
+}
+
 interface RepoConfigRow {
   id: string
   name: string
@@ -111,6 +119,10 @@ export function UniversalMenu({
   )
   const sessions = envTrpc.agent.sessionList.useQuery(workspaceId ? { workspaceId } : undefined, {
     enabled: open && !!workspaceId,
+    staleTime: 5_000,
+  })
+  const workspaceShells = envTrpc.shell.list.useQuery(workspaceId ? { workspaceId } : undefined, {
+    enabled: open && !scope && !!workspaceId,
     staleTime: 5_000,
   })
   const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open && !!detailsSelection, staleTime: 5_000 })
@@ -243,9 +255,23 @@ export function UniversalMenu({
       }
     }
 
-    const shells = contextItems
-      .filter((item) => item.kind === 'shell')
-      .map((item): UniversalMenuResult => ({
+    const shellMap = new Map<string, UniversalMenuResult>()
+    for (const shell of (workspaceShells.data as ShellRow[] | undefined) ?? []) {
+      if (shell.alive === false) continue
+      shellMap.set(shell.id, {
+        id: `shell:${shell.id}`,
+        kind: 'shell',
+        label: shell.title || `shell ${shell.id.slice(-6)}`,
+        detail: displayPath(shell.cwd, homePath),
+        detailNode: <CompactPath path={displayPath(shell.cwd, homePath)} />,
+        icon: paneTabIconForType('shell'),
+        haystack: `${shell.title ?? ''} ${shell.id} ${shell.cwd} ${shell.ownerKind ?? ''}`,
+        run: () => onOpenContent?.({ type: 'shell', shellId: shell.id }),
+      })
+    }
+    for (const item of contextItems.filter((item) => item.kind === 'shell')) {
+      if (shellMap.has(item.content.type === 'shell' ? item.content.shellId : item.id)) continue
+      shellMap.set(item.id, {
         id: item.id,
         kind: 'shell',
         label: item.label,
@@ -254,9 +280,11 @@ export function UniversalMenu({
         icon: paneTabIconForType('shell'),
         haystack: `${item.label} ${item.detail ?? ''}`,
         run: () => onOpenContent?.(item.content),
-      }))
+      })
+    }
+    const shells = [...shellMap.values()]
 
-    const browserTabs = contextItems
+    const pages = contextItems
       .filter((item) => item.kind === 'browser-tab')
       .map((item): UniversalMenuResult => ({
         id: item.id,
@@ -273,9 +301,9 @@ export function UniversalMenu({
     return [
       { id: 'folders', label: 'Recent workspace folders', results: [...folderMap.values()] },
       { id: 'shells', label: 'Shells', results: shells },
-      { id: 'browser-tabs', label: 'Pages', results: browserTabs },
+      { id: 'browser-tabs', label: 'Pages', results: pages },
     ].filter((section) => section.results.length > 0)
-  }, [contextItems, faviconCache.data, homePath, onCreatedChat, onOpenContent, sessions.data, startChat, workspaceId])
+  }, [contextItems, faviconCache.data, homePath, onCreatedChat, onOpenContent, sessions.data, startChat, workspaceId, workspaceShells.data])
 
   const contextualCount = contextualSections.reduce((sum, section) => sum + section.results.length, 0)
   const contextualResults = useMemo(() => contextualSections.flatMap((section) => section.results), [contextualSections])

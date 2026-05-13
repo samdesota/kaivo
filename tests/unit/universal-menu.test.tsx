@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => ({
   recentFolders: [] as Array<{ path: string; label: string | null }>,
   repoConfigs: [] as Array<{ id: string; name: string; originUrl?: string | null; githubFullName?: string | null }>,
   worktrees: [] as Array<{ id: string; name: string; slug: string; worktreeName: string; worktreeSlug: string; workingDir: string; githubFullName: string | null }>,
-  shells: [] as Array<{ id: string; cwd: string; title: string | null }>,
+  shells: [] as Array<{ id: string; cwd: string; title: string | null; alive?: boolean }>,
   gitFiles: [] as Array<{ root: string; path: string; relativePath: string }>,
   workspaceTree: [] as Array<unknown>,
 }))
@@ -325,6 +325,31 @@ describe('UniversalMenu baseline shell', () => {
 
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'shell', shellId: 'shell-1' })
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'http://127.0.0.1' })
+  })
+
+  it('shows live workspace shells without open tabs on the landing page', () => {
+    const onOpenContent = vi.fn()
+    mocks.shells = [
+      { id: 'shell-live', cwd: '/Users/sam/live', title: 'detached shell', alive: true },
+      { id: 'shell-dead', cwd: '/Users/sam/dead', title: 'terminated shell', alive: false },
+    ]
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('detached shell')).toBeTruthy()
+    expect(screen.queryByText('terminated shell')).toBeNull()
+
+    fireEvent.click(screen.getByText('detached shell'))
+
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'shell', shellId: 'shell-live' })
   })
 
   it('navigates contextual landing rows with the keyboard', async () => {
