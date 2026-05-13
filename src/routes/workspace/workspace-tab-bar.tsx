@@ -173,14 +173,6 @@ export function WorkspaceTabBar({
           </Link>
         )
       })}
-      <button
-        onClick={() => void createWorkspace()}
-        disabled={create.isPending}
-        className="shrink-0 rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400 hover:bg-highlight hover:text-neutral-100 disabled:opacity-50"
-        aria-label="Create new workspace"
-      >
-        +
-      </button>
     </div>
   )
 }

@@ -17,17 +17,20 @@ const treeData = [
     type: 'folder',
     folder: { id: 'folder-cloud', name: 'Zoottle', position: 0, collapsed: false },
     children: [
-      { type: 'workspace', workspace: { id: 'workspace-tools', name: 'zoottle-app', position: 0 } },
+      { type: 'workspace', workspace: { id: 'workspace-tools', name: 'zoottle-app', folderId: 'folder-cloud', position: 0 } },
+      { type: 'workspace', workspace: { id: 'workspace-docs', name: 'docs-app', folderId: 'folder-cloud', position: 1 } },
       {
         type: 'folder',
-        folder: { id: 'folder-packages', name: 'Packages', position: 1, collapsed: false },
-        children: [{ type: 'workspace', workspace: { id: 'workspace-plugin', name: 'opencode-plugin', position: 0 } }],
+        folder: { id: 'folder-packages', name: 'Packages', position: 2, collapsed: false },
+        children: [{ type: 'workspace', workspace: { id: 'workspace-plugin', name: 'opencode-plugin', folderId: 'folder-packages', position: 0 } }],
       },
     ],
   },
 ]
 
 const moveSidebarNodeMock = vi.hoisted(() => vi.fn())
+const createFolderMock = vi.hoisted(() => vi.fn())
+const renameFolderMock = vi.hoisted(() => vi.fn())
 const notificationDismissMock = vi.hoisted(() => vi.fn())
 const notificationDismissForSessionMock = vi.hoisted(() => vi.fn())
 const notificationListData = vi.hoisted(() => [] as Array<{
@@ -65,8 +68,9 @@ vi.mock('../../src/trpc', () => ({
       listTree: { useQuery: () => ({ data: treeData }) },
       list: { useQuery: () => ({ data: [{ id: 'workspace-tools', name: 'zoottle-app' }] }) },
       create: { useMutation: () => ({ isPending: false, mutateAsync: vi.fn() }) },
-      createFolder: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      createFolder: { useMutation: () => ({ isPending: false, mutateAsync: createFolderMock }) },
       rename: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      renameFolder: { useMutation: () => ({ mutateAsync: renameFolderMock }) },
       archive: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       archiveFolder: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       deleteResource: { useMutation: () => ({ mutateAsync: vi.fn() }) },
@@ -166,10 +170,15 @@ function renderSidebar() {
 }
 
 beforeEach(() => {
+  ctx.workspace = { id: 'workspace-active', name: 'Active workspace' }
   ctx.uiState.activeAgentSessionId = null
   ctx.localEnvTarget = null
   moveSidebarNodeMock.mockReset()
   moveSidebarNodeMock.mockResolvedValue([])
+  createFolderMock.mockReset()
+  createFolderMock.mockResolvedValue({ id: 'folder-new', name: 'New folder', position: 0, collapsed: false })
+  renameFolderMock.mockReset()
+  renameFolderMock.mockResolvedValue({ id: 'folder-cloud', name: 'Renamed folder', position: 0, collapsed: false })
   notificationDismissMock.mockReset()
   notificationDismissForSessionMock.mockReset()
   notificationListData.length = 0
@@ -201,15 +210,13 @@ describe('WorkspaceSidebar', () => {
     expect(select.value).toBe('new')
   })
 
-  it('opens the new agent chat modal in existing-workspace mode from a workspace plus', async () => {
+  it('does not render workspace row plus buttons', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Create chat in zoottle-app' }))
-
-    const select = await screen.findByLabelText('Workspace mode') as HTMLSelectElement
-    expect(select.value).toBe('existing')
-    expect(screen.getAllByText('zoottle-app').length).toBeGreaterThan(0)
+    expect(await screen.findByText('zoottle-app')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Create chat in zoottle-app' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Create workspace in Zoottle' })).toBeTruthy()
   })
 
   it('does not expose workspace chat expansion controls', async () => {
@@ -353,5 +360,73 @@ describe('WorkspaceSidebar', () => {
     expect(folderRow.getAttribute('aria-roledescription')).toBe('sortable')
     expect(workspaceRow.textContent).toContain('zoottle-app')
     expect(workspaceRow.textContent).not.toContain('Packages')
+  })
+
+  it('renames folders inline and disables drag handles while editing', async () => {
+    renderSidebar()
+
+    fireEvent.doubleClick(await screen.findByText('Zoottle'))
+
+    const input = await screen.findByLabelText('Folder name') as HTMLInputElement
+    expect(input.value).toBe('Zoottle')
+    expect(screen.getByText('zoottle-app').closest('[role="button"]')).toBeNull()
+
+    fireEvent.change(input, { target: { value: 'Renamed folder' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(renameFolderMock).toHaveBeenCalledWith({ id: 'folder-cloud', name: 'Renamed folder' }))
+  })
+
+  it('groups all cmd-selected sibling workspaces into a new folder', async () => {
+    renderSidebar()
+
+    fireEvent.click(await screen.findByText('zoottle-app'), { metaKey: true })
+    fireEvent.click(await screen.findByText('docs-app'), { metaKey: true })
+    fireEvent.keyDown(window, { key: 'g', metaKey: true })
+
+    await waitFor(() => expect(createFolderMock).toHaveBeenCalledWith({ name: 'New folder', parentId: 'folder-cloud' }))
+    await waitFor(() => expect(moveSidebarNodeMock).toHaveBeenCalledWith({
+      nodeType: 'workspace',
+      nodeId: 'workspace-tools',
+      parentFolderId: 'folder-new',
+      beforeNodeId: null,
+    }))
+    expect(moveSidebarNodeMock).toHaveBeenCalledWith({
+      nodeType: 'workspace',
+      nodeId: 'workspace-docs',
+      parentFolderId: 'folder-new',
+      beforeNodeId: null,
+    })
+  })
+
+  it('includes the active workspace when grouping selected workspaces', async () => {
+    ctx.workspace = { id: 'workspace-tools', name: 'zoottle-app' }
+    renderSidebar()
+
+    fireEvent.click(await screen.findByText('docs-app'), { metaKey: true })
+    fireEvent.keyDown(window, { key: 'g', metaKey: true })
+
+    await waitFor(() => expect(createFolderMock).toHaveBeenCalledWith({ name: 'New folder', parentId: 'folder-cloud' }))
+    expect(moveSidebarNodeMock).toHaveBeenCalledWith({
+      nodeType: 'workspace',
+      nodeId: 'workspace-tools',
+      parentFolderId: 'folder-new',
+      beforeNodeId: null,
+    })
+    expect(moveSidebarNodeMock).toHaveBeenCalledWith({
+      nodeType: 'workspace',
+      nodeId: 'workspace-docs',
+      parentFolderId: 'folder-new',
+      beforeNodeId: null,
+    })
+  })
+
+  it('prevents browser default behavior on shift-click workspace links', async () => {
+    renderSidebar()
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })
+    const allowed = (await screen.findByText('docs-app')).dispatchEvent(event)
+
+    expect(allowed).toBe(false)
   })
 })
