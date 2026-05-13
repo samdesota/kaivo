@@ -11,6 +11,7 @@ import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { defaultWorkspaceName, newAgentChatStartInput, resolveWorkspaceName, type NewAgentChatSelection } from '../agent/new-agent-chat-state'
 import { WorkspaceModeControl } from '../agent/new-agent-chat-modal'
+import { fileSystemScopeModule } from './scopes/file-system'
 import { findFilesScopeModule } from './scopes/find-files'
 import { recentFoldersScopeModule } from './scopes/recent-folders'
 import { shellsScopeModule } from './scopes/shells'
@@ -161,26 +162,6 @@ interface ScopeController {
 const fileSystemScopeController: ScopeController = {
   definition: { id: 'open-folder', label: 'File System', key: '/', detail: 'Open files or choose folders for chats', placeholder: 'File system browsing lands in Task 3' },
   footerHints: ['←/→ folder'],
-  renderResult: renderFileSystemResult,
-  handleKeyDown(event, context) {
-    if (event.key === 'ArrowRight') {
-      const result = context.activeResult
-      if (result?.kind !== 'folder' || !result.detail) return false
-      event.preventDefault()
-      context.drillIntoFolder(result.detail)
-      context.setActive(0)
-      return true
-    }
-    if (event.key === 'ArrowLeft') {
-      const parent = parentPath(context.browsePath)
-      if (!parent) return false
-      event.preventDefault()
-      context.drillIntoFolder(parent)
-      context.setActive(0)
-      return true
-    }
-    return false
-  },
 }
 
 const scopeControllers: ScopeController[] = [
@@ -194,6 +175,7 @@ const scopeControllers: ScopeController[] = [
 ]
 
 const componentScopeById = new Map([
+  [fileSystemScopeModule.id, fileSystemScopeModule],
   [findFilesScopeModule.id, findFilesScopeModule],
   [recentFoldersScopeModule.id, recentFoldersScopeModule],
   [shellsScopeModule.id, shellsScopeModule],
@@ -244,14 +226,12 @@ export function UniversalMenu({
   const [active, setActive] = useState(0)
   const [mouseMoved, setMouseMoved] = useState(false)
   const [scope, setScope] = useState<{ definition: ScopeDefinition; query: string } | null>(null)
-  const [folderPath, setFolderPath] = useState<string | undefined>(undefined)
   const [detailsSelection, setDetailsSelection] = useState<NewAgentChatSelection | null>(null)
   const [detailsError, setDetailsError] = useState<string | null>(null)
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
   const [parentFolderId, setParentFolderId] = useState<string | null>(null)
   const [scopeApi, setScopeApi] = useState<UniversalScopeApi | null>(null)
   const scopeApiRef = useRef<UniversalScopeApi | null>(null)
-  const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
   const previousFindFilesResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
   const updateScopeApi = useCallback((api: UniversalScopeApi | null) => {
@@ -264,16 +244,10 @@ export function UniversalMenu({
       return api
     })
   }, [])
-  const envUtils = envTrpc.useUtils()
   const folderProbe = envTrpc.fs.browseHome.useQuery(
     { path: undefined },
     { enabled: open, refetchOnWindowFocus: false, staleTime: 30_000 },
   )
-  const folderBrowsePlan = useMemo(() => {
-    if (scope?.definition.id !== 'open-folder' || !isPathLikeInput(query)) return null
-    const probe = folderProbe.data as FolderBrowseData | undefined
-    return pathBrowsePlan(query, { home: probe?.home ?? undefined, defaultPath: probe?.defaultPath ?? undefined })
-  }, [folderProbe.data, query, scope?.definition.id])
   const sessions = envTrpc.agent.sessionList.useQuery(workspaceId ? { workspaceId } : undefined, {
     enabled: open && !!workspaceId,
     staleTime: 5_000,
@@ -285,14 +259,9 @@ export function UniversalMenu({
   const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && !!detailsSelection, staleTime: 15_000 })
   const startChat = envTrpc.agent.sessionStart.useMutation()
   const createShell = envTrpc.shell.create.useMutation()
-  const createDirectory = envTrpc.fs.createDirectory.useMutation()
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
-  const folderBrowse = envTrpc.fs.browseHome.useQuery(
-    { path: folderBrowsePlan ? folderBrowsePlan.dir : folderPath },
-    { enabled: open && scope?.definition.id === 'open-folder', refetchOnWindowFocus: false },
-  )
   const faviconOrigins = useMemo(() => Array.from(new Set(
     contextItems
       .filter((item) => item.kind === 'browser-tab' && item.content.type === 'browser')
@@ -316,7 +285,6 @@ export function UniversalMenu({
   const enterScope = useCallback((definition: ScopeDefinition, initialQuery: string) => {
     setScope({ definition, query: initialQuery })
     setQuery(initialQuery)
-    if (definition.id === 'open-folder') setFolderPath(undefined)
     setActive(0)
     setMouseMoved(false)
   }, [])
@@ -416,31 +384,6 @@ export function UniversalMenu({
 
   const visibleResults = useMemo(() => {
     if (scope && componentScopeById.has(scope.definition.id)) return []
-    if (scope?.definition.id === 'open-folder') {
-      const next = openFolderScopeResults({
-        data: folderBrowse.data as FolderBrowseData | undefined,
-        error: folderBrowse.error,
-        loading: folderBrowse.isLoading,
-        filter: folderBrowsePlan ? folderBrowsePlan.filter : query,
-        workspaceId,
-        startChat: async (path) => {
-          if (!workspaceId) return
-          const created = await startChat.mutateAsync({ workspaceId, directory: path }) as { id: string }
-          onCreatedChat?.(created.id, workspaceId)
-        },
-        openFile: (path) => onOpenContent?.({ type: 'file', path, absolute: true }),
-        drillFolder: drillIntoFolder,
-        createFolder: async (parentPath, name) => {
-          const created = await createDirectory.mutateAsync({ parentPath, name }) as FolderBrowseDir
-          await envUtils.fs.browseHome.invalidate()
-          drillIntoFolder(created.path)
-        },
-        openNewWorkspaceChat: (path) => openDetails({ type: 'folder', path }),
-      })
-      if (folderBrowse.isLoading && previousFileSystemResultsRef.current.length > 0) return previousFileSystemResultsRef.current
-      if (!folderBrowse.isLoading && next.length > 0) previousFileSystemResultsRef.current = next
-      return next
-    }
     if (scope?.definition.id === 'recent-folders') {
       return recentFolderScopeResults({
         folders: recentFolders.data as RecentFolderRow[] | undefined,
@@ -500,7 +443,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [commandResults, contextItems, createDirectory, envUtils.fs.browseHome, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [commandResults, contextItems, faviconCache.data, fileRoots, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -565,10 +508,6 @@ export function UniversalMenu({
   const contextualCount = contextualSections.reduce((sum, section) => sum + section.results.length, 0)
   const contextualResults = useMemo(() => contextualSections.flatMap((section) => section.results), [contextualSections])
 
-  const openFolderFilter = scope?.definition.id === 'open-folder'
-    ? (folderBrowsePlan ? folderBrowsePlan.filter : query).trim()
-    : ''
-
   useEffect(() => {
     if (!scope && !query.trim()) return
     const length = scopeApi ? scopeApi.resultCount : visibleResults.length
@@ -579,11 +518,6 @@ export function UniversalMenu({
     if (scope || query.trim()) return
     if (active >= contextualResults.length) setActive(0)
   }, [active, contextualResults.length, query, scope])
-
-  useEffect(() => {
-    if (scope?.definition.id !== 'open-folder') return
-    setActive(openFolderFilter && visibleResults.length > 1 ? 1 : 0)
-  }, [folderBrowse.data, openFolderFilter, scope?.definition.id, visibleResults.length])
 
   const currentScopeController = scope ? scopeControllerById.get(scope.definition.id) : undefined
   const currentScopeComponent = scope ? componentScopeById.get(scope.definition.id) : undefined
@@ -625,13 +559,6 @@ export function UniversalMenu({
         return
       }
       if (scopeApiRef.current?.handleKeyDown?.(event)) return
-      const handled = currentScopeController?.handleKeyDown?.(event, {
-        activeResult: visibleResults[active],
-        browsePath: folderBrowsePlan?.dir ?? (folderBrowse.data as FolderBrowseData | undefined)?.path,
-        drillIntoFolder,
-        setActive,
-      })
-      if (handled) return
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -753,7 +680,6 @@ export function UniversalMenu({
     setScope(null)
     setQuery('')
     setActive(0)
-    setFolderPath(undefined)
     setMouseMoved(false)
   }
 
@@ -873,6 +799,7 @@ export function UniversalMenu({
       ) : ActiveScopeComponent ? (
         <ActiveScopeComponent
           query={query}
+          setQuery={setQuery}
           activeIndex={active}
           mouseMoved={mouseMoved}
           workspaceId={workspaceId}
@@ -898,61 +825,10 @@ export function UniversalMenu({
           onSelect={(index, event) => void pick(index, event)}
           onAlternateSelect={(index) => void pickAlternate(index)}
           renderResult={currentScopeController?.renderResult}
-          loading={scope?.definition.id === 'open-folder' && folderBrowse.isFetching}
+          loading={false}
         />
       )}
     </OverlayShell>
-  )
-
-  function drillIntoFolder(path: string) {
-    startTransition(() => setFolderPath(path))
-    const probe = folderProbe.data as FolderBrowseData | undefined
-    setQuery(pathInputForAbsolutePath(path, query, { home: probe?.home, defaultPath: probe?.defaultPath }))
-  }
-}
-
-function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMenuRenderState): ReactNode {
-  const detail = result.actionHint ? (state.active ? result.actionHint : undefined) : result.detail
-  const detailNode = result.actionHint ? undefined : result.detailNode
-  const depth = result.depth ?? 0
-  const isCreateFolder = result.id.startsWith('open-folder-create:')
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        disabled={state.disabled}
-        onMouseEnter={state.onMouseEnter}
-        onClick={(event) => state.onSelect(event)}
-        className={`${rowClassName(state)} !gap-1.5 ${isCreateFolder ? '!text-neutral-500' : ''}`}
-        style={{ paddingLeft: `${16 + depth * 12}px` }}
-      >
-        {result.kind === 'folder' ? (
-          <span
-            role={result.drill ? 'button' : undefined}
-            aria-label={result.drill ? `Open ${result.label}` : undefined}
-            className={`relative z-10 flex w-3 shrink-0 items-center justify-center text-neutral-600 ${result.drill ? 'cursor-pointer hover:text-neutral-300' : ''}`}
-            onClick={(event) => {
-              if (!result.drill) return
-              event.preventDefault()
-              event.stopPropagation()
-              result.drill()
-            }}
-          >
-            {depth === 0 ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
-          </span>
-        ) : isCreateFolder ? (
-          <span className="relative z-10 flex w-3 shrink-0 items-center justify-center text-neutral-600"><Plus className="h-3.5 w-3.5" aria-hidden="true" /></span>
-        ) : result.icon ? (
-          <span className="relative z-10"><TabIconView icon={result.icon} /></span>
-        ) : (
-          <span className="relative z-10 w-3" />
-        )}
-        <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
-        {detail && (
-          <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>
-        )}
-      </button>
-    </div>
   )
 }
 
@@ -1203,108 +1079,6 @@ function UniversalMenuScopeButtons({ scopes, onEnter }: { scopes: ScopeDefinitio
       {scopes.map((scope) => <UniversalMenuScopeButton key={scope.id} scope={scope} onClick={() => onEnter(scope)} />)}
     </div>
   )
-}
-
-function openFolderScopeResults({
-  data,
-  error,
-  loading,
-  filter,
-  workspaceId,
-  startChat,
-  openFile,
-  drillFolder,
-  createFolder,
-  openNewWorkspaceChat,
-}: {
-  data?: FolderBrowseData
-  error: unknown
-  loading: boolean
-  filter: string
-  workspaceId?: string
-  startChat: (path: string) => Promise<void>
-  openFile: (path: string) => void
-  drillFolder: (path: string) => void
-  createFolder: (parentPath: string, name: string) => Promise<void>
-  openNewWorkspaceChat: (path: string) => void
-}): UniversalMenuResult[] {
-  if (loading) return [disabledRow('open-folder-loading', 'Loading folders…')]
-  if (error) return [disabledRow('open-folder-error', extractTrpcMessage(error))]
-  if (!data) return [disabledRow('open-folder-empty', 'No folder data.')]
-
-  const q = filter.trim().toLowerCase()
-  const dirs = q ? data.dirs.filter((dir) => dir.name.toLowerCase().includes(q) || dir.path.toLowerCase().includes(q)) : data.dirs
-  const files = q ? (data.files ?? []).filter((file) => file.name.toLowerCase().includes(q) || file.path.toLowerCase().includes(q)) : (data.files ?? [])
-  const rows: UniversalMenuResult[] = [
-    {
-      id: `open-folder-current:${data.path}`,
-      kind: 'folder',
-      label: basename(data.path),
-      detail: data.path,
-      actionHint: 'create chat',
-      icon: paneTabIconForType('file'),
-      depth: 0,
-      haystack: data.path,
-      disabled: !workspaceId,
-      run: () => startChat(data.path),
-      alternateRun: () => openNewWorkspaceChat(data.path),
-    },
-  ]
-
-  rows.push(...dirs.map((dir): UniversalMenuResult => ({
-    id: `open-folder-dir:${dir.path}`,
-    kind: 'folder',
-    label: dir.name,
-    detail: dir.path,
-    actionHint: 'create chat',
-    icon: paneTabIconForType('file'),
-    parentId: `open-folder-current:${data.path}`,
-    depth: 1,
-    haystack: `${dir.name} ${dir.path}`,
-    run: () => startChat(dir.path),
-    alternateRun: () => openNewWorkspaceChat(dir.path),
-    drill: () => drillFolder(dir.path),
-  })))
-
-  rows.push(...files.map((file): UniversalMenuResult => ({
-    id: `open-folder-file:${file.path}`,
-    kind: 'file',
-    label: file.name,
-    detail: file.path,
-    actionHint: 'open file',
-    icon: paneTabIconForType('file'),
-    parentId: `open-folder-current:${data.path}`,
-    depth: 1,
-    haystack: `${file.name} ${file.path}`,
-    run: () => openFile(file.path),
-  })))
-
-  const createName = folderNameToCreate(filter, data.dirs)
-  if (createName) {
-    rows.push({
-      id: `open-folder-create:${data.path}/${createName}`,
-      kind: 'action',
-      label: `New folder: ${createName}`,
-      detail: data.path,
-      actionHint: 'create folder',
-      parentId: `open-folder-current:${data.path}`,
-      depth: 1,
-      haystack: `create folder ${createName} ${data.path}`,
-      keepOpen: true,
-      run: () => createFolder(data.path, createName),
-    })
-  }
-
-  if (dirs.length === 0 && files.length === 0 && !createName) rows.push(disabledRow('open-folder-no-matches', q ? 'No matching items.' : 'No items.'))
-  return rows
-}
-
-function folderNameToCreate(filter: string, dirs: FolderBrowseDir[]): string | null {
-  const name = filter.trim()
-  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) return null
-  const lower = name.toLowerCase()
-  if (dirs.some((dir) => dir.name.toLowerCase() === lower)) return null
-  return name
 }
 
 function recentFolderScopeResults({
@@ -1622,68 +1396,6 @@ function displayPath(path: string, home: string | null | undefined): string {
 function isPathLikeInput(value: string): boolean {
   const trimmed = value.trimStart()
   return trimmed.startsWith('~') || trimmed.includes('/')
-}
-
-function pathBrowsePlan(value: string, anchors: { home?: string | null; defaultPath?: string | null }): FolderBrowsePlan {
-  const trimmed = value.trim()
-  const home = anchors.home || undefined
-  const defaultPath = anchors.defaultPath || undefined
-
-  let expanded: string
-  if (!trimmed) return { dir: undefined, filter: '' }
-  if (trimmed === '~') return { dir: home, filter: '' }
-  if (trimmed.startsWith('~/')) {
-    expanded = home ? `${home}${trimmed.slice(1)}` : trimmed
-  } else if (trimmed.startsWith('/')) {
-    expanded = trimmed
-  } else {
-    const relativeRoot = home ?? defaultPath
-    expanded = relativeRoot ? `${relativeRoot.replace(/\/+$/, '')}/${trimmed}` : trimmed
-  }
-
-  if (expanded.endsWith('/')) return { dir: expanded, filter: '' }
-  const slash = expanded.lastIndexOf('/')
-  if (slash < 0) return { dir: defaultPath, filter: expanded }
-  if (slash === 0) return { dir: '/', filter: expanded.slice(1) }
-  return { dir: expanded.slice(0, slash), filter: expanded.slice(slash + 1) }
-}
-
-function pathInputForAbsolutePath(path: string, currentInput: string, anchors: { home?: string | null; defaultPath?: string | null }): string {
-  const normalized = path.replace(/\/+$/, '')
-  const trimmed = currentInput.trimStart()
-  if (trimmed.startsWith('/')) return `${normalized}/`
-
-  const home = anchors.home?.replace(/\/+$/, '')
-  if (trimmed.startsWith('~') && home && isPathWithin(normalized, home)) {
-    const rel = normalized === home ? '' : normalized.slice(home.length + 1)
-    return rel ? `~/${rel}/` : '~/'
-  }
-
-  if (home && isPathWithin(normalized, home)) {
-    const rel = normalized === home ? '' : normalized.slice(home.length + 1)
-    return rel ? `${rel}/` : ''
-  }
-
-  const defaultPath = anchors.defaultPath?.replace(/\/+$/, '')
-  if (defaultPath && isPathWithin(normalized, defaultPath)) {
-    const rel = normalized === defaultPath ? '' : normalized.slice(defaultPath.length + 1)
-    return rel ? `${rel}/` : ''
-  }
-
-  return `${normalized}/`
-}
-
-function isPathWithin(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}/`)
-}
-
-function parentPath(path: string | undefined): string | null {
-  if (!path) return null
-  const normalized = path.replace(/\/+$/, '')
-  const slash = normalized.lastIndexOf('/')
-  if (slash < 0) return null
-  if (slash === 0) return '/'
-  return normalized.slice(0, slash)
 }
 
 function rowClassName(state: UniversalMenuRenderState): string {

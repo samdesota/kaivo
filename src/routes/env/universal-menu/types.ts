@@ -71,6 +71,7 @@ export interface UniversalScopeApi {
 
 export interface UniversalScopeProps {
   query: string
+  setQuery: (query: string) => void
   activeIndex: number
   mouseMoved: boolean
   workspaceId?: string
