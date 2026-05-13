@@ -487,6 +487,30 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' })
   })
 
+  it('opens direct web URLs from command search', () => {
+    const onOpenContent = vi.fn()
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: 'google.com' } })
+
+    expect(screen.getByText('https://google.com')).toBeTruthy()
+    expect(screen.getByText('open URL')).toBeTruthy()
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' })
+  })
+
   it('shows filtered workspace ancestry and switches workspace', () => {
     const onSwitchWorkspace = vi.fn()
     mocks.workspaceTree = [{ type: 'folder', folder: { id: 'baz', name: 'baz' }, children: [{ type: 'folder', folder: { id: 'bar', name: 'bar' }, children: [{ type: 'workspace', workspace: { id: 'foo-id', name: 'foo', folderId: 'bar' } }] }] }]

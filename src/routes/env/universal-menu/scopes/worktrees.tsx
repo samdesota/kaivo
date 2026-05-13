@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo } from 'react'
-import { Plus } from 'lucide-react'
+import { GitBranch } from 'lucide-react'
 import { paneTabIconForType } from '../../../../components/tab-icon'
 import { envTrpc } from '../../../../env-trpc'
 import { extractTrpcMessage } from '../../../../lib/utils'
@@ -80,7 +80,6 @@ export function WorktreesScope(props: UniversalScopeProps) {
 }
 
 function renderWorkTreeResult(result: UniversalMenuResult, state: UniversalMenuRenderState) {
-  const depth = result.depth ?? 0
   if (result.id.startsWith('worktree-clone:')) {
     return (
       <button
@@ -89,9 +88,9 @@ function renderWorkTreeResult(result: UniversalMenuResult, state: UniversalMenuR
         onMouseEnter={state.onMouseEnter}
         onClick={(event) => state.onSelect(event)}
         className={rowClassName(state)}
-        style={{ paddingLeft: `${16 + depth * 18}px` }}
+        style={{ paddingLeft: 16 }}
       >
-        <span className="flex w-3 shrink-0 items-center justify-center text-neutral-500"><Plus className="h-3.5 w-3.5" aria-hidden="true" /></span>
+        <span className="flex w-3 shrink-0 items-center justify-center text-neutral-500"><GitBranch className="h-3.5 w-3.5" aria-hidden="true" /></span>
         <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
         {result.detail && <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{result.detail}</span>}
       </button>
@@ -154,6 +153,7 @@ function workTreeScopeResults({
         parentId: 'worktree-clone-section',
         depth: 1,
         haystack: `${config.name} ${config.githubFullName ?? ''} ${config.originUrl ?? ''}`,
+        keepOpen: true,
         run: () => openNewWorkspaceChat({ type: 'repoConfig', configId: config.id, worktreeName: '' }),
       })
     }

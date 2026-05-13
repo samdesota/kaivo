@@ -4,7 +4,7 @@ import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } fr
 import { trpc } from '../../../../trpc'
 import { UniversalMenuResultList, selectResult } from '../shared'
 import type { UniversalMenuContextItem, UniversalMenuResult, UniversalScopeModule, UniversalScopeProps } from '../types'
-import { disabledRow } from '../utils'
+import { disabledRow, webQueryUrl } from '../utils'
 import type { PaneContent } from '../../shell/tab-state'
 
 export const webScopeModule: UniversalScopeModule = {
@@ -46,19 +46,4 @@ function webScopeResults({ items, query, faviconRecords, openContent }: { items:
     run: () => openContent(item.content),
   })))
   return rows.length ? rows : [disabledRow('web-empty', q ? 'No matching tabs or URLs.' : 'No browser tabs are open.')]
-}
-
-function webQueryUrl(query: string): string | null {
-  const trimmed = query.trim()
-  if (!trimmed || /\s/.test(trimmed)) return null
-  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed)
-  const candidate = hasScheme ? trimmed : trimmed.includes('.') || trimmed.startsWith('localhost') ? `https://${trimmed}` : ''
-  if (!candidate) return null
-  try {
-    const url = new URL(candidate)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-    return url.toString().replace(/\/$/, '')
-  } catch {
-    return null
-  }
 }
