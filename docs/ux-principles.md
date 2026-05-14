@@ -1,6 +1,6 @@
 # UX Principles
 
-This document defines the default UI standards for Cloud Code. The goal is a clean, compact, minimal product UI that is fast to scan, easy to operate, and resistant to visual noise.
+This document defines the default UI standards for Kaivo. The goal is a clean, compact, minimal product UI that is fast to scan, easy to operate, and resistant to visual noise.
 
 These principles should guide new screens, component choices, and cleanup work. When in doubt, choose the simpler, denser, quieter option.
 

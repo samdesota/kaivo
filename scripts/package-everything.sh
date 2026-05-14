@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # package-everything.sh — build + deploy everything for local dev:
 #   1. env-server → ~/.local/share/cc-env/app/
-#   2. Zoottle OpenCode plugin → ~/.local/share/cc-env/zoottle-opencode-plugin/
+#   2. Kaivo OpenCode plugin → ~/.local/share/cc-env/kaivo-opencode-plugin/
 #   3. desktop Electron app → /Applications/
 #   4. restart the launchd service
 set -euo pipefail
@@ -20,12 +20,12 @@ cp "$repo_root/packages/env-server/dist/terminal-daemon.js.map" "$install_dir/ap
 rsync -a --delete "$repo_root/packages/env-server/migrations/" "$install_dir/app/migrations/"
 find "$install_dir/app/node_modules/node-pty/prebuilds" -name spawn-helper -type f -exec chmod 755 {} +
 
-echo "==> building Zoottle OpenCode plugin"
+echo "==> building Kaivo OpenCode plugin"
 (cd "$repo_root/packages/opencode-plugin" && npm run build)
 
-echo "==> staging Zoottle OpenCode plugin"
-mkdir -p "$install_dir/zoottle-opencode-plugin"
-cp "$repo_root/packages/opencode-plugin/dist/index.js" "$install_dir/zoottle-opencode-plugin/index.js"
+echo "==> staging Kaivo OpenCode plugin"
+mkdir -p "$install_dir/kaivo-opencode-plugin"
+cp "$repo_root/packages/opencode-plugin/dist/index.js" "$install_dir/kaivo-opencode-plugin/index.js"
 
 echo "==> packaging desktop app"
 (cd "$repo_root/packages/zoottle-desktop" && npm run package:mac)

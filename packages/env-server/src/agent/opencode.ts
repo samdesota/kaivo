@@ -342,7 +342,7 @@ class OpenCodeSupervisor {
       OPENCODE_ENABLE_EXA: '1',
       CLOUDCODE_AGENT_TOKEN: token,
       // Plugin talks to this env-server on loopback (we publish /trpc
-      // there; the plugin just treats it as "the cloud-code app").
+      // there; the plugin just treats it as "the Kaivo app").
       CLOUDCODE_APP_URL: `http://127.0.0.1:${config.CC_PORT}`,
       XDG_CONFIG_HOME: path.join(config.CC_STATE_DIR, 'xdg', 'config'),
       XDG_DATA_HOME: path.join(config.CC_STATE_DIR, 'xdg', 'data'),

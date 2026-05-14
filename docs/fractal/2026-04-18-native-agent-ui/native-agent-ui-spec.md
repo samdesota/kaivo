@@ -223,7 +223,7 @@ agentShell = router({
 
 Byte chunks in subscriptions are base64-encoded — tRPC subscriptions are JSON. Frontend consumer rarely uses this path (it attaches the xterm directly via `/ws/shell/:id`); it's primarily for the plugin.
 
-### The OpenCode plugin (`@zoottle/opencode-plugin`)
+### The OpenCode plugin (`@kaivo/opencode-plugin`)
 
 - Ships as a JS/TS module installed into the base-sandbox image at a fixed path, referenced from `~/.opencode/config.json` (or the opencode-config location; **verify in impl**).
 - Startup: reads `CLOUDCODE_AGENT_TOKEN` and `CLOUDCODE_APP_URL` from env. Builds a typed tRPC client against our `AppRouter` type.
@@ -412,7 +412,7 @@ Location: new directory under `src/routes/sandbox/agent/`. Rendered as the left-
 
 ### Base-sandbox image changes
 
-- Add `npm install -g @zoottle/opencode-plugin@<pinned>` (or bundle as a local tarball if we keep it in-repo; pick during impl).
+- Add `npm install -g @kaivo/opencode-plugin@<pinned>` (or bundle as a local tarball if we keep it in-repo; pick during impl).
 - Seed an `~/.opencode/config.json` template that wires the plugin path.
 - No change to `opencode-ai` version requirement; plugin targets the running version.
 
@@ -456,7 +456,7 @@ On `app` restart: reconciler re-reads tokens; if a token row is missing for an a
 
 Backend: no new runtime deps. (`@trpc/client` already transitively; confirm.)
 
-Sandbox plugin package (`@zoottle/opencode-plugin`): `@opencode-ai/plugin`, `@trpc/client`, `zod`, `undici` (for fetch if needed on older Node). Shipped as its own workspace package in the monorepo.
+Sandbox plugin package (`@kaivo/opencode-plugin`): `@opencode-ai/plugin`, `@trpc/client`, `zod`, `undici` (for fetch if needed on older Node). Shipped as its own workspace package in the monorepo.
 
 Frontend: `@tanstack/react-virtual` (if not already present). Everything else is already in the stack.
 

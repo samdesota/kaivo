@@ -27,7 +27,7 @@ const schema = z.object({
   // Override in dev when the app listens on the host (`host.docker.internal`).
   SANDBOX_APP_URL: z.string().default('http://app:3000'),
   // Dev-only: bind-mount this host file into each sandbox at
-  // /opt/zoottle-opencode-plugin/index.js so `npm run build:plugin` + a sandbox
+  // /opt/kaivo-opencode-plugin/index.js so `npm run build:plugin` + a sandbox
   // restart is enough to pick up plugin changes (no image rebuild).
   DEV_PLUGIN_HOST_PATH: z.string().optional(),
   // Optional host directory containing an SSH private key (`id_ed25519` or
