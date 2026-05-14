@@ -2,13 +2,13 @@
 
 ## Seed
 
-Provide agent-accessible browser tools for Zoottle browser panes, using Starch's `browser-run` tool suite as the reference for browser inspection and interaction.
+Provide agent-accessible browser tools for Kaivo browser panes, using Starch's `browser-run` tool suite as the reference for browser inspection and interaction.
 
 ## Solution
 
 - Tool surface: expose direct OpenCode browser tools for list tabs, connect tab, open and connect tab, disconnect tab, snapshot, interact, screenshot, and execute JavaScript.
 - Connection model: tools operate on a `cdpId` returned by explicit tab connection, not implicit active-tab state.
-- Browser target: connect only to Zoottle browser panes backed by Electron/webframe tabs.
+- Browser target: connect only to Kaivo browser panes backed by Electron/webframe tabs.
 - Browser primitives: implement snapshot, interact, screenshot, and JavaScript execution through the desktop CDP/webframe boundary.
 - UI state: show an agent-connected banner under the URL bar with a disconnect button for connected tabs.
 - Orchestration: let the OpenCode agent decide whether to call tools inline or delegate through its own sub-task mechanisms.
@@ -19,7 +19,7 @@ Provide agent-accessible browser tools for Zoottle browser panes, using Starch's
 
 ### Scope
 
-Zoottle will add browser automation tools to the OpenCode plugin. These tools control browser panes already owned by the Zoottle desktop app. They do not create a browser subagent, use Browserbase, or mirror Starch's LRT child-run orchestration.
+Kaivo will add browser automation tools to the OpenCode plugin. These tools control browser panes already owned by the Kaivo desktop app. They do not create a browser subagent, use Browserbase, or mirror Starch's LRT child-run orchestration.
 
 The first version supports desktop browser panes only. In browser-only mode the tools return a clear unavailable error because there is no native webframe tab or Electron CDP target to operate on.
 
@@ -65,7 +65,7 @@ type BrowserTabSummary = {
 
 Connections are scoped to the authenticated agent token and `opencodeSessionId`. A `cdpId` cannot be used by another sandbox or another OpenCode session. Disconnect detaches the CDP session and clears UI state; closing the tab or ending the agent session also invalidates the connection.
 
-`cloud_browser_open_and_connect` creates or focuses a Zoottle browser pane for the requested URL, waits until the backing `browserTabId` exists, then returns a connection. This is the fast path for agents that need a fresh page instead of selecting from existing tabs.
+`cloud_browser_open_and_connect` creates or focuses a Kaivo browser pane for the requested URL, waits until the backing `browserTabId` exists, then returns a connection. This is the fast path for agents that need a fresh page instead of selecting from existing tabs.
 
 ### App And Desktop Architecture
 
@@ -197,7 +197,7 @@ Execution runs in the main frame of the connected tab. Results must be JSON-seri
 
 The app validates URL schemes before opening or navigating. The allowed defaults are `http:`, `https:`, `about:blank`, and local development URLs. Dangerous schemes such as `file:`, `javascript:`, and custom external app protocols are rejected unless a future explicit policy allows them.
 
-Browser commands are scoped to tabs known to the current Zoottle desktop window. The router rejects unknown `browserTabId`, stale `cdpId`, closed tabs, and commands from the wrong sandbox/session. JavaScript and screenshots use conservative payload limits to avoid leaking excessive data into the agent transcript.
+Browser commands are scoped to tabs known to the current Kaivo desktop window. The router rejects unknown `browserTabId`, stale `cdpId`, closed tabs, and commands from the wrong sandbox/session. JavaScript and screenshots use conservative payload limits to avoid leaking excessive data into the agent transcript.
 
 ### Error Handling
 

@@ -10,7 +10,7 @@ Improve pane iconography so every pane type has a clear default icon, browser ta
 - Tab rendering: add an icon slot to `BorderedTabStrip`; labels remain text and truncation behavior stays unchanged.
 - Favicon resolution: use `webframe`/Electron `page-favicon-updated` as the browser-quality signal; no app-side favicon scraping.
 - Webframe API: expose favicon on tab list/create/change payloads and improve candidate selection when multiple favicon URLs are reported.
-- App persistence: store Zoottle favicon cache records in the app service SQLite layer, not in webframe’s tab store.
+- App persistence: store Kaivo favicon cache records in the app service SQLite layer, not in webframe’s tab store.
 - Browser fallback: show the default web icon until a cached or newly resolved favicon is available; blank/system/error cases keep the default.
 - Cache flow: browser tab favicon events update app-service cache, and restored tabs hydrate icons from that cache before live browser events arrive.
 
@@ -57,7 +57,7 @@ Selection rules:
 - Prefer larger explicit image filenames when distinguishable by URL (`32`, `48`, `64`, `96`, `128`, `180`, `192`, `256`) over `16` or unknown size.
 - Keep the previous favicon if Electron emits an empty candidate list during navigation.
 
-`webframe` tab list/get/create/change payloads must expose `favicon?: string` consistently. Zoottle’s browser bridge and browser API then surface `favicon?: string` on `BrowserTabChange`, `BrowserTabCreated`, and `listTabs()` results.
+`webframe` tab list/get/create/change payloads must expose `favicon?: string` consistently. Kaivo’s browser bridge and browser API then surface `favicon?: string` on `BrowserTabChange`, `BrowserTabCreated`, and `listTabs()` results.
 
 ### App-Service Cache
 
@@ -101,7 +101,7 @@ During browsing:
 
 1. `webframe` receives Electron favicon candidates.
 2. `webframe` selects a candidate and emits `patch.favicon`.
-3. Zoottle’s browser API forwards the favicon patch.
+3. Kaivo’s browser API forwards the favicon patch.
 4. The browser pane/workspace tab layer fetches the image as a bounded data URL using browser fetch semantics where possible.
 5. The app service persists the data URL by page origin.
 6. Visible browser tab icons update from the new cache entry.

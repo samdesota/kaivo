@@ -91,7 +91,7 @@ function installAppShortcutMenu(): void {
       ? [{ role: 'appMenu' as const }]
       : []),
     {
-      label: 'Zoottle',
+      label: 'Kaivo',
       submenu: appShortcuts.map((shortcut) => ({
         label: shortcut.label,
         accelerator: shortcut.accelerator,

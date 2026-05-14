@@ -1,4 +1,4 @@
-# Zoottle — operator notes
+# Kaivo — operator notes
 
 ## Modal and Overlay Layer
 
@@ -8,7 +8,7 @@ Use `src/lib/overlay-layer-controller.tsx` as the app-facing API. Add a typed `O
 
 Do not add new `<Modal>`, `role="dialog"`, command palette, or picker UI directly to workspace/app routes unless it is intentionally non-blocking inline UI. If a route needs to trigger a modal from JSX, create a small `XOverlayLauncher` component that calls the controller and returns `null`.
 
-Zoottle is currently local-first. The default product path is the Electron desktop app, which starts a local identity/app server and a matching local `cc-env`, then auto-pairs them.
+Kaivo is currently local-first. The default product path is the Electron desktop app, which starts a local identity/app server and a matching local `cc-env`, then auto-pairs them.
 
 Remote Docker sandboxes/orchestrator are legacy for now. The production box still has old data that will be exported into local SQLite at the final migration step of the current Fractal plan.
 

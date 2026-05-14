@@ -31,8 +31,8 @@ RUN npm install -g --omit=dev "opencode-ai@${OPENCODE_VERSION}" \
  && which opencode \
  && opencode --version
 
-# cloud-code OpenCode plugin. Prebuilt by `npm run prepare:sandbox-image`.
-COPY plugin/index.js /opt/zoottle-opencode-plugin/index.js
+# Kaivo OpenCode plugin. Prebuilt by `npm run prepare:sandbox-image`.
+COPY plugin/index.js /opt/kaivo-opencode-plugin/index.js
 
 # cc-env binary + its runtime package.json. Prebuilt by
 # `npm run prepare:sandbox-image` (runs tsup in packages/env-server and
@@ -55,7 +55,7 @@ RUN groupadd -g 1000 coder \
 RUN mkdir -p /workspace /home/coder/.opencode /home/coder/.config/opencode /var/lib/cc-env \
  && chown -R coder:coder /workspace /home/coder /var/lib/cc-env \
  && chown -R coder:coder /opt/cc-env \
- && chmod -R a+r /opt/zoottle-opencode-plugin
+ && chmod -R a+r /opt/kaivo-opencode-plugin
 
 USER coder
 WORKDIR /home/coder/.config/opencode

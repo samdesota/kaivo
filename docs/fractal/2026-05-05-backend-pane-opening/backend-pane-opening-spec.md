@@ -2,7 +2,7 @@
 
 ## Seed
 
-`cloud_open_pane` should open Zoottle panes through backend state instead of depending on a currently rendered frontend event handler. Opening a file, shell, preview, or browser pane must work even when no frontend is mounted at the moment the tool is called.
+`cloud_open_pane` should open Kaivo panes through backend state instead of depending on a currently rendered frontend event handler. Opening a file, shell, preview, or browser pane must work even when no frontend is mounted at the moment the tool is called.
 
 ## Solution
 

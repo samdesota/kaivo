@@ -1,6 +1,6 @@
-# Zoottle
+# Kaivo
 
-Zoottle is a local-first desktop app. Electron owns a local identity/app server and a matching `cc-env` process, auto-pairs them on startup, and opens the React UI against the local app server.
+Kaivo is a local-first desktop app. Electron owns a local identity/app server and a matching `cc-env` process, auto-pairs them on startup, and opens the React UI against the local app server.
 
 The old remote Docker sandbox/orchestrator path is legacy while the new remote-env design is rebuilt later. Keep `cc-env` as the environment-service boundary.
 
@@ -35,7 +35,7 @@ Useful overrides:
 
 ```bash
 CC_INSTANCE_ID=my-branch npm run dev
-CC_INSTANCE_ROOT=/tmp/zoottle-a CC_APP_PORT=3101 CC_ENV_PORT=48001 npm run dev
+CC_INSTANCE_ROOT=/tmp/kaivo-a CC_APP_PORT=3101 CC_ENV_PORT=48001 npm run dev
 ```
 
 Each instance scopes its app DB, env DB, logs, ports, env label, and pairing token.

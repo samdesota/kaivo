@@ -126,12 +126,12 @@ describe('resolveInstanceRuntimeConfig', () => {
 
   it('uses packaged app identity for production defaults', () => {
     const config = resolveInstanceRuntimeConfig(
-      { NODE_ENV: 'production', CC_DESKTOP_APP_ID: 'Zoottle Beta' },
+      { NODE_ENV: 'production', CC_DESKTOP_APP_ID: 'Kaivo Beta' },
       { cwd: '/worktree', homeDir: '/Users/sam' },
     )
 
-    expect(config.instanceId).toBe('zoottle-beta')
-    expect(config.rootDir).toBe('/Users/sam/Library/Application Support/zoottle-beta/instances/zoottle-beta')
+    expect(config.instanceId).toBe('kaivo-beta')
+    expect(config.rootDir).toBe('/Users/sam/Library/Application Support/kaivo-beta/instances/kaivo-beta')
     expect(config.env.workingDir).toBe('/Users/sam/d')
   })
 

@@ -28,13 +28,13 @@ const DEFAULT_MODEL_SECRET = 'agent.default_model'
 const CLOUD_TOOL_OVERRIDES = {
   bash: false,
   pty: false,
-  zoottle_bash: true,
-  zoottle_pty: true,
-  zoottle_pty_list: true,
-  zoottle_pty_write: true,
-  zoottle_pty_read: true,
-  zoottle_pty_close: true,
-  zoottle_open_pane: true,
+  kaivo_bash: true,
+  kaivo_pty: true,
+  kaivo_pty_list: true,
+  kaivo_pty_write: true,
+  kaivo_pty_read: true,
+  kaivo_pty_close: true,
+  kaivo_open_pane: true,
 } as const
 
 /** Turn a user prompt into a compact session title (≤60 chars, single line). */

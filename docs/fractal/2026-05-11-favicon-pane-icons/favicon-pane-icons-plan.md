@@ -20,12 +20,12 @@ Add shared default icons for current pane types and render them in existing tab 
 
 ## Task 2: Surface Webframe Favicons
 
-Extend the existing `webframe` favicon event path so Zoottle receives selected favicon URLs consistently.
+Extend the existing `webframe` favicon event path so Kaivo receives selected favicon URLs consistently.
 
 **Steps**
 - Improve `webframe` favicon candidate selection for `page-favicon-updated`.
 - Include `favicon?: string` in `webframe` tab list/get/create/change payloads.
-- Forward favicon data through Zoottle browser API events and tab listings.
+- Forward favicon data through Kaivo browser API events and tab listings.
 
 **Tests**
 - Unit: favicon candidate selection prefers valid, same-origin, larger candidates and keeps prior favicon on empty events.

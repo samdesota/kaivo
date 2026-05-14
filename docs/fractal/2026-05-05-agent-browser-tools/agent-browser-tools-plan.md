@@ -60,7 +60,7 @@ Create the desktop-side connection registry that maps a session-scoped `cdpId` t
 Port Starch's current semantic snapshot implementation rather than reimplementing it. This task is isolated so behavior and tests can be reviewed against the upstream source before interaction tools depend on it.
 
 **Steps**
-- Port `/Users/sam/d/starch/Starch-app/supabase/functions/_shared/agent-tree-snapshot.ts` into the Zoottle browser tool layer with minimal semantic changes.
+- Port `/Users/sam/d/starch/Starch-app/supabase/functions/_shared/agent-tree-snapshot.ts` into the Kaivo browser tool layer with minimal semantic changes.
 - Port the CDP wrapper behavior from `/Users/sam/d/starch/Starch-app/supabase/functions/_shared/browser/snapshot.ts` to Electron debugger CDP calls.
 - Preserve semantic tree output, viewport filtering, shadow DOM traversal, ARIA role/name handling, element id assignment, filtering, pruning, and compact text formatting.
 - Adapt Deno/Supabase imports and Starch tool wrappers to this repo's TypeScript and test environment.
@@ -107,7 +107,7 @@ Expose the app-side browser operations as OpenCode plugin tools with concise des
 - Update plugin logging to include the browser tool names when registered.
 
 **Tests**
-- Unit: plugin registers every browser tool when Zoottle credentials exist.
+- Unit: plugin registers every browser tool when Kaivo credentials exist.
 - Unit: each tool calls the expected tRPC procedure with `opencodeSessionId` and normalized inputs.
 - Unit: app-unreachable and router errors map to structured plugin error metadata.
 
