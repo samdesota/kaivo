@@ -150,12 +150,12 @@ vi.mock('../../src/routes/env/agent/new-agent-chat-modal', () => ({
     ) : null,
 }))
 
-function renderSidebar() {
+function renderSidebar({ onNewWorkspaceIntent = vi.fn() }: { onNewWorkspaceIntent?: () => void } = {}) {
   const rootRoute = createRootRoute()
   const route = createRoute({
     getParentRoute: () => rootRoute,
     path: '/w/$workspaceId',
-    component: () => <WorkspaceSidebar dispatchWorkspaceState={vi.fn()} onHide={vi.fn()} />,
+    component: () => <WorkspaceSidebar dispatchWorkspaceState={vi.fn()} onHide={vi.fn()} onNewWorkspaceIntent={onNewWorkspaceIntent} />,
     validateSearch: () => ({ chat: undefined as string | undefined, tab: undefined as string | undefined }),
   })
   const router = createRouter({
@@ -200,23 +200,24 @@ describe('WorkspaceSidebar', () => {
     expect(screen.getByText('opencode-plugin')).toBeTruthy()
   })
 
-  it('opens the new agent chat modal in new-workspace mode from a folder plus', async () => {
+  it('opens new-workspace universal menu intent from the header plus', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
-    renderSidebar()
+    const onNewWorkspaceIntent = vi.fn()
+    renderSidebar({ onNewWorkspaceIntent })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Create workspace in Zoottle' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create new workspace' }))
 
-    const select = await screen.findByLabelText('Workspace mode') as HTMLSelectElement
-    expect(select.value).toBe('new')
+    expect(onNewWorkspaceIntent).toHaveBeenCalledTimes(1)
   })
 
-  it('does not render workspace row plus buttons', async () => {
+  it('does not render folder or workspace row plus buttons', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
     expect(await screen.findByText('zoottle-app')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Create chat in zoottle-app' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Create workspace in Zoottle' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Create workspace in Zoottle' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Create new workspace' })).toBeTruthy()
   })
 
   it('does not expose workspace chat expansion controls', async () => {
