@@ -40,7 +40,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
 
   const hasTabs = state.tabs.length > 0
 
-  async function openCommandPalette() {
+  async function openCommandPalette(initialIntent: 'default' | 'new-workspace' = 'default') {
     const result = await openUniversalMenuOverlay({
       env: envContext.env,
       envToken: envContext.envToken,
@@ -55,6 +55,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
         }
         return []
       }),
+      initialIntent,
     })
     if (result.type === 'open-pane') openContent(result.content)
     if (result.type === 'switch-workspace') void navigate({ to: '/w/$workspaceId', params: { workspaceId: result.workspaceId }, search: { chat: undefined, tab: undefined } })
@@ -67,9 +68,9 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         void openCommandPalette()
-      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 't') {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
-        void openCommandPalette()
+        void openCommandPalette(e.shiftKey ? 'new-workspace' : 'default')
       }
     }
     window.addEventListener('keydown', onKey)

@@ -7,7 +7,7 @@ import { OVERLAY_CHANNEL, OverlayLayerApp, type OverlayRequest, type OverlayResp
 import type { PaneContent } from '../routes/env/shell/tab-state'
 import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
 import type { WorkspaceResourceRecord } from '../routes/workspace/resources-store'
-import type { UniversalMenuContextItem } from '../routes/env/universal-menu/universal-menu'
+import type { UniversalMenuContextItem, UniversalMenuInitialIntent } from '../routes/env/universal-menu/universal-menu'
 
 /**
  * Desktop modals must be opened through this controller so they render in the
@@ -120,6 +120,7 @@ export async function openUniversalMenuOverlay(
     contextItems?: UniversalMenuContextItem[]
     canToggleAgentPane?: boolean
     canToggleSidebar?: boolean
+    initialIntent?: UniversalMenuInitialIntent
   },
 ): Promise<UniversalMenuOverlayResult> {
   const response = await openOverlayRequest({
