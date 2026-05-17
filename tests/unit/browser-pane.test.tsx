@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = {
@@ -24,13 +24,37 @@ vi.mock('../../src/lib/browser-api', () => ({
   browserApi: api,
 }))
 
+const openCreateBookmarkOverlay = vi.hoisted(() => vi.fn(async () => 'bookmark-1'))
+const openBrowserUrlPopoverOverlay = vi.hoisted(() => vi.fn(async () => ({ update: vi.fn(), close: vi.fn() })))
+
+vi.mock('../../src/lib/overlay-layer-controller', () => ({
+  openCreateBookmarkOverlay,
+  openBrowserUrlPopoverOverlay,
+}))
+
 class TestResizeObserver {
   observe = vi.fn()
   disconnect = vi.fn()
 }
 
 const { BrowserPane } = await import('../../src/components/browser-pane')
+type BookmarkRecord = import('../../src/routes/workspace/bookmarks-store').BookmarkRecord
 let rect = { x: 10, y: 20, width: 300, height: 200 }
+
+function bookmark(input: Partial<BookmarkRecord> & { title: string; url: string }): BookmarkRecord {
+  return {
+    id: input.id ?? input.title,
+    workspaceId: 'workspace-1',
+    title: input.title,
+    url: input.url,
+    normalizedUrl: input.normalizedUrl ?? input.url,
+    origin: input.origin ?? new URL(input.url).origin,
+    faviconDataUrl: input.faviconDataUrl ?? null,
+    faviconUrl: input.faviconUrl ?? null,
+    createdAt: input.createdAt ?? new Date('2026-05-16T00:00:00Z'),
+    updatedAt: input.updatedAt ?? new Date('2026-05-16T00:00:00Z'),
+  }
+}
 
 describe('BrowserPane', () => {
   beforeEach(() => {
@@ -38,6 +62,9 @@ describe('BrowserPane', () => {
     api.onTabChange.mockReturnValue(() => undefined)
     api.isAvailable.mockReturnValue(true)
     api.getAgentConnections.mockResolvedValue({ browserTabIds: [] })
+    openCreateBookmarkOverlay.mockClear()
+    openBrowserUrlPopoverOverlay.mockClear()
+    openBrowserUrlPopoverOverlay.mockResolvedValue({ update: vi.fn(), close: vi.fn() })
     rect = { x: 10, y: 20, width: 300, height: 200 }
     Object.defineProperty(globalThis, 'ResizeObserver', {
       value: TestResizeObserver,
@@ -107,6 +134,13 @@ describe('BrowserPane', () => {
     expect(api.createTab).not.toHaveBeenCalled()
   })
 
+  it('keeps browser-unavailable fallback quiet with malformed bookmark context', () => {
+    api.isAvailable.mockReturnValue(false)
+    const malformed = { id: 'bad', title: null, url: null, normalizedUrl: null, origin: null, updatedAt: null } as unknown as BookmarkRecord
+    expect(() => render(<BrowserPane paneId="pane-1" active={true} url="doc" bookmarks={[malformed]} />)).not.toThrow()
+    expect(screen.getByText('Browser pane unavailable')).toBeTruthy()
+  })
+
   it('renders controls and drives browser navigation', async () => {
     const view = render(
       <BrowserPane paneId="pane-1" browserTabId="native-tab-1" url="https://example.com" active={true} />,
@@ -133,6 +167,135 @@ describe('BrowserPane', () => {
       browserTabId: 'native-tab-1',
       url: 'https://example.org/path',
     }))
+  })
+
+  it('filters URL bar bookmarks and renders favicon rows without bookmark labels', async () => {
+    const view = render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        bookmarks={[bookmark({ title: 'Docs', url: 'https://example.com/docs', faviconDataUrl: 'data:image/png;base64,abc' })]}
+      />,
+    )
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    const input = view.getByLabelText('URL') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'doc' } })
+
+    await waitFor(() => expect(openBrowserUrlPopoverOverlay).toHaveBeenCalled())
+    const [request] = openBrowserUrlPopoverOverlay.mock.calls.at(-1)!
+    expect(request.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'bookmark',
+        title: 'Docs',
+        detail: 'example.com',
+        iconUrl: 'data:image/png;base64,abc',
+      }),
+    ]))
+    expect(view.queryByText('bookmark')).toBeNull()
+  })
+
+  it('renders search fallback row and navigates to encoded search URL', async () => {
+    const view = render(<BrowserPane paneId="pane-1" browserTabId="native-tab-1" url="https://example.com" active={true} />)
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    const input = view.getByLabelText('URL') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'foo bar' } })
+    await waitFor(() => expect(openBrowserUrlPopoverOverlay).toHaveBeenCalled())
+    const [request] = openBrowserUrlPopoverOverlay.mock.calls.at(-1)!
+    expect(request.results).toEqual([
+      expect.objectContaining({ kind: 'search', title: 'Search web for "foo bar"' }),
+    ])
+
+    fireEvent.submit(view.getByLabelText('Browser controls'))
+    await waitFor(() => expect(api.navigate).toHaveBeenCalledWith({
+      browserTabId: 'native-tab-1',
+      url: 'https://www.google.com/search?q=foo%20bar',
+    }))
+  })
+
+  it('navigates to the selected bookmark from the URL bar', async () => {
+    let selectResult: ((resultId: string) => void) | undefined
+    openBrowserUrlPopoverOverlay.mockImplementation(async (_request, onSelect) => {
+      selectResult = onSelect
+      return { update: vi.fn(), close: vi.fn() }
+    })
+    const view = render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        bookmarks={[bookmark({ title: 'Docs', url: 'https://example.com/docs' })]}
+      />,
+    )
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    const input = view.getByLabelText('URL') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'doc' } })
+    await waitFor(() => expect(selectResult).toBeTruthy())
+    act(() => selectResult?.('bookmark:Docs'))
+    await waitFor(() => expect(api.navigate).toHaveBeenCalledWith({ browserTabId: 'native-tab-1', url: 'https://example.com/docs' }))
+  })
+
+  it('uses exact bookmark matches before treating submitted text as URL or search', async () => {
+    const view = render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        bookmarks={[bookmark({ title: 'foo', url: 'https://example.com/foo' })]}
+      />,
+    )
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    const input = view.getByLabelText('URL') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'foo' } })
+    fireEvent.submit(view.getByLabelText('Browser controls'))
+    await waitFor(() => expect(api.navigate).toHaveBeenCalledWith({ browserTabId: 'native-tab-1', url: 'https://example.com/foo' }))
+  })
+
+  it('renders devtools and bookmark controls on the right side of the URL input', async () => {
+    const view = render(<BrowserPane paneId="pane-1" workspaceId="workspace-1" browserTabId="native-tab-1" url="https://example.com" active={true} />)
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    const buttons = Array.from(view.getByLabelText('Browser controls').querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))
+    expect(buttons).toEqual(['Back', 'Forward', 'Reload', 'Open DevTools', 'Bookmark page'])
+  })
+
+  it('opens bookmark creation from star button and shortcut', async () => {
+    const view = render(
+      <BrowserPane
+        paneId="pane-1"
+        workspaceId="workspace-1"
+        browserTabId="native-tab-1"
+        url="https://example.com/docs"
+        title="Example Docs"
+        faviconDataUrl="data:image/png;base64,abc"
+        faviconUrl="https://example.com/favicon.ico"
+        active={true}
+      />,
+    )
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    fireEvent.click(view.getByLabelText('Bookmark page'))
+    await waitFor(() => expect(openCreateBookmarkOverlay).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1',
+      initialTitle: 'Example Docs',
+      initialUrl: 'https://example.com/docs',
+      initialFaviconDataUrl: 'data:image/png;base64,abc',
+      initialFaviconUrl: 'https://example.com/favicon.ico',
+    }))
+
+    const input = view.getByLabelText('URL')
+    fireEvent.keyDown(input, { key: 'd', metaKey: true })
+    await waitFor(() => expect(openCreateBookmarkOverlay).toHaveBeenCalledTimes(2))
+  })
+
+  it('disables bookmark creation for unbookmarkable URLs', () => {
+    const view = render(<BrowserPane paneId="pane-1" workspaceId="workspace-1" browserTabId="native-tab-1" url="about:blank" active={true} />)
+    expect(view.getByLabelText('Bookmark page')).toHaveProperty('disabled', true)
   })
 
   it('does not reattach or refocus a native tab on unrelated parent rerenders', async () => {
