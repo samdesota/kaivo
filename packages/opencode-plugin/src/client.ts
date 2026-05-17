@@ -1,5 +1,5 @@
 /**
- * Tiny tRPC-over-HTTP client for the cloud-code app's agentShell router.
+ * Tiny tRPC-over-HTTP client for the Kaivo app's agentShell router.
  *
  * Avoids pulling in @trpc/client so the plugin bundle stays small. Talks to
  * the fastify-tRPC adapter's URL scheme:
@@ -95,7 +95,7 @@ export class AgentShellClient {
       }
     }
     throw new AppUnreachableError(
-      `cloud-code app unreachable: ${(lastErr as Error | null)?.message ?? 'unknown error'}`,
+      `Kaivo app unreachable: ${(lastErr as Error | null)?.message ?? 'unknown error'}`,
     )
   }
 

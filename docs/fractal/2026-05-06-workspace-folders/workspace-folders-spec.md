@@ -34,7 +34,7 @@ Workspace Folder
 Default:
 
 ```text
-Zoottle                            +  +folder
+Kaivo                            +  +folder
   > zoottle                 4   *
   > opencode-plugin         1
 
@@ -49,7 +49,7 @@ Unfiled                            +
 Expanded workspace:
 
 ```text
-Zoottle
+Kaivo
   v zoottle                 4   *
       Fix sidebar           *
       Add tests
@@ -74,11 +74,11 @@ Sidebar order is database-backed, scoped by parent, and unaffected by reloads or
 
 ```text
 parent = null
-  001 Zoottle folder
+  001 Kaivo folder
   002 Starch folder
   003 scratch workspace
 
-parent = Zoottle
+parent = Kaivo
   001 zoottle workspace
   002 opencode-plugin workspace
   003 Packages folder

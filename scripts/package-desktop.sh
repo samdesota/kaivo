@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # package-desktop.sh — build a self-contained Zoottle.app
 #
-# Bundles the webapp server, env-server, Zoottle OpenCode plugin, and client SPA
+# Bundles the webapp server, env-server, Kaivo OpenCode plugin, and client SPA
 # into the Electron app so it runs without the source repo.
 set -euo pipefail
 
@@ -98,7 +98,7 @@ done
 
 echo "==> cleaning bundle dir"
 rm -rf "$bundle_dir"
-mkdir -p "$bundle_dir/app-server" "$bundle_dir/env-server" "$bundle_dir/zoottle-opencode-plugin"
+mkdir -p "$bundle_dir/app-server" "$bundle_dir/env-server" "$bundle_dir/kaivo-opencode-plugin"
 job_log_dir=$(mktemp -d "${TMPDIR:-/tmp}/zoottle-desktop-package.XXXXXX")
 
 run_job client_pid "client-spa" bash -lc "cd '$repo_root' && npx vite build"
@@ -173,8 +173,8 @@ find "$bundle_dir/env-server/node_modules/node-pty/prebuilds" -name spawn-helper
 
 wait_job "opencode-plugin-build" "$opencode_plugin_pid"
 
-echo "==> staging Zoottle OpenCode plugin"
-cp "$repo_root/packages/opencode-plugin/dist/index.js" "$bundle_dir/zoottle-opencode-plugin/index.js"
+echo "==> staging Kaivo OpenCode plugin"
+cp "$repo_root/packages/opencode-plugin/dist/index.js" "$bundle_dir/kaivo-opencode-plugin/index.js"
 
 wait_job "desktop-build" "$desktop_pid"
 

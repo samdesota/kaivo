@@ -5,8 +5,8 @@ import { AgentShellClient, AppUnreachableError } from './client.js'
 /**
  * Tool-name collision: OpenCode ships a built-in `bash` tool that shells
  * out locally. We can't replace it from a plugin in a way that also
- * surfaces our shellId metadata to the Zoottle UI, so we expose our
- * tools under `zoottle_bash` and `zoottle_pty` and teach the system prompt to
+ * surfaces our shellId metadata to the Kaivo UI, so we expose our
+ * tools under `kaivo_bash` and `kaivo_pty` and teach the system prompt to
  * prefer them. The `plugin` config entry is always paired with an agent
  * prompt that mentions these names.
  */
@@ -98,12 +98,12 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     const tokenSet = !!process.env[TOKEN_ENV]
     const urlSet = !!process.env[APP_URL_ENV]
     console.error(
-      `[zoottle-opencode-plugin] env missing — tokenSet=${tokenSet} urlSet=${urlSet}; tools not registered`,
+      `[kaivo-opencode-plugin] env missing — tokenSet=${tokenSet} urlSet=${urlSet}; tools not registered`,
     )
     return {}
   }
   console.error(
-    `[zoottle-opencode-plugin] registering zoottle_bash, zoottle_pty, zoottle_pty_list, zoottle_pty_write, zoottle_pty_read, zoottle_pty_close, zoottle_open_pane, zoottle_browser_* (appUrl=${creds.appUrl})`,
+    `[kaivo-opencode-plugin] registering kaivo_bash, kaivo_pty, kaivo_pty_list, kaivo_pty_write, kaivo_pty_read, kaivo_pty_close, kaivo_open_pane, kaivo_browser_* (appUrl=${creds.appUrl})`,
   )
   const client = new AgentShellClient({
     appUrl: creds.appUrl,
@@ -114,9 +114,9 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
 
   return {
     tool: {
-      zoottle_bash: tool({
+      kaivo_bash: tool({
         description:
-          'Run a finite shell command inside the Zoottle sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `zoottle_pty` instead so the human can see and interact with them.',
+          'Run a finite shell command inside the Kaivo sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `kaivo_pty` instead so the human can see and interact with them.',
         args: {
           command: z
             .string()
@@ -127,9 +127,9 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudBash(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      zoottle_pty: tool({
+      kaivo_pty: tool({
         description:
-          'Open a persistent interactive PTY shell inside the Zoottle sandbox. Prefer this for dev servers, watch commands, REPLs, or anything that runs indefinitely — the shell appears in the human user\'s Shells panel so they can watch output and type into it. Returns a shellId you can then use with `zoottle_pty_write` to send commands or `zoottle_pty_read` to check output. Once a PTY is open, DO NOT run the same long-running command via zoottle_bash.',
+          'Open a persistent interactive PTY shell inside the Kaivo sandbox. Prefer this for dev servers, watch commands, REPLs, or anything that runs indefinitely — the shell appears in the human user\'s Shells panel so they can watch output and type into it. Returns a shellId you can then use with `kaivo_pty_write` to send commands or `kaivo_pty_read` to check output. Once a PTY is open, DO NOT run the same long-running command via kaivo_bash.',
         args: {
           cwd: z.string().optional().describe('Starting cwd for the shell. Defaults to /workspace.'),
           label: z.string().optional().describe('Short human-readable label shown in the Shells panel.'),
@@ -140,19 +140,19 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudPty(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      zoottle_pty_list: tool({
+      kaivo_pty_list: tool({
         description:
-          'List persistent Zoottle PTY shells in this agent session\'s workspace. Use this before reading or reusing an existing shell. Returns shell ids, cwd, alive/exit state, last activity, and title, which may contain the running command from shell integration.',
+          'List persistent Kaivo PTY shells in this agent session\'s workspace. Use this before reading or reusing an existing shell. Returns shell ids, cwd, alive/exit state, last activity, and title, which may contain the running command from shell integration.',
         args: {},
         async execute(_args, context) {
           return runCloudPtyList(client, context as unknown as ToolCtxLike)
         },
       }),
-      zoottle_pty_write: tool({
+      kaivo_pty_write: tool({
         description:
-          'Send text input to an already-opened PTY shell (created with `zoottle_pty`). Use this to run commands inside a persistent shell instead of spawning new ones. By default a trailing newline is appended so the shell executes the line.',
+          'Send text input to an already-opened PTY shell (created with `kaivo_pty`). Use this to run commands inside a persistent shell instead of spawning new ones. By default a trailing newline is appended so the shell executes the line.',
         args: {
-          shellId: z.string().describe('Shell id returned by zoottle_pty.'),
+          shellId: z.string().describe('Shell id returned by kaivo_pty.'),
           input: z
             .string()
             .describe('Text to send. Control characters like "\\x03" for Ctrl-C are allowed.'),
@@ -165,11 +165,11 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudPtyWrite(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      zoottle_pty_read: tool({
+      kaivo_pty_read: tool({
         description:
-          'Read the most recent output from a PTY shell. Returns the last `maxBytes` of scrollback, whether the shell is still alive, and the exit code if it exited. Use after `zoottle_pty_write` or to poll progress of a long-running process.',
+          'Read the most recent output from a PTY shell. Returns the last `maxBytes` of scrollback, whether the shell is still alive, and the exit code if it exited. Use after `kaivo_pty_write` or to poll progress of a long-running process.',
         args: {
-          shellId: z.string().describe('Shell id returned by zoottle_pty.'),
+          shellId: z.string().describe('Shell id returned by kaivo_pty.'),
           maxBytes: z
             .number()
             .int()
@@ -180,19 +180,19 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudPtyRead(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      zoottle_pty_close: tool({
+      kaivo_pty_close: tool({
         description:
-          'Terminate a PTY shell created with `zoottle_pty` and dispose it. Call when the process is no longer needed so the Shells panel stays tidy.',
+          'Terminate a PTY shell created with `kaivo_pty` and dispose it. Call when the process is no longer needed so the Shells panel stays tidy.',
         args: {
-          shellId: z.string().describe('Shell id returned by zoottle_pty.'),
+          shellId: z.string().describe('Shell id returned by kaivo_pty.'),
         },
         async execute(args, context) {
           return runCloudPtyClose(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      zoottle_open_pane: tool({
+      kaivo_open_pane: tool({
         description:
-          'Open or focus a right-side pane tab in the Zoottle UI. Supports file, shell, and browser panes. Use browser panes for web pages and local dev servers. This tool does not read, write, or execute anything by itself.',
+          'Open or focus a right-side pane tab in the Kaivo UI. Supports file, shell, and browser panes. Use browser panes for web pages and local dev servers. This tool does not read, write, or execute anything by itself.',
         args: {
           kind: z
             .enum(['file', 'shell', 'browser'])
@@ -215,51 +215,51 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runCloudOpenPane(client, args, context as unknown as ToolCtxLike)
         },
       }),
-      zoottle_browser_list_tabs: tool({
+      kaivo_browser_list_tabs: tool({
         description:
-          'List Zoottle browser tabs in the current workspace that are available for agent connection. Includes child tabs/popups opened by workspace tabs; OAuth flows may appear as child tabs with openerBrowserTabId.',
+          'List Kaivo browser tabs in the current workspace that are available for agent connection. Includes child tabs/popups opened by workspace tabs; OAuth flows may appear as child tabs with openerBrowserTabId.',
         args: {},
         async execute(_args, context) {
           return runBrowserTool(client, 'agentBrowser.listTabs', {}, context as unknown as ToolCtxLike, 'query')
         },
       }),
-      zoottle_browser_connect_tab: tool({
-        description: 'Connect the agent to an existing Zoottle browser tab and return a cdpId for subsequent browser tools.',
+      kaivo_browser_connect_tab: tool({
+        description: 'Connect the agent to an existing Kaivo browser tab and return a cdpId for subsequent browser tools.',
         args: { browserTabId: z.string().min(1) },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.connectTab', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      zoottle_browser_open_and_connect: tool({
-        description: 'Open a URL in a Zoottle browser tab and connect the agent to it in one step.',
+      kaivo_browser_open_and_connect: tool({
+        description: 'Open a URL in a Kaivo browser tab and connect the agent to it in one step.',
         args: { url: z.string().min(1), title: z.string().optional(), activate: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.openAndConnect', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      zoottle_browser_disconnect: tool({
+      kaivo_browser_disconnect: tool({
         description: 'Disconnect a previously connected browser tab by cdpId.',
         args: { cdpId: z.string().min(1) },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.disconnect', args, context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      zoottle_browser_snapshot: tool({
+      kaivo_browser_snapshot: tool({
         description:
-          'Read a connected browser tab as a semantic tree of interactive elements. Use element IDs from this output with zoottle_browser_interact. Check childTabs in the output after clicks, especially OAuth/login buttons, because auth flows may open popups or new child tabs that need zoottle_browser_connect_tab.',
+          'Read a connected browser tab as a semantic tree of interactive elements. Use element IDs from this output with kaivo_browser_interact. Check childTabs in the output after clicks, especially OAuth/login buttons, because auth flows may open popups or new child tabs that need kaivo_browser_connect_tab.',
         args: { cdpId: z.string().min(1), filter: z.string().optional(), filterFlags: z.string().optional(), viewportOnly: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.snapshot', stripEmptyStrings(args), context as unknown as ToolCtxLike, 'query')
         },
       }),
-      zoottle_browser_read_logs: tool({
-        description: 'Read buffered console logs from a connected browser tab. Logs are collected after the tab is connected with zoottle_browser_connect_tab or zoottle_browser_open_and_connect.',
+      kaivo_browser_read_logs: tool({
+        description: 'Read buffered console logs from a connected browser tab. Logs are collected after the tab is connected with kaivo_browser_connect_tab or kaivo_browser_open_and_connect.',
         args: { cdpId: z.string().min(1), maxEntries: z.number().int().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.readLogs', args, context as unknown as ToolCtxLike, 'query')
         },
       }),
-      zoottle_browser_interact: tool({
+      kaivo_browser_interact: tool({
         description:
           'Perform a browser action on a connected tab by element ID. After clicks, prefer postSnapshot wait="settle"; do not wait for full navigation because modern apps often route client-side. Inspect the returned snapshot.childTabs for OAuth/login popups or new child tabs, then connect to the child tab if needed.',
         args: { cdpId: z.string().min(1), action: browserInteractActionSchema, postSnapshot: browserPostSnapshotSchema },
@@ -267,14 +267,14 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
           return runBrowserTool(client, 'agentBrowser.interact', normalizeInteractArgs(args), context as unknown as ToolCtxLike, 'mutate')
         },
       }),
-      zoottle_browser_screenshot: tool({
+      kaivo_browser_screenshot: tool({
         description: 'Capture a screenshot from a connected browser tab.',
         args: { cdpId: z.string().min(1), format: z.enum(['jpeg', 'png']).optional(), quality: z.number().int().optional(), fullPage: z.boolean().optional() },
         async execute(args, context) {
           return runBrowserTool(client, 'agentBrowser.screenshot', args, context as unknown as ToolCtxLike, 'query')
         },
       }),
-      zoottle_browser_execute_js: tool({
+      kaivo_browser_execute_js: tool({
         description: 'Execute JavaScript in a connected browser tab. Prefer snapshot and interact first; use this for explicit inspection or one-off DOM operations.',
         args: { cdpId: z.string().min(1), expression: z.string().min(1), awaitPromise: z.boolean().optional(), timeoutMs: z.number().int().optional() },
         async execute(args, context) {
@@ -344,7 +344,7 @@ async function runCloudBash(
           cloudcode_shell_id: null,
           exit_code: 1,
           status: 'error',
-          stderr: 'cloud-code app unreachable',
+          stderr: 'Kaivo app unreachable',
           error: err.message,
         },
       }
@@ -388,7 +388,7 @@ async function runCloudPty(
         metadata: {
           cloudcode_shell_id: null,
           status: 'error',
-          stderr: 'cloud-code app unreachable',
+          stderr: 'Kaivo app unreachable',
           error: err.message,
         },
       }
@@ -440,7 +440,7 @@ async function runCloudPtyList(
         output: '',
         metadata: {
           status: 'error',
-          stderr: 'cloud-code app unreachable',
+          stderr: 'Kaivo app unreachable',
           error: err.message,
         },
       }
@@ -456,7 +456,7 @@ async function runCloudPtyList(
 }
 
 function formatPtyList(shells: CloudPtyInfo[]): string {
-  if (shells.length === 0) return 'No Zoottle PTY shells are open in this workspace.'
+  if (shells.length === 0) return 'No Kaivo PTY shells are open in this workspace.'
   return shells
     .map((shell) => {
       const status = shell.alive ? 'alive' : `exited ${shell.exitCode ?? 'unknown'}`
@@ -542,7 +542,7 @@ function ptyError(shellId: string, err: unknown): { output: string; metadata: Re
       metadata: {
         cloudcode_shell_id: shellId,
         status: 'error',
-        stderr: 'cloud-code app unreachable',
+        stderr: 'Kaivo app unreachable',
         error: err.message,
       },
     }
@@ -610,7 +610,7 @@ async function runCloudOpenPane(
       output: '',
       metadata: {
         status: 'error',
-        stderr: err instanceof AppUnreachableError ? 'cloud-code app unreachable' : (err as Error).message,
+        stderr: err instanceof AppUnreachableError ? 'Kaivo app unreachable' : (err as Error).message,
         error: (err as Error).message,
       },
     }
@@ -649,7 +649,7 @@ async function runBrowserTool(
         status: 'error',
         procedure,
         cdpId: args.cdpId,
-        stderr: err instanceof AppUnreachableError ? 'cloud-code app unreachable' : (err as Error).message,
+        stderr: err instanceof AppUnreachableError ? 'Kaivo app unreachable' : (err as Error).message,
         error: (err as Error).message,
       },
     }

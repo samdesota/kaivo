@@ -122,7 +122,7 @@ class SandboxManager {
     // visible inside the container. That way `npm run build:plugin` + a
     // sandbox restart is all you need to iterate — no image rebuild.
     const pluginHost = env.DEV_PLUGIN_HOST_PATH
-    const devBinds = pluginHost ? [`${pluginHost}:/opt/zoottle-opencode-plugin:ro`] : []
+    const devBinds = pluginHost ? [`${pluginHost}:/opt/kaivo-opencode-plugin:ro`] : []
     const sshBinds = env.SANDBOX_SSH_DIR
       ? [`${env.SANDBOX_SSH_DIR}:/home/coder/.ssh:ro`]
       : []

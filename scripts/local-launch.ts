@@ -510,7 +510,7 @@ function errorMessage(err: unknown): string {
 
 async function main(): Promise<void> {
   const result = await runLocalDevLauncher({ command: process.argv.join(' '), script: 'dev:local' })
-  console.log(`Local Zoottle dev runtime started:`)
+  console.log(`Local Kaivo dev runtime started:`)
   console.log(`  app:    ${result.config.app.url}`)
   console.log(`  env:    ${result.config.env.url}`)
   console.log(`  client: ${result.config.client.url}`)
