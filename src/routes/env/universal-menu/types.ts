@@ -32,7 +32,15 @@ export interface UniversalMenuResult {
   keepOpen?: boolean
   run: () => void | Promise<void>
   alternateRun?: () => void | Promise<void>
+  actions?: UniversalMenuResultAction[]
   drill?: () => void
+}
+
+export interface UniversalMenuResultAction {
+  id: string
+  label: string
+  key: string
+  run: () => void | Promise<void>
 }
 
 export interface UniversalMenuContextItem {
@@ -49,6 +57,9 @@ export interface UniversalMenuRenderState {
   onMouseEnter: () => void
   onSelect: (event?: { shiftKey?: boolean }) => void
   onAlternateSelect: () => void
+  actionMenuOpen: boolean
+  onOpenActions: () => void
+  onRunAction: (action: UniversalMenuResultAction) => void
 }
 
 export type ScopeId = 'open-folder' | 'recent-folders' | 'work-trees' | 'find-files' | 'web' | 'shells' | 'workspaces'
@@ -66,6 +77,7 @@ export interface UniversalScopeApi {
   footerHints?: string[]
   selectActive: (event?: { shiftKey?: boolean }) => void | Promise<void>
   selectAlternateActive?: () => void | Promise<void>
+  activeActions?: UniversalMenuResultAction[]
   handleKeyDown?: (event: KeyboardEvent) => boolean
 }
 
@@ -80,6 +92,9 @@ export interface UniversalScopeProps {
   contextItems: UniversalMenuContextItem[]
   onActiveChange: (index: number) => void
   onMouseMoved: () => void
+  actionMenuIndex?: number | null
+  onOpenActions?: (index: number) => void
+  onRunAction?: (action: UniversalMenuResultAction) => void
   onClose: () => void
   onOpenContent?: (content: PaneContent) => void
   onCreatedChat?: (sessionId: string, workspaceId?: string) => void

@@ -101,6 +101,7 @@ export function UniversalMenu({
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
   const [parentFolderId, setParentFolderId] = useState<string | null>(null)
   const [scopeApi, setScopeApi] = useState<UniversalScopeApi | null>(null)
+  const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const scopeApiRef = useRef<UniversalScopeApi | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const updateScopeApi = useCallback((api: UniversalScopeApi | null) => {
@@ -109,7 +110,7 @@ export function UniversalMenu({
       if (!api || !current) return current === api ? current : api
       const currentHints = current.footerHints ?? []
       const nextHints = api.footerHints ?? []
-      if (current.resultCount === api.resultCount && currentHints.length === nextHints.length && currentHints.every((hint, index) => hint === nextHints[index])) return current
+      if (current.resultCount === api.resultCount && Boolean(current.activeActions?.length) === Boolean(api.activeActions?.length) && currentHints.length === nextHints.length && currentHints.every((hint, index) => hint === nextHints[index])) return current
       return api
     })
   }, [])
@@ -127,8 +128,10 @@ export function UniversalMenu({
   })
   const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open && !!detailsSelection, staleTime: 5_000 })
   const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && !!detailsSelection, staleTime: 15_000 })
+  const envUtils = envTrpc.useUtils()
   const startChat = envTrpc.agent.sessionStart.useMutation()
   const createShell = envTrpc.shell.create.useMutation()
+  const disposeShell = envTrpc.shell.dispose.useMutation()
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
@@ -164,6 +167,7 @@ export function UniversalMenu({
     setDetailsError(null)
     setWorkspaceNameDraft({ value: '', edited: false })
     setParentFolderId(null)
+    setActionMenuOpen(false)
     updateScopeApi(null)
   }, [open])
 
@@ -256,6 +260,10 @@ export function UniversalMenu({
     }
 
     const shellMap = new Map<string, UniversalMenuResult>()
+    const deleteShell = async (shellId: string) => {
+      await disposeShell.mutateAsync({ id: shellId })
+      await envUtils.shell.list.invalidate(workspaceId ? { workspaceId } : undefined)
+    }
     for (const shell of (workspaceShells.data as ShellRow[] | undefined) ?? []) {
       if (shell.alive === false) continue
       shellMap.set(shell.id, {
@@ -267,10 +275,13 @@ export function UniversalMenu({
         icon: paneTabIconForType('shell'),
         haystack: `${shell.title ?? ''} ${shell.id} ${shell.cwd} ${shell.ownerKind ?? ''}`,
         run: () => onOpenContent?.({ type: 'shell', shellId: shell.id }),
+        actions: [{ id: 'terminate', label: 'Terminate shell', key: 't', run: () => deleteShell(shell.id) }],
       })
     }
     for (const item of contextItems.filter((item) => item.kind === 'shell')) {
-      if (shellMap.has(item.content.type === 'shell' ? item.content.shellId : item.id)) continue
+      const shellId = item.content.type === 'shell' ? item.content.shellId : item.id
+      if (workspaceId && workspaceShells.data && !(workspaceShells.data as ShellRow[]).some((shell) => shell.id === shellId && shell.alive !== false)) continue
+      if (shellMap.has(shellId)) continue
       shellMap.set(item.id, {
         id: item.id,
         kind: 'shell',
@@ -280,6 +291,7 @@ export function UniversalMenu({
         icon: paneTabIconForType('shell'),
         haystack: `${item.label} ${item.detail ?? ''}`,
         run: () => onOpenContent?.(item.content),
+        actions: [{ id: 'terminate', label: 'Terminate shell', key: 't', run: () => deleteShell(shellId) }],
       })
     }
     const shells = [...shellMap.values()]
@@ -303,7 +315,7 @@ export function UniversalMenu({
       { id: 'shells', label: 'Shells', results: shells },
       { id: 'browser-tabs', label: 'Pages', results: pages },
     ].filter((section) => section.results.length > 0)
-  }, [contextItems, faviconCache.data, homePath, onCreatedChat, onOpenContent, sessions.data, startChat, workspaceId, workspaceShells.data])
+  }, [contextItems, disposeShell, envUtils.shell.list, faviconCache.data, homePath, onCreatedChat, onOpenContent, sessions.data, startChat, workspaceId, workspaceShells.data])
 
   const contextualCount = contextualSections.reduce((sum, section) => sum + section.results.length, 0)
   const contextualResults = useMemo(() => contextualSections.flatMap((section) => section.results), [contextualSections])
@@ -326,7 +338,26 @@ export function UniversalMenu({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault()
+        if (actionMenuOpen) {
+          setActionMenuOpen(false)
+          return
+        }
         goBackOrClose()
+        return
+      }
+      const activeScopeApi = scopeApiRef.current
+      const selectedActions = activeScopeApi?.activeActions ?? (!scope && !query.trim() ? contextualResults[active]?.actions : visibleResults[active]?.actions) ?? []
+      if (actionMenuOpen) {
+        const action = selectedActions.find((candidate) => candidate.key.toLowerCase() === event.key.toLowerCase())
+        if (action) {
+          event.preventDefault()
+          void runAction(action)
+          return
+        }
+      }
+      if (event.key === 'Alt' && selectedActions.length > 0) {
+        event.preventDefault()
+        setActionMenuOpen(true)
         return
       }
       if (event.key === 'Backspace' && scope && query.length === 0) {
@@ -336,19 +367,19 @@ export function UniversalMenu({
       }
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        const activeScopeApi = scopeApiRef.current
         const length = activeScopeApi ? activeScopeApi.resultCount : scope || query.trim() ? visibleResults.length : contextualResults.length
+        setActionMenuOpen(false)
         setActive((value) => Math.min(Math.max(length - 1, 0), value + 1))
         return
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault()
+        setActionMenuOpen(false)
         setActive((value) => Math.max(0, value - 1))
         return
       }
       if (event.key === 'Enter') {
         event.preventDefault()
-        const activeScopeApi = scopeApiRef.current
         if (activeScopeApi) {
           void activeScopeApi.selectActive({ shiftKey: event.shiftKey })
           return
@@ -382,6 +413,22 @@ export function UniversalMenu({
     if (scope) setScope({ ...scope, query: value })
     setActive(0)
     setMouseMoved(false)
+    setActionMenuOpen(false)
+  }
+
+  function activateIndex(index: number) {
+    setActive(index)
+    setActionMenuOpen(false)
+  }
+
+  function openActions(index: number) {
+    setActive(index)
+    setActionMenuOpen(true)
+  }
+
+  async function runAction(action: { run: () => void | Promise<void> }) {
+    await action.run()
+    setActionMenuOpen(false)
   }
 
   async function pick(index: number, event?: { shiftKey?: boolean }) {
@@ -418,6 +465,7 @@ export function UniversalMenu({
     setWorkspaceNameDraft({ value: '', edited: false })
     setParentFolderId(workspaceFolderId ?? null)
     setMouseMoved(false)
+    setActionMenuOpen(false)
   }
 
   async function createDetailsChat() {
@@ -480,11 +528,15 @@ export function UniversalMenu({
     setQuery('')
     setActive(0)
     setMouseMoved(false)
+    setActionMenuOpen(false)
   }
 
   const placeholder = scope ? `Search ${scope.definition.label.toLowerCase()}…` : 'Search commands'
   const resultCount = scopeApi ? scopeApi.resultCount : scope || query.trim() ? visibleResults.length : contextualCount
   const footerHints = scopeApi?.footerHints ?? []
+  const selectedResult = scopeApi ? null : scope || query.trim() ? visibleResults[active] : contextualResults[active]
+  const selectedActions = scopeApi?.activeActions ?? selectedResult?.actions ?? []
+  const showActionHint = selectedActions.length > 0
   const selectedConfig = detailsSelection?.type === 'repoConfig' ? (repoConfigs.data as RepoConfigRow[] | undefined)?.find((config) => config.id === detailsSelection.configId) : null
   const generatedWorkspaceName = defaultWorkspaceName(detailsSelection).name
   const workspaceNameValue = resolveWorkspaceName(detailsSelection, workspaceNameDraft).name
@@ -557,6 +609,7 @@ export function UniversalMenu({
           <span>↑↓ navigate</span>
           <span>↵ {scope?.definition.id === 'open-folder' ? 'open/create' : 'open'}</span>
           {footerHints.map((hint) => <span key={hint}>{hint}</span>)}
+          {showActionHint && <span>⌥ actions</span>}
           <span>esc {scope ? 'back' : 'close'}</span>
           <span className="ml-auto">{resultCount} result{resultCount === 1 ? '' : 's'}</span>
         </>
@@ -584,7 +637,10 @@ export function UniversalMenu({
           activeIndex={active}
           mouseMoved={mouseMoved}
           onMouseMoved={() => setMouseMoved(true)}
-          onActiveChange={setActive}
+          onActiveChange={activateIndex}
+          actionMenuIndex={actionMenuOpen ? active : null}
+          onOpenActions={openActions}
+          onRunAction={(action) => void runAction(action)}
           loadingFolders={sessions.isLoading}
           onEnterScope={(definition) => enterScope(definition, '')}
           onSelect={(result, event) => {
@@ -606,8 +662,11 @@ export function UniversalMenu({
           workspaceFolderId={workspaceFolderId}
           activeSessionId={activeSessionId}
           contextItems={contextItems}
-          onActiveChange={setActive}
+          onActiveChange={activateIndex}
           onMouseMoved={() => setMouseMoved(true)}
+          actionMenuIndex={actionMenuOpen ? active : null}
+          onOpenActions={openActions}
+          onRunAction={(action) => void runAction(action)}
           onClose={onClose}
           onOpenContent={onOpenContent}
           onCreatedChat={onCreatedChat}
@@ -621,9 +680,12 @@ export function UniversalMenu({
           activeIndex={active}
           mouseMoved={mouseMoved}
           onMouseMoved={() => setMouseMoved(true)}
-          onActiveChange={setActive}
+          onActiveChange={activateIndex}
           onSelect={(index, event) => void pick(index, event)}
           onAlternateSelect={(index) => void pickAlternate(index)}
+          actionMenuIndex={actionMenuOpen ? active : null}
+          onOpenActions={openActions}
+          onRunAction={(action) => void runAction(action)}
           loading={false}
         />
       )}

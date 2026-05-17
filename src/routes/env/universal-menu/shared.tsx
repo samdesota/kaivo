@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, EllipsisVertical } from 'lucide-react'
 import { TabIconView } from '../../../components/tab-icon'
-import type { UniversalMenuRenderState, UniversalMenuResult } from './types'
-import type { ReactNode } from 'react'
+import type { UniversalMenuRenderState, UniversalMenuResult, UniversalMenuResultAction } from './types'
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 
 export function UniversalMenuResultList({
   results,
@@ -12,6 +13,9 @@ export function UniversalMenuResultList({
   onActiveChange,
   onSelect,
   onAlternateSelect,
+  actionMenuIndex = null,
+  onOpenActions,
+  onRunAction,
   renderResult,
 }: {
   results: UniversalMenuResult[]
@@ -22,6 +26,9 @@ export function UniversalMenuResultList({
   onActiveChange: (index: number) => void
   onSelect: (index: number, event?: { shiftKey?: boolean }) => void
   onAlternateSelect?: (index: number) => void
+  actionMenuIndex?: number | null
+  onOpenActions?: (index: number) => void
+  onRunAction?: (action: UniversalMenuResultAction) => void
   renderResult?: (result: UniversalMenuResult, state: UniversalMenuRenderState) => ReactNode
 }) {
   if (results.length === 0) return <UniversalMenuEmptyRow>No matches.</UniversalMenuEmptyRow>
@@ -39,6 +46,9 @@ export function UniversalMenuResultList({
           },
           onSelect: (event) => onSelect(index, event),
           onAlternateSelect: () => onAlternateSelect?.(index),
+          actionMenuOpen: actionMenuIndex === index,
+          onOpenActions: () => onOpenActions?.(index),
+          onRunAction: (action) => onRunAction?.(action),
         }
         return (
           <li key={result.id} onMouseMove={onMouseMoved}>
@@ -55,20 +65,37 @@ export function UniversalMenuResultList({
 }
 
 export function UniversalMenuResultRow({ result, state }: { result: UniversalMenuResult; state: UniversalMenuRenderState }) {
+  const rowRef = useRef<HTMLDivElement | null>(null)
   const detail = result.actionHint ? (state.active ? result.actionHint : undefined) : result.detail
   const detailNode = result.actionHint ? undefined : result.detailNode
+  const showActions = state.active && !!result.actions?.length
   return (
-    <button
-      type="button"
-      disabled={state.disabled}
-      onMouseEnter={state.onMouseEnter}
-      onClick={(event) => state.onSelect(event)}
-      className={rowClassName(state)}
-    >
-      {result.icon && <TabIconView icon={result.icon} />}
-      <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
-      {detailNode ? <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
-    </button>
+    <div ref={rowRef} onMouseEnter={state.onMouseEnter} className="relative">
+      <button
+        type="button"
+        disabled={state.disabled}
+        onClick={(event) => state.onSelect(event)}
+        className={`${rowClassName(state)} ${showActions ? 'pr-10' : ''}`}
+      >
+        {result.icon && <TabIconView icon={result.icon} />}
+        <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
+        {detailNode ? <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
+      </button>
+      {showActions && (
+        <button
+          type="button"
+          aria-label={`Actions for ${result.label}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            state.onOpenActions()
+          }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-0.5 text-neutral-300 hover:bg-neutral-900 hover:text-neutral-100"
+        >
+          <EllipsisVertical className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
+      {state.actionMenuOpen && result.actions?.length ? <UniversalMenuActionMenu anchorRef={rowRef} actions={result.actions} onRunAction={state.onRunAction} /> : null}
+    </div>
   )
 }
 
@@ -93,6 +120,52 @@ export function UniversalMenuHierarchyRow({ result, state }: { result: Universal
       <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
       {detailNode ? <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
     </button>
+  )
+}
+
+function UniversalMenuActionMenu({ anchorRef, actions, onRunAction }: { anchorRef: RefObject<HTMLElement | null>; actions: UniversalMenuResultAction[]; onRunAction: (action: UniversalMenuResultAction) => void }) {
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+
+  useLayoutEffect(() => {
+    function updatePosition() {
+      const anchor = anchorRef.current
+      if (!anchor) return
+      const rect = anchor.getBoundingClientRect()
+      setPosition({
+        left: Math.max(8, rect.right - 184),
+        top: rect.bottom + 4,
+      })
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [anchorRef])
+
+  if (!position || typeof document === 'undefined') return null
+
+  return createPortal(
+    <div className="fixed z-[70] w-44 rounded border border-neutral-800 bg-neutral-975 p-1 shadow-lg" style={position} role="menu">
+      {actions.map((action) => (
+        <button
+          key={action.id}
+          type="button"
+          role="menuitem"
+          onClick={(event) => {
+            event.stopPropagation()
+            onRunAction(action)
+          }}
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-900"
+        >
+          <span className="rounded bg-neutral-900 px-1 font-mono text-[10px] uppercase text-neutral-400">{action.key}</span>
+          <span>{action.label}</span>
+        </button>
+      ))}
+    </div>,
+    document.body,
   )
 }
 

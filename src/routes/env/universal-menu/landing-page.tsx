@@ -1,5 +1,5 @@
 import { UniversalMenuEmptyRow, UniversalMenuResultRow } from './shared'
-import type { ScopeDefinition, UniversalMenuResult } from './types'
+import type { ScopeDefinition, UniversalMenuResult, UniversalMenuResultAction } from './types'
 
 export interface UniversalMenuLandingSection {
   id: string
@@ -14,6 +14,9 @@ export function UniversalMenuLandingPage({
   mouseMoved,
   onMouseMoved,
   onActiveChange,
+  actionMenuIndex,
+  onOpenActions,
+  onRunAction,
   loadingFolders,
   onEnterScope,
   onSelect,
@@ -24,6 +27,9 @@ export function UniversalMenuLandingPage({
   mouseMoved: boolean
   onMouseMoved: () => void
   onActiveChange: (index: number) => void
+  actionMenuIndex?: number | null
+  onOpenActions?: (index: number) => void
+  onRunAction?: (action: UniversalMenuResultAction) => void
   loadingFolders: boolean
   onEnterScope: (scope: ScopeDefinition) => void
   onSelect: (result: UniversalMenuResult, event?: { shiftKey?: boolean }) => void
@@ -39,6 +45,9 @@ export function UniversalMenuLandingPage({
         mouseMoved={mouseMoved}
         onMouseMoved={onMouseMoved}
         onActiveChange={onActiveChange}
+        actionMenuIndex={actionMenuIndex}
+        onOpenActions={onOpenActions}
+        onRunAction={onRunAction}
         loadingFolders={loadingFolders}
         onSelect={onSelect}
       />
@@ -52,6 +61,9 @@ function UniversalMenuLandingSections({
   mouseMoved,
   onMouseMoved,
   onActiveChange,
+  actionMenuIndex,
+  onOpenActions,
+  onRunAction,
   loadingFolders,
   onSelect,
 }: {
@@ -60,6 +72,9 @@ function UniversalMenuLandingSections({
   mouseMoved: boolean
   onMouseMoved: () => void
   onActiveChange: (index: number) => void
+  actionMenuIndex?: number | null
+  onOpenActions?: (index: number) => void
+  onRunAction?: (action: UniversalMenuResultAction) => void
   loadingFolders: boolean
   onSelect: (result: UniversalMenuResult, event?: { shiftKey?: boolean }) => void
 }) {
@@ -85,6 +100,9 @@ function UniversalMenuLandingSections({
                       },
                       onSelect: (event) => onSelect(result, event),
                       onAlternateSelect: () => undefined,
+                      actionMenuOpen: actionMenuIndex === index,
+                      onOpenActions: () => onOpenActions?.(index),
+                      onRunAction: (action) => onRunAction?.(action),
                     }}
                   />
                 </li>

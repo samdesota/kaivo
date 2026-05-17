@@ -22,7 +22,7 @@ export function ShellTabContent({
   const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
 
   const list = (shells.data ?? []) as ShellRow[]
-  const info = list.find((s) => s.id === shellId)
+  const info = list.find((s) => s.id === shellId && s.alive !== false)
   const missing = shells.data && !info
 
   return (
