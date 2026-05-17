@@ -25,8 +25,8 @@ const viewStatePatchSchema = z.object({
   agentCollapsed: z.boolean().optional(),
 })
 
-const workspaceResourceSchema = z.object({
-  type: z.enum(['browser_tab', 'worktree', 'shell', 'other']),
+export const workspaceResourceSchema = z.object({
+  type: z.enum(['browser_tab', 'worktree', 'shell', 'bookmark', 'other']),
   resourceKey: z.string().min(1).max(1_000),
   shared: z.boolean().optional(),
   data: z.record(z.unknown()).optional(),

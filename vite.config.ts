@@ -21,6 +21,7 @@ export function resolveViteServerConfig(env: NodeJS.ProcessEnv = process.env) {
       '/trpc': { target: appUrl, ws: true },
       '/ws': { target: appUrl, ws: true },
       '/api': appUrl,
+      '/internal/desktop-auth': appUrl,
       '/healthz': appUrl,
       // Preview proxies live on the API server, not vite — otherwise unknown
       // `/preview/:id/:port/*` paths fall through to the SPA and look like

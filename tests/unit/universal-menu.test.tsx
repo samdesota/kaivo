@@ -35,6 +35,18 @@ const mocks = vi.hoisted(() => ({
   shells: [] as Array<{ id: string; cwd: string; title: string | null }>,
   gitFiles: [] as Array<{ root: string; path: string; relativePath: string }>,
   workspaceTree: [] as Array<unknown>,
+  bookmarks: [] as Array<{
+    id: string
+    workspaceId: string
+    title: string
+    url: string
+    normalizedUrl: string
+    origin: string | null
+    faviconDataUrl?: string | null
+    faviconUrl?: string | null
+    createdAt: Date
+    updatedAt: Date
+  }>,
 }))
 
 vi.mock('../../src/env-trpc', () => ({
@@ -104,6 +116,10 @@ vi.mock('../../src/trpc', () => ({
   },
 }))
 
+vi.mock('../../src/routes/workspace/bookmarks-store', () => ({
+  useWorkspaceBookmarksStore: () => ({ bookmarks: mocks.bookmarks, isLoading: false, error: null }),
+}))
+
 afterEach(() => cleanup())
 
 beforeEach(() => {
@@ -137,6 +153,7 @@ beforeEach(() => {
   mocks.shells = []
   mocks.gitFiles = []
   mocks.workspaceTree = []
+  mocks.bookmarks = []
   Object.defineProperty(window, 'focus', { value: vi.fn(), configurable: true })
 })
 
@@ -476,6 +493,68 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' })
+  })
+
+  it('shows direct web search action for non-url text', () => {
+    const onOpenContent = vi.fn()
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: '@foo bar' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://www.google.com/search?q=foo%20bar' })
+  })
+
+  it('shows exact web bookmarks before prefix matches and opens the selected bookmark', () => {
+    const onOpenContent = vi.fn()
+    const now = new Date('2026-05-16T00:00:00Z')
+    mocks.bookmarks = [
+      { id: 'bookmark-foozam', workspaceId: 'workspace-1', title: 'foozam', url: 'https://example.com/foozam', normalizedUrl: 'https://example.com/foozam', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+      { id: 'bookmark-foo', workspaceId: 'workspace-1', title: 'foo', url: 'https://example.com/foo', normalizedUrl: 'https://example.com/foo', origin: 'https://example.com', faviconDataUrl: 'data:image/png;base64,abc', faviconUrl: null, createdAt: now, updatedAt: now },
+    ]
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: '@foo' } })
+    const labels = Array.from(screen.getByTestId('universal-menu-results').querySelectorAll('button')).map((button) => button.textContent ?? '')
+    expect(labels.indexOf('fooexample.com')).toBeLessThan(labels.indexOf('foozamexample.com'))
+    expect(screen.getByTestId('universal-menu-results').querySelector('img')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /fooexample\.com/ }))
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/foo' })
+  })
+
+  it('ignores malformed web bookmark rows without breaking search', () => {
+    const now = new Date('2026-05-16T00:00:00Z')
+    mocks.bookmarks = [
+      { id: 'bad', workspaceId: 'workspace-1', title: null, url: null, normalizedUrl: null, origin: null, createdAt: now, updatedAt: null } as never,
+      { id: 'bookmark-docs', workspaceId: 'workspace-1', title: 'Docs', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+    ]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onOpenContent={vi.fn()} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: '@doc' } })
+
+    expect(screen.getByRole('button', { name: /Docsexample\.com/ })).toBeTruthy()
+    expect(screen.queryByText('bad')).toBeNull()
   })
 
   it('shows filtered workspace ancestry and switches workspace', () => {

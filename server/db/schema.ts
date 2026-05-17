@@ -12,7 +12,7 @@ export type ShellOwnerKind = 'human' | 'agent'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 export type WorkspaceNameSource = 'explicit' | 'folder_path' | 'worktree' | 'derived'
 export type WorkspaceSourceKind = 'folder' | 'worktree' | 'repo_config'
-export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'other'
+export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'bookmark' | 'other'
 
 export type WorkspaceUiState = {
   activeAgentSessionId: string | null

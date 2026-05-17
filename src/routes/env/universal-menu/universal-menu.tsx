@@ -6,10 +6,12 @@ import { paneTabIconForType, TabIconView, type TabIcon } from '../../../componen
 import { envTrpc } from '../../../env-trpc'
 import { trpc } from '../../../trpc'
 import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../../../lib/favicon-cache'
+import { matchBookmarks, resolveBrowserAddress } from '../../../lib/browser-navigation'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { defaultWorkspaceName, newAgentChatStartInput, resolveWorkspaceName, type NewAgentChatSelection } from '../agent/new-agent-chat-state'
 import { WorkspaceModeControl } from '../agent/new-agent-chat-modal'
+import { useWorkspaceBookmarksStore, type BookmarkRecord } from '../../workspace/bookmarks-store'
 
 export type UniversalMenuResultKind =
   | 'action'
@@ -254,16 +256,20 @@ export function UniversalMenu({
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
+  const bookmarksStore = useWorkspaceBookmarksStore(workspaceId)
   const folderBrowse = envTrpc.fs.browseHome.useQuery(
     { path: folderBrowsePlan ? folderBrowsePlan.dir : folderPath },
     { enabled: open && scope?.definition.id === 'open-folder', refetchOnWindowFocus: false },
   )
   const faviconOrigins = useMemo(() => Array.from(new Set(
-    contextItems
-      .filter((item) => item.kind === 'browser-tab' && item.content.type === 'browser')
-      .map((item) => item.content.type === 'browser' ? faviconOriginForUrl(item.content.url) : null)
+    [
+      ...contextItems
+        .filter((item) => item.kind === 'browser-tab' && item.content.type === 'browser')
+        .map((item) => item.content.type === 'browser' ? faviconOriginForUrl(item.content.url) : null),
+      ...(workspaceId ? bookmarksStore.bookmarks.map((bookmark) => bookmark.origin) : []),
+    ]
       .filter((origin): origin is string => Boolean(origin)),
-  )), [contextItems])
+  )), [bookmarksStore.bookmarks, contextItems, workspaceId])
   const faviconCache = trpc.favicon.getByOrigins.useQuery(
     { origins: faviconOrigins },
     { enabled: open && faviconOrigins.length > 0, staleTime: 60_000 },
@@ -434,7 +440,13 @@ export function UniversalMenu({
       return shellScopeResults({ shells: shells.data as ShellRow[] | undefined, loading: shells.isLoading, error: shells.error, query, homePath, openShell: (shellId) => onOpenContent?.({ type: 'shell', shellId }) })
     }
     if (scope?.definition.id === 'web') {
-      return webScopeResults({ items: contextItems, query, faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>, openContent: (content) => onOpenContent?.(content) })
+      return webScopeResults({
+        items: contextItems,
+        bookmarks: workspaceId ? bookmarksStore.bookmarks : [],
+        query,
+        faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
+        openContent: (content) => onOpenContent?.(content),
+      })
     }
     if (scope?.definition.id === 'workspaces') {
       return workspaceScopeResults({ tree: workspaceTree.data as WorkspaceTreeNode[] | undefined, loading: workspaceTree.isLoading, error: workspaceTree.error, query, switchWorkspace: (workspaceId) => onSwitchWorkspace?.(workspaceId) })
@@ -450,7 +462,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [commandResults, contextItems, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, commandResults, contextItems, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -1309,11 +1321,24 @@ function shellScopeResults({ shells, loading, error, query, homePath, openShell 
   return rows.length ? rows : [disabledRow('shells-empty', q ? 'No matching shells.' : 'No shells in this workspace.')]
 }
 
-function webScopeResults({ items, query, faviconRecords, openContent }: { items: UniversalMenuContextItem[]; query: string; faviconRecords: Record<string, FaviconCacheRecord>; openContent: (content: PaneContent) => void }): UniversalMenuResult[] {
+function webScopeResults({
+  items,
+  bookmarks,
+  query,
+  faviconRecords,
+  openContent,
+}: {
+  items: UniversalMenuContextItem[]
+  bookmarks: BookmarkRecord[]
+  query: string
+  faviconRecords: Record<string, FaviconCacheRecord>
+  openContent: (content: PaneContent) => void
+}): UniversalMenuResult[] {
   const q = query.trim().toLowerCase()
-  const directUrl = webQueryUrl(query)
+  const directDecision = query.trim() ? resolveBrowserAddress(query) : { kind: 'url' as const, url: '' }
   const rows: UniversalMenuResult[] = []
-  if (directUrl) {
+  if (directDecision.kind === 'url' && directDecision.url) {
+    const directUrl = directDecision.url.replace(/\/$/, '')
     rows.push({
       id: `web-url:${directUrl}`,
       kind: 'browser-tab',
@@ -1336,20 +1361,33 @@ function webScopeResults({ items, query, faviconRecords, openContent }: { items:
       haystack: `${item.label} ${item.detail ?? ''}`,
       run: () => openContent(item.content),
     })))
-  return rows.length ? rows : [disabledRow('web-empty', q ? 'No matching pages.' : 'No browser pages in this workspace.')]
+  rows.push(...matchBookmarks(bookmarks, query).map((match): UniversalMenuResult => ({
+    id: `web-bookmark:${match.bookmark.id}`,
+    kind: 'bookmark',
+    label: match.bookmark.title,
+    detail: match.bookmark.origin?.replace(/^https?:\/\//, '') ?? match.bookmark.url,
+    icon: bookmarkIcon(match.bookmark, faviconRecords),
+    haystack: `${match.bookmark.title} ${match.bookmark.url} ${match.bookmark.origin ?? ''}`,
+    run: () => openContent({ type: 'browser', url: match.bookmark.url }),
+  })))
+  if (directDecision.kind === 'search') {
+    rows.push({
+      id: `web-search:${directDecision.query}`,
+      kind: 'browser-tab',
+      label: `Search web for "${directDecision.query}"`,
+      detail: directDecision.url,
+      icon: paneTabIconForType('browser'),
+      haystack: directDecision.query,
+      run: () => openContent({ type: 'browser', url: directDecision.url }),
+    })
+  }
+  return rows.length ? rows : [disabledRow('web-empty', q ? 'No matching pages or bookmarks.' : 'No browser pages or bookmarks in this workspace.')]
 }
 
-function webQueryUrl(query: string): string | null {
-  const value = query.trim()
-  if (!value || /\s/.test(value)) return null
-  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`
-  try {
-    const url = new URL(withProtocol)
-    if (!url.hostname.includes('.') && url.hostname !== 'localhost') return null
-    return url.toString().replace(/\/$/, '')
-  } catch {
-    return null
-  }
+function bookmarkIcon(bookmark: BookmarkRecord, faviconRecords: Record<string, FaviconCacheRecord>): TabIcon {
+  const iconUrl = bookmark.faviconDataUrl ?? bookmark.faviconUrl
+  if (iconUrl) return { kind: 'favicon', url: iconUrl, fallback: { kind: 'pane', pane: 'browser' } }
+  return browserTabIconForUrl({ url: bookmark.url, records: faviconRecords })
 }
 
 function workspaceScopeResults({ tree, loading, error, query, switchWorkspace }: { tree?: WorkspaceTreeNode[]; loading: boolean; error: unknown; query: string; switchWorkspace: (workspaceId: string) => void }): UniversalMenuResult[] {
