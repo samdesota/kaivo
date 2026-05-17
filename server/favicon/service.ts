@@ -19,6 +19,11 @@ export type FaviconCacheInput = {
   dataUrl: string
 }
 
+export type FaviconCacheFromUrlInput = {
+  pageOrigin: string
+  iconUrl: string
+}
+
 export class FaviconCacheError extends Error {
   constructor(message: string) {
     super(message)
@@ -78,6 +83,30 @@ export function createFaviconService(database: Db = db) {
           },
         })
     },
+
+    async cacheFromUrl(input: FaviconCacheFromUrlInput): Promise<FaviconCacheRow> {
+      const pageOrigin = normalizeFaviconPageOrigin(input.pageOrigin)
+      if (!pageOrigin) throw new FaviconCacheError('invalid page origin')
+      validateIconUrl(input.iconUrl)
+      const fetched = await fetchFaviconDataUrl(input.iconUrl)
+      const record = validateFaviconCacheInput({ pageOrigin, iconUrl: input.iconUrl, dataUrl: fetched.dataUrl })
+      const now = new Date()
+      await database
+        .insert(faviconCache)
+        .values({ ...record, updatedAt: now, lastSeenAt: now })
+        .onConflictDoUpdate({
+          target: faviconCache.pageOrigin,
+          set: {
+            iconUrl: record.iconUrl,
+            dataUrl: record.dataUrl,
+            mediaType: record.mediaType,
+            sizeBytes: record.sizeBytes,
+            updatedAt: now,
+            lastSeenAt: now,
+          },
+        })
+      return { ...record, updatedAt: now, lastSeenAt: now }
+    },
   }
 }
 
@@ -103,4 +132,15 @@ function parseDataUrl(input: string): { mediaType: string; sizeBytes: number } {
   const mediaType = rawMediaType.toLowerCase()
   const sizeBytes = Buffer.byteLength(Buffer.from(rawBase64, 'base64'))
   return { mediaType, sizeBytes }
+}
+
+async function fetchFaviconDataUrl(iconUrl: string): Promise<{ dataUrl: string }> {
+  if (iconUrl.startsWith('data:')) return { dataUrl: iconUrl }
+  const response = await fetch(iconUrl)
+  if (!response.ok) throw new FaviconCacheError(`favicon fetch failed: ${response.status}`)
+  const mediaType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || 'application/octet-stream'
+  if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) throw new FaviconCacheError('unsupported favicon media type')
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (buffer.length <= 0 || buffer.length > MAX_FAVICON_BYTES) throw new FaviconCacheError('favicon data size out of bounds')
+  return { dataUrl: `data:${mediaType};base64,${buffer.toString('base64')}` }
 }

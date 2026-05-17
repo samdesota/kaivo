@@ -29,7 +29,7 @@ import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
-import { browserTabIconForUrl, faviconOriginForUrl, fetchFaviconDataUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
+import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
 import { openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
@@ -38,7 +38,6 @@ import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { NewSessionPopover } from './env/agent/session-tabs'
-import { NewAgentChatOverlayLauncher } from './env/agent/new-agent-chat-modal'
 import type { UniversalMenuContextItem } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
@@ -63,6 +62,7 @@ import {
 } from './workspace/tab-state'
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { useWorkspaceResourcesStore, type WorkspaceResourceRecord } from './workspace/resources-store'
+import { useWorkspaceBookmarksStore } from './workspace/bookmarks-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
@@ -536,7 +536,6 @@ export function WorkspaceSidebar({
     onError: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
   })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
-  const [newChatContext, setNewChatContext] = useState<null | { mode: 'new'; folderId?: string | null } | { mode: 'existing'; workspace: WorkspaceSummary }>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [dragPlacement, setDragPlacement] = useState<DropPlacement>('after')
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
@@ -900,19 +899,6 @@ export function WorkspaceSidebar({
           <span className="truncate font-medium">Settings</span>
         </Link>
       </div>
-      {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && newChatContext && (
-        <WorkspaceAgentEnvProvider>
-          <NewAgentChatOverlayLauncher
-            open
-            workspaceId={newChatContext.mode === 'existing' ? newChatContext.workspace.id : ctx.workspace.id}
-            workspaceName={newChatContext.mode === 'existing' ? newChatContext.workspace.name : ctx.workspace.name}
-            initialWorkspaceMode={newChatContext.mode}
-            folderId={newChatContext.mode === 'new' ? newChatContext.folderId : undefined}
-            onClose={() => setNewChatContext(null)}
-            onCreated={(sessionId, workspaceId) => void selectCreatedChat(sessionId, workspaceId)}
-          />
-        </WorkspaceAgentEnvProvider>
-      )}
     </aside>
     </>
   )
@@ -1706,6 +1692,7 @@ function WorkspaceTabPane({
   const [fileEditorStates, setFileEditorStates] = useState<Record<string, FileEditorState>>({})
   const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
   const pendingFaviconWritesRef = useRef(new Set<string>())
+  const bookmarksStore = useWorkspaceBookmarksStore(ctx.workspace.id)
   const faviconOrigins = useMemo(() => Array.from(new Set(
     ctx.uiState.workspaceTabs
       .filter((tab): tab is Extract<WorkspaceTab, { type: 'browser' }> => tab.type === 'browser')
@@ -1716,7 +1703,7 @@ function WorkspaceTabPane({
     { origins: faviconOrigins },
     { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
   )
-  const upsertFavicon = trpc.favicon.upsert.useMutation()
+  const upsertFavicon = trpc.favicon.cacheFromUrl.useMutation()
 
   tabsRef.current = ctx.uiState.workspaceTabs
 
@@ -1768,9 +1755,8 @@ function WorkspaceTabPane({
     if (pendingFaviconWritesRef.current.has(key)) return
     pendingFaviconWritesRef.current.add(key)
     try {
-      const data = await fetchFaviconDataUrl(input.faviconUrl)
-      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: data.dataUrl }))
-      await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl, dataUrl: data.dataUrl })
+      const record = await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl })
+      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: record.dataUrl }))
       void faviconCache.refetch()
     } catch (error) {
       console.info('Favicon cache update failed', error)
@@ -1841,6 +1827,13 @@ function WorkspaceTabPane({
               dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
             }
             onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
+            bookmarks={bookmarksStore.bookmarks}
+            faviconDataUrl={activeTab.type === 'browser'
+              ? (liveFaviconDataUrls[faviconOriginForUrl(activeTab.url) ?? ''] ?? ((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(activeTab.url) ?? '']?.dataUrl ?? null)
+              : null}
+            faviconUrl={activeTab.type === 'browser'
+              ? (((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(activeTab.url) ?? '']?.iconUrl ?? null)
+              : null}
           />
         ) : (
           <div className="flex h-full items-center justify-center">Workspace tabs</div>
@@ -1961,6 +1954,9 @@ function WorkspaceTabContent({
   onUrlChange,
   onTitleChange,
   onFaviconChange,
+  bookmarks,
+  faviconDataUrl,
+  faviconUrl,
 }: {
   tab: WorkspaceTab
   onClose: () => void
@@ -1970,6 +1966,9 @@ function WorkspaceTabContent({
   onUrlChange: (url: string) => void
   onTitleChange: (title: string) => void
   onFaviconChange: (input: { pageUrl: string; faviconUrl: string }) => void
+  bookmarks?: import('./workspace/bookmarks-store').BookmarkRecord[]
+  faviconDataUrl?: string | null
+  faviconUrl?: string | null
 }) {
   const ctx = useWorkspaceContext()
   if (tab.type === 'shell') {
@@ -1999,8 +1998,13 @@ function WorkspaceTabContent({
     <div className="h-full min-h-0 w-full">
       <BrowserTabContent
         paneId={tab.id}
+        workspaceId={ctx.workspace.id}
         url={tab.url}
+        title={tab.title}
         browserTabId={tab.browserTabId}
+        faviconDataUrl={faviconDataUrl}
+        faviconUrl={faviconUrl}
+        bookmarks={bookmarks}
         active
         onBrowserTabId={onBrowserTabId}
           onUrlChange={onUrlChange}

@@ -14,6 +14,8 @@ export async function appTrpcQuery<T>(path: string, input?: unknown): Promise<T>
 }
 
 export async function appTrpcMutation<T>(path: string, input?: unknown): Promise<T> {
+  const mocked = maybeMockTrpcMutation<T>(path, input)
+  if (mocked) return mocked
   const res = await fetch(`/trpc/${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -21,6 +23,17 @@ export async function appTrpcMutation<T>(path: string, input?: unknown): Promise
     body: JSON.stringify({ json: input }),
   })
   return parseTrpcResponse<T>(path, res)
+}
+
+function maybeMockTrpcMutation<T>(path: string, input?: unknown): Promise<T> | null {
+  const dev = (import.meta as { env?: { DEV?: boolean } }).env?.DEV
+  if (!dev || typeof window === 'undefined') return null
+  if (window.localStorage.getItem('__zoottle_mock_bookmark_mutations') !== 'true') return null
+  if (path !== 'workspace.upsertResource') return null
+  const calls = JSON.parse(window.localStorage.getItem('__zoottle_mock_bookmark_mutation_calls') || '[]') as unknown[]
+  calls.push(input)
+  window.localStorage.setItem('__zoottle_mock_bookmark_mutation_calls', JSON.stringify(calls))
+  return Promise.resolve({ id: 'bookmark-e2e' } as T)
 }
 
 async function parseTrpcResponse<T>(path: string, res: Response): Promise<T> {

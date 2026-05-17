@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Search } from 'lucide-react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { EnvRef } from '../../lib/env-client'
 import { envTrpc, makeManagedEnvReactClient } from '../../env-trpc'
@@ -14,6 +15,8 @@ import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
 import { WorkspaceCleanupOverlay } from '../workspace/workspace-cleanup-overlay'
 import type { WorkspaceResourceRecord } from '../workspace/resources-store'
+import { bookmarkOriginForUrl, upsertWorkspaceBookmark } from '../workspace/bookmarks-store'
+import { resolveBrowserAddress } from '../../lib/browser-navigation'
 
 /**
  * Detached modal layer rendered at /internal/overlay-layer.
@@ -104,7 +107,25 @@ export type OverlayRequest = {
   resources: WorkspaceResourceRecord[]
   env: EnvRef & { label: string }
   envToken: string
+} | {
+  requestId: string
+  type: 'create-bookmark'
+  workspaceId: string
+  initialTitle?: string
+  initialUrl: string
+  initialFaviconDataUrl?: string | null
+  initialFaviconUrl?: string | null
+} | {
+  requestId: string
+  type: 'browser-url-popover'
+  anchor: { left: number; top: number; width: number }
+  results: BrowserUrlPopoverResult[]
+  activeIndex: number | null
 }
+
+export type BrowserUrlPopoverResult =
+  | { id: string; kind: 'bookmark'; title: string; detail: string; iconUrl?: string | null }
+  | { id: string; kind: 'search'; title: string }
 
 export type OverlayResponse =
   | { requestId: string; type: 'ready' }
@@ -125,6 +146,9 @@ export type OverlayResponse =
   | { requestId: string; type: 'repo-config-created'; configId: string }
   | { requestId: string; type: 'provider-credentials-saved' }
   | { requestId: string; type: 'workspace-cleanup-complete' }
+  | { requestId: string; type: 'bookmark-saved'; bookmarkId: string }
+  | { requestId: string; type: 'browser-url-popover-selected'; resultId: string }
+  | { requestId: string; type: 'browser-url-popover-closed' }
   | { requestId: string; type: 'error'; message: string }
 
 export function OverlayLayerPage() {
@@ -189,6 +213,8 @@ function isOverlayRequest(message: OverlayRequest | OverlayResponse | { type: 'c
     || message.type === 'new-repo-config'
     || message.type === 'provider-credentials'
     || message.type === 'workspace-cleanup'
+    || message.type === 'create-bookmark'
+    || message.type === 'browser-url-popover'
 }
 
 function OverlayRequestRenderer({
@@ -212,6 +238,12 @@ function OverlayRequestRenderer({
   }
   if (request.type === 'provider-credentials') {
     return <ProviderCredentialsOverlayRenderer request={request} respond={respond} />
+  }
+  if (request.type === 'create-bookmark') {
+    return <CreateBookmarkOverlay request={request} respond={respond} />
+  }
+  if (request.type === 'browser-url-popover') {
+    return <BrowserUrlPopoverOverlay request={request} respond={respond} />
   }
 
   return <EnvOverlayRequestRenderer request={request} respond={respond} />
@@ -304,6 +336,51 @@ function EnvOverlayRequestRenderer({
         </EnvContextProvider>
       </envTrpc.Provider>
     </QueryClientProvider>
+  )
+}
+
+function BrowserUrlPopoverOverlay({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'browser-url-popover' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  return (
+    <div className="fixed inset-0 bg-transparent pointer-events-none">
+      <div
+        role="listbox"
+        aria-label="URL bar results"
+        className="absolute max-h-64 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-950 py-1 shadow-lg pointer-events-auto"
+        style={{ left: request.anchor.left, top: request.anchor.top, width: request.anchor.width }}
+      >
+        {request.results.map((result, index) => (
+          <button
+            key={result.id}
+            type="button"
+            role="option"
+            aria-selected={request.activeIndex === index}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              respond({ requestId: request.requestId, type: 'browser-url-popover-selected', resultId: result.id })
+            }}
+            className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs ${request.activeIndex === index ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-300 hover:bg-neutral-900'}`}
+          >
+            {result.kind === 'search' ? (
+              <Search aria-hidden="true" size={12} strokeWidth={1.8} className="shrink-0 text-neutral-400" />
+            ) : result.iconUrl ? (
+              <img src={result.iconUrl} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 rounded-[2px] object-contain" draggable={false} />
+            ) : (
+              <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full border border-neutral-600" />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-neutral-200">{result.title}</span>
+              {result.kind === 'bookmark' && <span className="block truncate text-neutral-500">{result.detail}</span>}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -413,6 +490,98 @@ function TextInputOverlay({
       </form>
     </Modal>
   )
+}
+
+function CreateBookmarkOverlay({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'create-bookmark' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  const [title, setTitle] = useState(request.initialTitle?.trim() || defaultBookmarkTitle(request.initialUrl))
+  const [url, setUrl] = useState(request.initialUrl)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const titleValue = title.trim()
+  const urlValue = url.trim()
+  const decision = urlValue ? resolveBrowserAddress(urlValue) : null
+  const canSave = Boolean(titleValue && decision && decision.kind !== 'search' && decision.url && !busy)
+  const origin = decision && decision.kind !== 'search' ? bookmarkOriginForUrl(decision.url) : null
+
+  function close() {
+    respond({ requestId: request.requestId, type: 'closed' })
+  }
+
+  async function submit() {
+    if (!canSave || !decision || decision.kind === 'search') return
+    setBusy(true)
+    setError(null)
+    try {
+      const saved = await upsertWorkspaceBookmark(request.workspaceId, {
+        title: titleValue,
+        url: decision.url,
+        faviconDataUrl: request.initialFaviconDataUrl ?? null,
+        faviconUrl: request.initialFaviconUrl ?? null,
+        createdFrom: 'browser-pane',
+      })
+      respond({ requestId: request.requestId, type: 'bookmark-saved', bookmarkId: saved.id })
+    } catch (err) {
+      setError((err as { message?: string })?.message ?? 'Bookmark save failed')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={close} title="Save bookmark" widthClass="max-w-sm">
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
+        <label className="block space-y-1 text-xs text-neutral-400">
+          <span>Title</span>
+          <input
+            autoFocus
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            className="w-full rounded border border-neutral-800 bg-input px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+          />
+        </label>
+        <label className="block space-y-1 text-xs text-neutral-400">
+          <span>URL</span>
+          <input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            className="w-full rounded border border-neutral-800 bg-input px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+          />
+        </label>
+        {origin && <div className="truncate text-xs text-neutral-500">{origin.replace(/^https?:\/\//, '')}</div>}
+        {urlValue && decision?.kind === 'search' && <div className="text-xs text-red-300">Enter a URL to bookmark.</div>}
+        {error && <div className="text-xs text-red-300">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={close} className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!canSave}
+            className="rounded bg-neutral-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-600 disabled:opacity-50"
+          >
+            {busy ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function defaultBookmarkTitle(url: string): string {
+  const origin = bookmarkOriginForUrl(url)
+  if (origin) return origin.replace(/^https?:\/\//, '')
+  return url.trim() || 'Bookmark'
 }
 
 function ConfirmOverlay({

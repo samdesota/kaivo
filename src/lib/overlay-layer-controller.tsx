@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { EnvRef } from './env-client'
 import { browserApi } from './browser-api'
 import { makeTrpcClient, trpc } from '../trpc'
-import { OVERLAY_CHANNEL, OverlayLayerApp, type OverlayRequest, type OverlayResponse } from '../routes/internal/overlay-layer'
+import { OVERLAY_CHANNEL, OverlayLayerApp, type BrowserUrlPopoverResult, type OverlayRequest, type OverlayResponse } from '../routes/internal/overlay-layer'
 import type { PaneContent } from '../routes/env/shell/tab-state'
 import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
 import type { WorkspaceResourceRecord } from '../routes/workspace/resources-store'
@@ -48,6 +48,26 @@ export type UniversalMenuOverlayResult =
   | { type: 'toggle-sidebar' }
   | { type: 'open-settings' }
   | { type: 'closed' }
+
+export type CreateBookmarkOverlayInput = {
+  workspaceId: string
+  initialTitle?: string
+  initialUrl: string
+  initialFaviconDataUrl?: string | null
+  initialFaviconUrl?: string | null
+}
+
+export type BrowserUrlPopoverInput = {
+  anchor: { left: number; top: number; width: number }
+  results: BrowserUrlPopoverResult[]
+  activeIndex: number | null
+}
+
+export type BrowserUrlPopoverSession = {
+  requestId: string
+  update(input: BrowserUrlPopoverInput): void
+  close(): void
+}
 
 let detachedOverlayId: string | null = null
 let readyPromise: Promise<void> | null = null
@@ -227,12 +247,63 @@ export async function openWorkspaceCleanupOverlay(input: EnvOverlayInput & {
   throw new Error(`unexpected overlay response: ${response.type}`)
 }
 
+export async function openCreateBookmarkOverlay(input: CreateBookmarkOverlayInput): Promise<string | null> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'create-bookmark',
+    ...input,
+  })
+  if (response.type === 'bookmark-saved') return response.bookmarkId
+  if (response.type === 'closed') return null
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openBrowserUrlPopoverOverlay(input: BrowserUrlPopoverInput, onSelect: (resultId: string) => void): Promise<BrowserUrlPopoverSession | null> {
+  if (!browserApi.isAvailable()) return null
+  const requestId = makeOverlayRequestId()
+  let closed = false
+  await ensureElectronOverlay()
+  if (!detachedOverlayId) return null
+  const channel = new BroadcastChannel(OVERLAY_CHANNEL)
+  const post = (next: BrowserUrlPopoverInput) => {
+    channel.postMessage({ requestId, type: 'browser-url-popover', ...next } satisfies OverlayRequest)
+  }
+  channel.onmessage = (event: MessageEvent<OverlayResponse>) => {
+    const response = event.data
+    if (response.requestId !== requestId) return
+    if (response.type === 'browser-url-popover-selected') onSelect(response.resultId)
+    close()
+  }
+  const width = Math.max(1, window.innerWidth)
+  const height = Math.max(1, window.innerHeight)
+  await browserApi.attachOverlay({ overlayId: detachedOverlayId, placement: { x: 0, y: 0, w: width, h: height } })
+  post(input)
+
+  function close() {
+    if (closed) return
+    closed = true
+    channel.postMessage({ type: 'close' })
+    channel.close()
+    if (detachedOverlayId) void browserApi.detachOverlay({ overlayId: detachedOverlayId }).catch(() => undefined)
+  }
+
+  return {
+    requestId,
+    update(next) {
+      if (!closed) post(next)
+    },
+    close,
+  }
+}
+
 async function openOverlayRequest(request: OverlayRequest): Promise<OverlayResponse> {
   if (request.type !== 'confirm'
     && request.type !== 'text-input'
     && request.type !== 'repo-config'
     && request.type !== 'new-repo-config'
     && request.type !== 'provider-credentials'
+    && request.type !== 'create-bookmark'
+    && request.type !== 'browser-url-popover'
     && !request.envToken) {
     throw new Error('env token is required for env overlays')
   }
@@ -280,11 +351,11 @@ async function ensureElectronOverlay(): Promise<void> {
   const pendingReady = waitForOverlayReady()
   readyPromise = pendingReady
   try {
-    const { overlayId } = await browserApi.createDetachedOverlay({
+    const { overlayId } = await withTimeout(browserApi.createDetachedOverlay({
       url: `${window.location.origin}/internal/overlay-layer`,
       transparent: true,
       clickThrough: false,
-    })
+    }), 5_000, 'overlay create timed out')
     detachedOverlayId = overlayId
     await pendingReady
   } catch (e) {
@@ -311,6 +382,22 @@ function waitForOverlayReady(): Promise<void> {
       channel.close()
       resolve()
     }
+  })
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout)
+        resolve(value)
+      },
+      (error) => {
+        window.clearTimeout(timeout)
+        reject(error)
+      },
+    )
   })
 }
 

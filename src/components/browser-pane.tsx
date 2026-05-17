@@ -1,12 +1,21 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { browserApi } from '../lib/browser-api'
+import { matchBookmarks, normalizeBrowserUrl, resolveBrowserAddress, type BookmarkMatch } from '../lib/browser-navigation'
+import { openBrowserUrlPopoverOverlay, openCreateBookmarkOverlay, type BrowserUrlPopoverSession } from '../lib/overlay-layer-controller'
+import type { BrowserUrlPopoverResult } from '../routes/internal/overlay-layer'
+import type { BookmarkRecord } from '../routes/workspace/bookmarks-store'
 
 interface BrowserPaneProps {
   paneId: string
+  workspaceId?: string
   url?: string
+  title?: string
   browserTabId?: string
   active: boolean
   closeOnUnmount?: boolean
+  faviconDataUrl?: string | null
+  faviconUrl?: string | null
+  bookmarks?: BookmarkRecord[]
   onBrowserTabId?: (browserTabId: string) => void
   onUrlChange?: (url: string) => void
   onTitleChange?: (title: string) => void
@@ -31,9 +40,16 @@ function sameBrowserSlotRect(a: BrowserSlotRect | null, b: BrowserSlotRect): boo
   return Boolean(a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height)
 }
 
-export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount = true, onBrowserTabId, onUrlChange, onTitleChange, onFaviconChange }: BrowserPaneProps) {
+type AddressResult =
+  | { kind: 'bookmark'; id: string; bookmark: BookmarkRecord; match: BookmarkMatch }
+  | { kind: 'search'; id: string; query: string; url: string }
+
+export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, active, closeOnUnmount = true, faviconDataUrl, faviconUrl, bookmarks = [], onBrowserTabId, onUrlChange, onTitleChange, onFaviconChange }: BrowserPaneProps) {
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
+  const addressInputRef = useRef<HTMLInputElement | null>(null)
+  const addressResultsRef = useRef<AddressResult[]>([])
+  const addressPopoverRef = useRef<BrowserUrlPopoverSession | null>(null)
   const createdTabIdRef = useRef<string | null>(null)
   const onBrowserTabIdRef = useRef(onBrowserTabId)
   const onUrlChangeRef = useRef(onUrlChange)
@@ -43,7 +59,11 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   const focusedTabKeyRef = useRef<string | null>(null)
   const slotReadyRef = useRef<Promise<void>>(Promise.resolve())
   const [address, setAddress] = useState(url ?? '')
+  const [pageTitle, setPageTitle] = useState(title ?? '')
+  const [pageFaviconUrl, setPageFaviconUrl] = useState(faviconUrl ?? null)
   const [agentConnected, setAgentConnected] = useState(false)
+  const [addressFocused, setAddressFocused] = useState(false)
+  const [activeAddressResult, setActiveAddressResult] = useState<number | null>(null)
 
   browserTabIdRef.current = browserTabId
   onBrowserTabIdRef.current = onBrowserTabId
@@ -54,6 +74,14 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
   useEffect(() => {
     setAddress(url ?? '')
   }, [url])
+
+  useEffect(() => {
+    setPageTitle(title ?? '')
+  }, [title])
+
+  useEffect(() => {
+    setPageFaviconUrl(faviconUrl ?? null)
+  }, [faviconUrl])
 
   useEffect(() => {
     if (!browserApi.isAvailable()) return
@@ -152,8 +180,12 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
         setAddress(event.patch.url)
         onUrlChangeRef.current?.(event.patch.url)
       }
-      if (typeof event.patch.title === 'string') onTitleChangeRef.current?.(event.patch.title)
+      if (typeof event.patch.title === 'string') {
+        setPageTitle(event.patch.title)
+        onTitleChangeRef.current?.(event.patch.title)
+      }
       if (typeof event.patch.favicon === 'string') {
+        setPageFaviconUrl(event.patch.favicon)
         onFaviconChangeRef.current?.({ pageUrl: nextPageUrl, faviconUrl: event.patch.favicon })
       }
     })
@@ -191,6 +223,70 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     }
   }, [closeOnUnmount])
 
+  const activeBrowserTabId = browserTabIdRef.current
+  const bookmarkableUrl = isBookmarkableBrowserUrl(address)
+  const addressQuery = address.trim()
+  const bookmarkMatches = addressQuery ? matchBookmarks(bookmarks, addressQuery).slice(0, 6) : []
+  const addressDecision = addressQuery ? resolveBrowserAddress(addressQuery) : null
+  const addressResults: AddressResult[] = [
+    ...bookmarkMatches.map((match): AddressResult => ({ kind: 'bookmark', id: `bookmark:${match.bookmark.id}`, bookmark: match.bookmark, match })),
+    ...(addressDecision?.kind === 'search' ? [{ kind: 'search' as const, id: `search:${addressDecision.query}`, query: addressDecision.query, url: addressDecision.url }] : []),
+  ]
+  addressResultsRef.current = addressResults
+  const showAddressResults = addressFocused && addressQuery.length > 0 && addressResults.length > 0
+  const overlayResults = addressResults.map(toBrowserUrlPopoverResult)
+
+  useEffect(() => {
+    if (!showAddressResults) {
+      addressPopoverRef.current?.close()
+      addressPopoverRef.current = null
+      return
+    }
+    if (!browserApi.isAvailable()) return
+
+    const input = addressInputRef.current
+    if (!input) return
+    const rect = input.getBoundingClientRect()
+    const request = {
+      anchor: {
+        left: Math.round(rect.left),
+        top: Math.round(rect.bottom + 4),
+        width: Math.round(rect.width),
+      },
+      results: overlayResults,
+      activeIndex: activeAddressResult,
+    }
+
+    if (addressPopoverRef.current) {
+      addressPopoverRef.current.update(request)
+      return
+    }
+
+    let cancelled = false
+    void openBrowserUrlPopoverOverlay(request, (resultId) => {
+      const result = addressResultsRef.current.find((candidate) => candidate.id === resultId)
+      if (result) void activateAddressResult(result)
+    }).then((session) => {
+      if (!session) return
+      if (cancelled) {
+        session.close()
+        return
+      }
+      addressPopoverRef.current = session
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [showAddressResults, activeAddressResult, overlayResults])
+
+  useEffect(() => {
+    return () => {
+      addressPopoverRef.current?.close()
+      addressPopoverRef.current = null
+    }
+  }, [])
+
   if (!browserApi.isAvailable()) {
     const fallbackUrl = url ? normalizeBrowserUrl(url) : ''
     return (
@@ -216,12 +312,62 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
     )
   }
 
-  const activeBrowserTabId = browserTabIdRef.current
+  async function openBookmarkOverlay() {
+    if (!workspaceId || !bookmarkableUrl) return
+    window.localStorage?.setItem('__zoottle_bookmark_overlay_requested', bookmarkableUrl)
+    await openCreateBookmarkOverlay({
+      workspaceId,
+      initialTitle: pageTitle || defaultBrowserBookmarkTitle(bookmarkableUrl),
+      initialUrl: bookmarkableUrl,
+      initialFaviconDataUrl: faviconDataUrl ?? null,
+      initialFaviconUrl: pageFaviconUrl ?? null,
+    })
+  }
+
+  function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
+      event.preventDefault()
+      void openBookmarkOverlay()
+      return
+    }
+    if (event.key === 'ArrowDown' && showAddressResults) {
+      event.preventDefault()
+      setActiveAddressResult((value) => value === null ? 0 : Math.min(addressResults.length - 1, value + 1))
+      return
+    }
+    if (event.key === 'ArrowUp' && showAddressResults) {
+      event.preventDefault()
+      setActiveAddressResult((value) => value === null ? addressResults.length - 1 : Math.max(0, value - 1))
+      return
+    }
+    if (event.key === 'Escape' && showAddressResults) {
+      event.preventDefault()
+      setActiveAddressResult(null)
+      setAddressFocused(false)
+    }
+  }
 
   async function submitAddress(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!activeBrowserTabId) return
-    const nextUrl = normalizeBrowserUrl(address)
+    const selected = activeAddressResult === null ? null : addressResults[activeAddressResult]
+    const exactBookmark = selected ? null : matchBookmarks(bookmarks, address).find((match) => match.reason === 'exact')?.bookmark
+    const nextUrl = selected?.kind === 'bookmark'
+      ? selected.bookmark.url
+      : selected?.kind === 'search'
+        ? selected.url
+        : exactBookmark?.url ?? normalizeBrowserUrl(address)
+    setAddressFocused(false)
+    setActiveAddressResult(null)
+    setAddress(nextUrl)
+    await browserApi.navigate({ browserTabId: activeBrowserTabId, url: nextUrl })
+  }
+
+  async function activateAddressResult(result: AddressResult) {
+    if (!activeBrowserTabId) return
+    const nextUrl = result.kind === 'bookmark' ? result.bookmark.url : result.url
+    setAddressFocused(false)
+    setActiveAddressResult(null)
     setAddress(nextUrl)
     await browserApi.navigate({ browserTabId: activeBrowserTabId, url: nextUrl })
   }
@@ -272,6 +418,29 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
         >
           ↻
         </BrowserControlButton>
+        <label className="sr-only" htmlFor={`browser-url-${paneId}`}>
+          URL
+        </label>
+        <div className="relative ml-1 min-w-0 flex-1">
+          <input
+            ref={addressInputRef}
+            id={`browser-url-${paneId}`}
+            value={address}
+            onChange={(event) => {
+              setAddressFocused(true)
+              setAddress(event.currentTarget.value)
+              setActiveAddressResult(null)
+            }}
+            onFocus={() => setAddressFocused(true)}
+            onBlur={() => window.setTimeout(() => setAddressFocused(false), 100)}
+            onKeyDown={handleAddressKeyDown}
+            placeholder="Search bookmarks or enter URL"
+            className="w-full rounded-md border border-neutral-800 bg-input px-2 py-1 text-xs text-neutral-100 outline-none placeholder:text-placeholder focus:border-neutral-600"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+        </div>
         <BrowserControlButton
           label="Open DevTools"
           disabled={!activeBrowserTabId}
@@ -279,19 +448,13 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
         >
           &lt;/&gt;
         </BrowserControlButton>
-        <label className="sr-only" htmlFor={`browser-url-${paneId}`}>
-          URL
-        </label>
-        <input
-          id={`browser-url-${paneId}`}
-          value={address}
-          onChange={(event) => setAddress(event.currentTarget.value)}
-          placeholder="Search or enter URL"
-          className="ml-1 min-w-0 flex-1 rounded-md border border-neutral-800 bg-input px-2 py-1 text-xs text-neutral-100 outline-none placeholder:text-placeholder focus:border-neutral-600"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-        />
+        <BrowserControlButton
+          label="Bookmark page"
+          disabled={!workspaceId || !bookmarkableUrl}
+          onClick={() => void openBookmarkOverlay()}
+        >
+          ☆
+        </BrowserControlButton>
       </form>
       {agentConnected ? (
         <div className="flex shrink-0 items-center justify-between border-b border-amber-500/30 bg-amber-950/50 px-3 py-1.5 text-xs text-amber-100">
@@ -308,6 +471,20 @@ export function BrowserPane({ paneId, url, browserTabId, active, closeOnUnmount 
       <div ref={slotRef} className="min-h-0 flex-1 bg-neutral-975" aria-label="Browser pane slot" />
     </div>
   )
+}
+
+function toBrowserUrlPopoverResult(result: AddressResult): BrowserUrlPopoverResult {
+  if (result.kind === 'search') {
+    return { id: result.id, kind: 'search', title: `Search web for "${result.query}"` }
+  }
+
+  return {
+    id: result.id,
+    kind: 'bookmark',
+    title: result.bookmark.title,
+    detail: result.bookmark.origin?.replace(/^https?:\/\//, '') ?? result.bookmark.url,
+    iconUrl: result.bookmark.faviconDataUrl ?? result.bookmark.faviconUrl,
+  }
 }
 
 function BrowserControlButton({
@@ -335,12 +512,20 @@ function BrowserControlButton({
   )
 }
 
-export function normalizeBrowserUrl(raw: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed) return 'about:blank'
-  if (trimmed.startsWith('localhost') || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?/.test(trimmed)) {
-    return `http://${trimmed}`
+export { normalizeBrowserUrl } from '../lib/browser-navigation'
+
+export function isBookmarkableBrowserUrl(raw: string | undefined): string | null {
+  const decision = resolveBrowserAddress(raw ?? '')
+  if (decision.kind === 'search') return null
+  if (decision.url === 'about:blank') return null
+  if (!/^https?:\/\//i.test(decision.url)) return null
+  return decision.url
+}
+
+function defaultBrowserBookmarkTitle(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
   }
-  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)) return trimmed
-  return `https://${trimmed}`
 }
