@@ -27,8 +27,6 @@ const mocks = vi.hoisted(() => ({
   startChat: vi.fn(async () => ({ id: 'session-new' })),
   createShell: vi.fn(async () => ({ id: 'shell-new' })),
   disposeShell: vi.fn(async () => ({ ok: true })),
-  createDirectory: vi.fn(async ({ parentPath, name }: { parentPath: string; name: string }) => ({ name, path: `${parentPath}/${name}` })),
-  invalidateBrowseHome: vi.fn(async () => undefined),
   cloneConfig: vi.fn(async () => ({ repoId: 'repo-new', workingDir: '/Users/sam/d/standalone/new-tree' })),
   createWorkspace: vi.fn(async () => ({ id: 'workspace-new' })),
   upsertWorkspaceResource: vi.fn(async () => ({ ok: true })),
@@ -38,11 +36,23 @@ const mocks = vi.hoisted(() => ({
   shells: [] as Array<{ id: string; cwd: string; title: string | null; alive?: boolean }>,
   gitFiles: [] as Array<{ root: string; path: string; relativePath: string }>,
   workspaceTree: [] as Array<unknown>,
+  bookmarks: [] as Array<{
+    id: string
+    workspaceId: string
+    title: string
+    url: string
+    normalizedUrl: string
+    origin: string | null
+    faviconDataUrl?: string | null
+    faviconUrl?: string | null
+    createdAt: Date
+    updatedAt: Date
+  }>,
 }))
 
 vi.mock('../../src/env-trpc', () => ({
   envTrpc: {
-    useUtils: () => ({ fs: { browseHome: { invalidate: mocks.invalidateBrowseHome } }, shell: { list: { invalidate: vi.fn(async () => undefined) } } }),
+    useUtils: () => ({ shell: { list: { invalidate: vi.fn(async () => undefined) } } }),
     agent: {
       sessionList: {
         useQuery: () => ({ data: mocks.sessions, isLoading: false }),
@@ -60,9 +70,6 @@ vi.mock('../../src/env-trpc', () => ({
       },
       searchGitTrackedFiles: {
         useQuery: () => ({ data: mocks.gitFiles, isLoading: false, error: null }),
-      },
-      createDirectory: {
-        useMutation: () => ({ mutateAsync: mocks.createDirectory, isPending: false }),
       },
     },
     repo: {
@@ -114,6 +121,10 @@ vi.mock('../../src/trpc', () => ({
   },
 }))
 
+vi.mock('../../src/routes/workspace/bookmarks-store', () => ({
+  useWorkspaceBookmarksStore: () => ({ bookmarks: mocks.bookmarks, isLoading: false, error: null }),
+}))
+
 afterEach(() => cleanup())
 
 beforeEach(() => {
@@ -139,8 +150,6 @@ beforeEach(() => {
   mocks.startChat.mockClear()
   mocks.createShell.mockClear()
   mocks.disposeShell.mockClear()
-  mocks.createDirectory.mockClear()
-  mocks.invalidateBrowseHome.mockClear()
   mocks.cloneConfig.mockClear()
   mocks.createWorkspace.mockClear()
   mocks.upsertWorkspaceResource.mockClear()
@@ -150,6 +159,7 @@ beforeEach(() => {
   mocks.shells = []
   mocks.gitFiles = []
   mocks.workspaceTree = []
+  mocks.bookmarks = []
   Object.defineProperty(window, 'focus', { value: vi.fn(), configurable: true })
 })
 
@@ -332,31 +342,6 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'http://127.0.0.1' })
   })
 
-  it('shows live workspace shells without open tabs on the landing page', () => {
-    const onOpenContent = vi.fn()
-    mocks.shells = [
-      { id: 'shell-live', cwd: '/Users/sam/live', title: 'detached shell', alive: true },
-      { id: 'shell-dead', cwd: '/Users/sam/dead', title: 'terminated shell', alive: false },
-    ]
-    render(
-      <UniversalMenu
-        open
-        workspaceId="workspace-1"
-        hasActiveTab={false}
-        onOpenContent={onOpenContent}
-        onClose={vi.fn()}
-        onCloseTab={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText('detached shell')).toBeTruthy()
-    expect(screen.queryByText('terminated shell')).toBeNull()
-
-    fireEvent.click(screen.getByText('detached shell'))
-
-    expect(onOpenContent).toHaveBeenCalledWith({ type: 'shell', shellId: 'shell-live' })
-  })
-
   it('hides contextual shell tabs when the backing shell is terminated', () => {
     mocks.shells = [{ id: 'shell-dead', cwd: '/Users/sam/dead', title: 'terminated shell', alive: false }]
     render(
@@ -374,10 +359,15 @@ describe('UniversalMenu baseline shell', () => {
     expect(screen.queryByText('terminated shell')).toBeNull()
   })
 
-  it('opens landing shell actions with Option and terminates with t', async () => {
-    mocks.shells = [{ id: 'shell-live', cwd: '/Users/sam/live', title: 'detached shell', alive: true }]
+  it('shows live workspace shells without open tabs and terminates from landing actions', async () => {
+    mocks.shells = [
+      { id: 'shell-live', cwd: '/Users/sam/live', title: 'detached shell', alive: true },
+      { id: 'shell-dead', cwd: '/Users/sam/dead', title: 'terminated shell', alive: false },
+    ]
     render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
 
+    expect(screen.getByText('detached shell')).toBeTruthy()
+    expect(screen.queryByText('terminated shell')).toBeNull()
     expect(screen.getByText('⌥ actions')).toBeTruthy()
 
     const input = screen.getByLabelText('Universal menu search')
@@ -447,15 +437,14 @@ describe('UniversalMenu baseline shell', () => {
     expect(mocks.startChat).toHaveBeenCalledWith({ workspaceId: 'workspace-1', directory: '/Users/sam/d/baz/foo' })
   })
 
-  it('shows repo configs as clone rows and opens the create flow', () => {
+  it('shows repo configs without active worktrees and opens the create flow from plus', () => {
     const onClose = vi.fn()
     mocks.repoConfigs = [{ id: 'config-1', name: 'standalone', githubFullName: 'sam/standalone' }]
     render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={onClose} onCloseTab={vi.fn()} />)
 
     const input = screen.getByLabelText('Universal menu search')
     fireEvent.change(input, { target: { value: '#standalone' } })
-    expect(screen.getByText('Clone repo')).toBeTruthy()
-    fireEvent.click(screen.getByText('sam/standalone'))
+    fireEvent.click(screen.getByLabelText('Create work tree from sam/standalone'))
 
     expect(screen.getByText('sam/standalone')).toBeTruthy()
     expect(screen.getAllByText('Create chat').length).toBeGreaterThan(0)
@@ -586,7 +575,7 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' })
   })
 
-  it('opens direct web URLs from command search', () => {
+  it('shows direct web search action for non-url text', () => {
     const onOpenContent = vi.fn()
     render(
       <UniversalMenu
@@ -600,14 +589,52 @@ describe('UniversalMenu baseline shell', () => {
     )
 
     const input = screen.getByLabelText('Universal menu search')
-    fireEvent.change(input, { target: { value: 'google.com' } })
-
-    expect(screen.getByText('https://google.com')).toBeTruthy()
-    expect(screen.getByText('open URL')).toBeTruthy()
-
+    fireEvent.change(input, { target: { value: '@foo bar' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' })
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://www.google.com/search?q=foo%20bar' })
+  })
+
+  it('shows exact web bookmarks before prefix matches and opens the selected bookmark', () => {
+    const onOpenContent = vi.fn()
+    const now = new Date('2026-05-16T00:00:00Z')
+    mocks.bookmarks = [
+      { id: 'bookmark-foozam', workspaceId: 'workspace-1', title: 'foozam', url: 'https://example.com/foozam', normalizedUrl: 'https://example.com/foozam', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+      { id: 'bookmark-foo', workspaceId: 'workspace-1', title: 'foo', url: 'https://example.com/foo', normalizedUrl: 'https://example.com/foo', origin: 'https://example.com', faviconDataUrl: 'data:image/png;base64,abc', faviconUrl: null, createdAt: now, updatedAt: now },
+    ]
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: '@foo' } })
+    const labels = Array.from(screen.getByTestId('universal-menu-results').querySelectorAll('button')).map((button) => button.textContent ?? '')
+    expect(labels.indexOf('fooexample.com')).toBeLessThan(labels.indexOf('foozamexample.com'))
+    expect(screen.getByTestId('universal-menu-results').querySelector('img')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /fooexample\.com/ }))
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/foo' })
+  })
+
+  it('ignores malformed web bookmark rows without breaking search', () => {
+    const now = new Date('2026-05-16T00:00:00Z')
+    mocks.bookmarks = [
+      { id: 'bad', workspaceId: 'workspace-1', title: null, url: null, normalizedUrl: null, origin: null, createdAt: now, updatedAt: null } as never,
+      { id: 'bookmark-docs', workspaceId: 'workspace-1', title: 'Docs', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+    ]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onOpenContent={vi.fn()} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: '@doc' } })
+
+    expect(screen.getByRole('button', { name: /Docsexample\.com/ })).toBeTruthy()
+    expect(screen.queryByText('bad')).toBeNull()
   })
 
   it('shows filtered workspace ancestry and switches workspace', () => {
@@ -640,18 +667,6 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'file', path: '/Users/sam/d/foo/src/foo.ts', absolute: true })
-  })
-
-  it('middle-truncates long find file paths', () => {
-    mocks.sessions = [{ id: 'session-1', workingDir: '/Users/sam/d/foo' }]
-    mocks.gitFiles = [{ root: '/Users/sam/d/foo', relativePath: 'docs/blah/alpha/beta/foo/bar.ts', path: '/Users/sam/d/foo/docs/blah/alpha/beta/foo/bar.ts' }]
-    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
-
-    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: '.bar' } })
-
-    const rows = Array.from(screen.getByTestId('universal-menu-results').querySelectorAll('button')).map((button) => button.textContent ?? '')
-    expect(rows.some((text) => text.includes('docs/blah/.../foo/bar.ts'))).toBe(true)
-    expect(rows.some((text) => text.includes('docs/blah/alpha/beta/foo/bar.ts'))).toBe(false)
   })
 
   it('hides empty contextual sections', () => {
@@ -753,72 +768,6 @@ describe('UniversalMenu baseline shell', () => {
 
     expect(input.value).toBe('/Users/sam/scratch/')
     expect(mocks.startChat).not.toHaveBeenCalled()
-  })
-
-  it('shows create folder as the last path result when the final segment is not an exact folder match', () => {
-    mocks.browse = {
-      ...mocks.browse,
-      data: {
-        path: '/Users/sam/foo',
-        home: '/Users/sam',
-        defaultPath: '/Users/sam/d/cloud-code-tools',
-        parent: '/Users/sam',
-        dirs: [{ name: 'bazooka', path: '/Users/sam/foo/bazooka' }],
-        files: [{ name: 'baz.txt', path: '/Users/sam/foo/baz.txt' }],
-      },
-    }
-    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
-
-    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'foo/baz' } })
-
-    const rows = Array.from(screen.getByTestId('universal-menu-results').querySelectorAll('button')).map((button) => button.textContent ?? '')
-    expect(rows.some((text) => text.includes('bazooka'))).toBe(true)
-    expect(rows.some((text) => text.includes('baz.txt'))).toBe(true)
-    expect(rows[rows.length - 1]).toContain('New folder: baz')
-  })
-
-  it('creates a folder from the path create option without starting a chat or closing', async () => {
-    const onClose = vi.fn()
-    mocks.browse = {
-      ...mocks.browse,
-      data: {
-        path: '/Users/sam/foo',
-        home: '/Users/sam',
-        defaultPath: '/Users/sam/d/cloud-code-tools',
-        parent: '/Users/sam',
-        dirs: [],
-        files: [],
-      },
-    }
-    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={onClose} onCloseTab={vi.fn()} />)
-
-    const input = screen.getByLabelText('Universal menu search') as HTMLInputElement
-    fireEvent.change(input, { target: { value: 'foo/baz' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
-
-    await waitFor(() => expect(mocks.createDirectory).toHaveBeenCalledWith({ parentPath: '/Users/sam/foo', name: 'baz' }))
-    await waitFor(() => expect(input.value).toBe('foo/baz/'))
-    expect(mocks.startChat).not.toHaveBeenCalled()
-    expect(onClose).not.toHaveBeenCalled()
-  })
-
-  it('does not show create folder when the path segment exactly matches a folder', () => {
-    mocks.browse = {
-      ...mocks.browse,
-      data: {
-        path: '/Users/sam/foo',
-        home: '/Users/sam',
-        defaultPath: '/Users/sam/d/cloud-code-tools',
-        parent: '/Users/sam',
-        dirs: [{ name: 'baz', path: '/Users/sam/foo/baz' }],
-        files: [],
-      },
-    }
-    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
-
-    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'foo/baz' } })
-
-    expect(screen.queryByText('New folder: baz')).toBeNull()
   })
 
   it('treats path-like command input as File System path input', () => {

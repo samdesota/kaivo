@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
 import { runLocalAppMigrations } from '../db/local-migrate'
 import { createFaviconService, normalizeFaviconPageOrigin, validateFaviconCacheInput } from './service'
@@ -19,6 +19,10 @@ function createTestDb() {
 }
 
 describe('favicon cache service', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('normalizes origins and rejects invalid or oversized favicon data', () => {
     expect(normalizeFaviconPageOrigin('https://example.com/path?q=1')).toBe('https://example.com')
     expect(normalizeFaviconPageOrigin('about:blank')).toBeNull()
@@ -64,6 +68,34 @@ describe('favicon cache service', () => {
       } finally {
         readonly.close()
       }
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('fetches favicon bytes server-side and stores a data URL', async () => {
+    const { sqlite, db } = createTestDb()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([137, 80, 78, 71]), {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+    })))
+    try {
+      const service = createFaviconService(db)
+      const row = await service.cacheFromUrl({
+        pageOrigin: 'https://www.google.com/search?q=x',
+        iconUrl: 'https://www.gstatic.com/images/branding/searchlogo/ico/favicon.ico',
+      })
+
+      expect(fetch).toHaveBeenCalledWith('https://www.gstatic.com/images/branding/searchlogo/ico/favicon.ico')
+      expect(row).toMatchObject({
+        pageOrigin: 'https://www.google.com',
+        iconUrl: 'https://www.gstatic.com/images/branding/searchlogo/ico/favicon.ico',
+        mediaType: 'image/png',
+        sizeBytes: 4,
+      })
+      expect(row.dataUrl).toBe('data:image/png;base64,iVBORw==')
+      const rows = await service.getByOrigins(['https://www.google.com/'])
+      expect(rows['https://www.google.com']?.dataUrl).toBe(row.dataUrl)
     } finally {
       sqlite.close()
     }

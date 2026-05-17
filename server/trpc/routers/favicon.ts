@@ -9,6 +9,11 @@ const faviconInputSchema = z.object({
   dataUrl: z.string().min(1).max(200_000),
 })
 
+const faviconUrlInputSchema = z.object({
+  pageOrigin: z.string().min(1).max(2_000),
+  iconUrl: z.string().min(1).max(8_000),
+})
+
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof FaviconCacheError) return new TRPCError({ code: 'BAD_REQUEST', message: err.message })
   return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: (err as { message?: string })?.message ?? 'favicon cache error' })
@@ -25,6 +30,16 @@ export const faviconRouter = router({
       try {
         await faviconService.upsert(input)
         return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  cacheFromUrl: protectedProcedure
+    .input(faviconUrlInputSchema)
+    .mutation(async ({ input }) => {
+      try {
+        return await faviconService.cacheFromUrl(input)
       } catch (err) {
         throw toTrpcError(err)
       }

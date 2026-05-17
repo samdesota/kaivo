@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     mode: 'desktop',
   })
 
-  console.log(`Local Zoottle desktop runtime started:`)
+  console.log(`Local Kaivo desktop runtime started:`)
   console.log(`  app:      ${result.config.app.url}`)
   console.log(`  env:      ${result.config.env.url}`)
   console.log(`  client:   ${result.config.client.url}`)

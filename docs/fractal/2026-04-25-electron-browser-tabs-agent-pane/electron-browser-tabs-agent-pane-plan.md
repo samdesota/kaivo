@@ -5,7 +5,7 @@
 Prepare `webframe` for scoped package publishing so `zoottle` can consume it as a normal dependency while keeping the source in its own repo.
 
 **Steps**
-- Rename or scope the `webframe` package for GitHub Packages, for example `@zoottle/webframe`.
+- Rename or scope the `webframe` package for GitHub Packages, for example `@kaivo/webframe`.
 - Add GitHub Packages publish configuration and document required `.npmrc` authentication.
 - Add a release/publish workflow or script that runs the `webframe` build before publishing.
 

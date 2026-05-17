@@ -45,10 +45,10 @@ const schema = z.object({
   CC_OPENCODE_GPT55_OUTPUT_LIMIT: z.coerce.number().int().positive().default(128_000),
   CC_OPENCODE_GPT55_COMPACT_LIMIT: z.coerce.number().int().positive().optional(),
 
-  // `file://` URI or absolute path to the Zoottle opencode plugin. In
+  // `file://` URI or absolute path to the Kaivo opencode plugin. In
   // container mode the Dockerfile bakes it to /opt; in local mode
   // install.sh writes it under the state dir.
-  CC_OPENCODE_PLUGIN_PATH: z.string().default('file:///opt/zoottle-opencode-plugin/index.js'),
+  CC_OPENCODE_PLUGIN_PATH: z.string().default('file:///opt/kaivo-opencode-plugin/index.js'),
 
   // Desktop-managed local envs proxy persistent PTY shells to a sibling
   // terminal daemon over this Unix socket. Container/manual envs leave it unset

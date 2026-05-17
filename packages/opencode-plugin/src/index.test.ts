@@ -3,7 +3,7 @@ import { buildHooks } from './index.js'
 
 /**
  * Unit tests for the OpenCode plugin. We don't need a real OpenCode runtime
- * here — we pull `hooks.tool.zoottle_bash.execute` out and invoke it directly
+ * here — we pull `hooks.tool.kaivo_bash.execute` out and invoke it directly
  * with a stubbed fetch so we can verify the app-facing HTTP shape, SSE
  * parsing, and error fallbacks.
  */
@@ -44,13 +44,13 @@ function sseStream(events: Array<Record<string, unknown> | null>): ReadableStrea
   })
 }
 
-describe('cloud-code opencode plugin', () => {
+describe('Kaivo opencode plugin', () => {
   it('returns no tools when env vars are missing', async () => {
     const hooks = buildHooks({})
     expect(hooks.tool).toBeUndefined()
   })
 
-  it('zoottle_bash: SSE drives run-once; returns stdout + metadata', async () => {
+  it('kaivo_bash: SSE drives run-once; returns stdout + metadata', async () => {
     const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
       expect(init?.method ?? 'GET').toBe('GET')
       expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer tok-xyz')
@@ -72,7 +72,7 @@ describe('cloud-code opencode plugin', () => {
       fetchImpl,
     })
     const ctx = makeCtx()
-    const cloudBash = hooks.tool!.zoottle_bash!
+    const cloudBash = hooks.tool!.kaivo_bash!
     const result = (await cloudBash.execute(
       { command: 'echo hello' },
       ctx as never,
@@ -93,16 +93,16 @@ describe('cloud-code opencode plugin', () => {
   it('registers every browser tool when credentials exist', () => {
     const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000' })
 
-    expect(Object.keys(hooks.tool!).filter((name) => name.startsWith('zoottle_browser_')).sort()).toEqual([
-      'zoottle_browser_connect_tab',
-      'zoottle_browser_disconnect',
-      'zoottle_browser_execute_js',
-      'zoottle_browser_interact',
-      'zoottle_browser_list_tabs',
-      'zoottle_browser_open_and_connect',
-      'zoottle_browser_read_logs',
-      'zoottle_browser_screenshot',
-      'zoottle_browser_snapshot',
+    expect(Object.keys(hooks.tool!).filter((name) => name.startsWith('kaivo_browser_')).sort()).toEqual([
+      'kaivo_browser_connect_tab',
+      'kaivo_browser_disconnect',
+      'kaivo_browser_execute_js',
+      'kaivo_browser_interact',
+      'kaivo_browser_list_tabs',
+      'kaivo_browser_open_and_connect',
+      'kaivo_browser_read_logs',
+      'kaivo_browser_screenshot',
+      'kaivo_browser_snapshot',
     ])
   })
 
@@ -134,15 +134,15 @@ describe('cloud-code opencode plugin', () => {
     const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
     const ctx = makeCtx('oc-browser')
 
-    await hooks.tool!.zoottle_browser_list_tabs!.execute({}, ctx as never)
-    await hooks.tool!.zoottle_browser_connect_tab!.execute({ browserTabId: 'tab-1' }, ctx as never)
-    await hooks.tool!.zoottle_browser_open_and_connect!.execute({ url: 'https://example.com' }, ctx as never)
-    await hooks.tool!.zoottle_browser_disconnect!.execute({ cdpId: 'cdp-1' }, ctx as never)
-    await hooks.tool!.zoottle_browser_snapshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
-    await hooks.tool!.zoottle_browser_interact!.execute({ cdpId: 'cdp-1', action: { type: 'wait' } }, ctx as never)
-    await hooks.tool!.zoottle_browser_read_logs!.execute({ cdpId: 'cdp-1' }, ctx as never)
-    await hooks.tool!.zoottle_browser_screenshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
-    await hooks.tool!.zoottle_browser_execute_js!.execute({ cdpId: 'cdp-1', expression: 'document.title' }, ctx as never)
+    await hooks.tool!.kaivo_browser_list_tabs!.execute({}, ctx as never)
+    await hooks.tool!.kaivo_browser_connect_tab!.execute({ browserTabId: 'tab-1' }, ctx as never)
+    await hooks.tool!.kaivo_browser_open_and_connect!.execute({ url: 'https://example.com' }, ctx as never)
+    await hooks.tool!.kaivo_browser_disconnect!.execute({ cdpId: 'cdp-1' }, ctx as never)
+    await hooks.tool!.kaivo_browser_snapshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
+    await hooks.tool!.kaivo_browser_interact!.execute({ cdpId: 'cdp-1', action: { type: 'wait' } }, ctx as never)
+    await hooks.tool!.kaivo_browser_read_logs!.execute({ cdpId: 'cdp-1' }, ctx as never)
+    await hooks.tool!.kaivo_browser_screenshot!.execute({ cdpId: 'cdp-1' }, ctx as never)
+    await hooks.tool!.kaivo_browser_execute_js!.execute({ cdpId: 'cdp-1', expression: 'document.title' }, ctx as never)
 
     expect(calls.map((call) => call.url)).toEqual([
       'http://app:3000/trpc/agentBrowser.listTabs',
@@ -172,7 +172,7 @@ describe('cloud-code opencode plugin', () => {
     }) as unknown as typeof fetch
     const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
 
-    await hooks.tool!.zoottle_browser_snapshot!.execute(
+    await hooks.tool!.kaivo_browser_snapshot!.execute(
       { cdpId: 'cdp-1', filter: '', filterFlags: '', viewportOnly: true },
       makeCtx('oc-browser') as never,
     )
@@ -192,11 +192,11 @@ describe('cloud-code opencode plugin', () => {
     }) as unknown as typeof fetch
     const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
 
-    await hooks.tool!.zoottle_browser_interact!.execute(
+    await hooks.tool!.kaivo_browser_interact!.execute(
       { cdpId: 'cdp-1', action: { type: 'click', id: 28 }, postSnapshot: { filter: '', viewportOnly: true } },
       makeCtx('oc-browser') as never,
     )
-    await hooks.tool!.zoottle_browser_interact!.execute(
+    await hooks.tool!.kaivo_browser_interact!.execute(
       { cdpId: 'cdp-1', action: { type: 'fill', id: 28, value: 'OpenAI' } },
       makeCtx('oc-browser') as never,
     )
@@ -220,17 +220,17 @@ describe('cloud-code opencode plugin', () => {
     }) as unknown as typeof fetch
     const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://nope', fetchImpl, backoffMs: [1] })
 
-    const result = (await hooks.tool!.zoottle_browser_snapshot!.execute(
+    const result = (await hooks.tool!.kaivo_browser_snapshot!.execute(
       { cdpId: 'cdp-1' },
       makeCtx() as never,
     )) as { output: string; metadata: Record<string, unknown> }
 
     expect(result.output).toBe('')
     expect(result.metadata.status).toBe('error')
-    expect(result.metadata.stderr).toBe('cloud-code app unreachable')
+    expect(result.metadata.stderr).toBe('Kaivo app unreachable')
   })
 
-  it('zoottle_bash: returns structured error if app is unreachable', async () => {
+  it('kaivo_bash: returns structured error if app is unreachable', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('ECONNREFUSED')
     }) as unknown as typeof fetch
@@ -240,17 +240,17 @@ describe('cloud-code opencode plugin', () => {
       fetchImpl,
       backoffMs: [1, 1], // keep the test fast
     })
-    const cloudBash = hooks.tool!.zoottle_bash!
+    const cloudBash = hooks.tool!.kaivo_bash!
     const result = (await cloudBash.execute(
       { command: 'ls' },
       makeCtx() as never,
     )) as { output: string; metadata: Record<string, unknown> }
     expect(result.metadata.status).toBe('error')
-    expect(result.metadata.stderr).toBe('cloud-code app unreachable')
+    expect(result.metadata.stderr).toBe('Kaivo app unreachable')
     expect(result.metadata.exit_code).toBe(1)
   })
 
-  it('zoottle_pty: mutation returns shellId; metadata emits it', async () => {
+  it('kaivo_pty: mutation returns shellId; metadata emits it', async () => {
     const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
       expect(init?.method).toBe('POST')
       const parsed = JSON.parse(init!.body as string)
@@ -267,7 +267,7 @@ describe('cloud-code opencode plugin', () => {
       fetchImpl,
     })
     const ctx = makeCtx('oc-xyz')
-    const cloudPty = hooks.tool!.zoottle_pty!
+    const cloudPty = hooks.tool!.kaivo_pty!
     const result = (await cloudPty.execute(
       { cwd: '/tmp' },
       ctx as never,
@@ -276,7 +276,7 @@ describe('cloud-code opencode plugin', () => {
     expect(ctx.metadataCalls.at(0)?.metadata?.cloudcode_shell_id).toBe('pty-42')
   })
 
-  it('zoottle_pty_list: queries shells for the current opencode session', async () => {
+  it('kaivo_pty_list: queries shells for the current opencode session', async () => {
     const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
       expect(init?.method).toBe('GET')
       const requestUrl = new URL(String(url))
@@ -310,7 +310,7 @@ describe('cloud-code opencode plugin', () => {
     }) as unknown as typeof fetch
 
     const hooks = buildHooks({ tokenOverride: 't', appUrlOverride: 'http://app:3000', fetchImpl })
-    const result = (await hooks.tool!.zoottle_pty_list!.execute(
+    const result = (await hooks.tool!.kaivo_pty_list!.execute(
       {},
       makeCtx('oc-list') as never,
     )) as { output: string; metadata: Record<string, unknown> }
@@ -321,7 +321,7 @@ describe('cloud-code opencode plugin', () => {
     expect(result.metadata.shell_ids).toEqual(['pty-42'])
   })
 
-  it('zoottle_open_pane: mutation publishes pane intent', async () => {
+  it('kaivo_open_pane: mutation publishes pane intent', async () => {
     const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
       expect(String(url)).toBe('http://app:3000/trpc/agentUi.openPane')
       expect(init?.method).toBe('POST')
@@ -343,7 +343,7 @@ describe('cloud-code opencode plugin', () => {
       appUrlOverride: 'http://app:3000',
       fetchImpl,
     })
-    const result = (await hooks.tool!.zoottle_open_pane!.execute(
+    const result = (await hooks.tool!.kaivo_open_pane!.execute(
       { kind: 'file', path: '/src/app.ts', title: 'app.ts', activate: true },
       makeCtx('oc-pane') as never,
     )) as { output: string; metadata: Record<string, unknown> }
@@ -353,7 +353,7 @@ describe('cloud-code opencode plugin', () => {
     expect(result.metadata.pane_type).toBe('file')
   })
 
-  it('zoottle_open_pane: browser mutation publishes pane intent', async () => {
+  it('kaivo_open_pane: browser mutation publishes pane intent', async () => {
     const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
       expect(String(url)).toBe('http://app:3000/trpc/agentUi.openPane')
       expect(init?.method).toBe('POST')
@@ -375,7 +375,7 @@ describe('cloud-code opencode plugin', () => {
       appUrlOverride: 'http://app:3000',
       fetchImpl,
     })
-    const result = (await hooks.tool!.zoottle_open_pane!.execute(
+    const result = (await hooks.tool!.kaivo_open_pane!.execute(
       { kind: 'browser', url: 'https://example.com', title: 'Example', activate: true },
       makeCtx('oc-browser-pane') as never,
     )) as { output: string; metadata: Record<string, unknown> }
@@ -385,7 +385,7 @@ describe('cloud-code opencode plugin', () => {
     expect(result.metadata.pane_type).toBe('browser')
   })
 
-  it('zoottle_open_pane: omits empty title', async () => {
+  it('kaivo_open_pane: omits empty title', async () => {
     const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
       const parsed = JSON.parse(init!.body as string)
       expect(parsed.json).toEqual({
@@ -404,13 +404,13 @@ describe('cloud-code opencode plugin', () => {
       appUrlOverride: 'http://app:3000',
       fetchImpl,
     })
-    await hooks.tool!.zoottle_open_pane!.execute(
+    await hooks.tool!.kaivo_open_pane!.execute(
       { kind: 'file', path: 'src/app.ts', title: '' },
       makeCtx('oc-empty-title') as never,
     )
   })
 
-  it('zoottle_pty: structured error on unreachable app', async () => {
+  it('kaivo_pty: structured error on unreachable app', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down')
     }) as unknown as typeof fetch
@@ -420,15 +420,15 @@ describe('cloud-code opencode plugin', () => {
       fetchImpl,
       backoffMs: [1, 1],
     })
-    const result = (await hooks.tool!.zoottle_pty!.execute(
+    const result = (await hooks.tool!.kaivo_pty!.execute(
       {},
       makeCtx() as never,
     )) as { output: string; metadata: Record<string, unknown> }
     expect(result.metadata.status).toBe('error')
-    expect(result.metadata.stderr).toBe('cloud-code app unreachable')
+    expect(result.metadata.stderr).toBe('Kaivo app unreachable')
   })
 
-  it('zoottle_bash: tolerates 401 auth rejection without infinite retry', async () => {
+  it('kaivo_bash: tolerates 401 auth rejection without infinite retry', async () => {
     const fetchImpl = vi.fn(async () => new Response('', { status: 401 })) as unknown as typeof fetch
     const hooks = buildHooks({
       tokenOverride: 'bad',
@@ -436,12 +436,12 @@ describe('cloud-code opencode plugin', () => {
       fetchImpl,
       backoffMs: [],
     })
-    const result = (await hooks.tool!.zoottle_bash!.execute(
+    const result = (await hooks.tool!.kaivo_bash!.execute(
       { command: 'x' },
       makeCtx() as never,
     )) as { output: string; metadata: Record<string, unknown> }
     expect(result.metadata.status).toBe('error')
-    // The exact message goes through backoff wrapper → "cloud-code app unreachable".
+    // The exact message goes through backoff wrapper -> "Kaivo app unreachable".
     expect(typeof result.metadata.stderr).toBe('string')
   })
 })

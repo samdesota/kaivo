@@ -1,7 +1,7 @@
 {
-  "name": "@zoottle/opencode-plugin",
+  "name": "@kaivo/opencode-plugin",
   "version": "0.1.0",
-  "description": "OpenCode plugin that bridges bash/pty tool calls to the Zoottle app's agentShell router.",
+  "description": "OpenCode plugin that bridges bash/pty tool calls to the Kaivo app's agentShell router.",
   "private": true,
   "type": "module",
   "main": "dist/index.js",

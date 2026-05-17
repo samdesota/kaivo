@@ -15,9 +15,9 @@ const ctx = {
 const treeData = [
   {
     type: 'folder',
-    folder: { id: 'folder-cloud', name: 'Zoottle', position: 0, collapsed: false },
+    folder: { id: 'folder-cloud', name: 'Kaivo', position: 0, collapsed: false },
     children: [
-      { type: 'workspace', workspace: { id: 'workspace-tools', name: 'zoottle-app', folderId: 'folder-cloud', position: 0 } },
+      { type: 'workspace', workspace: { id: 'workspace-tools', name: 'kaivo-app', folderId: 'folder-cloud', position: 0 } },
       { type: 'workspace', workspace: { id: 'workspace-docs', name: 'docs-app', folderId: 'folder-cloud', position: 1 } },
       {
         type: 'folder',
@@ -66,7 +66,7 @@ vi.mock('../../src/trpc', () => ({
   trpc: {
     workspace: {
       listTree: { useQuery: () => ({ data: treeData }) },
-      list: { useQuery: () => ({ data: [{ id: 'workspace-tools', name: 'zoottle-app' }] }) },
+      list: { useQuery: () => ({ data: [{ id: 'workspace-tools', name: 'kaivo-app' }] }) },
       create: { useMutation: () => ({ isPending: false, mutateAsync: vi.fn() }) },
       createFolder: { useMutation: () => ({ isPending: false, mutateAsync: createFolderMock }) },
       rename: { useMutation: () => ({ mutateAsync: vi.fn() }) },
@@ -150,12 +150,12 @@ vi.mock('../../src/routes/env/agent/new-agent-chat-modal', () => ({
     ) : null,
 }))
 
-function renderSidebar() {
+function renderSidebar({ onNewWorkspaceIntent = vi.fn() }: { onNewWorkspaceIntent?: () => void } = {}) {
   const rootRoute = createRootRoute()
   const route = createRoute({
     getParentRoute: () => rootRoute,
     path: '/w/$workspaceId',
-    component: () => <WorkspaceSidebar dispatchWorkspaceState={vi.fn()} onHide={vi.fn()} />,
+    component: () => <WorkspaceSidebar dispatchWorkspaceState={vi.fn()} onHide={vi.fn()} onNewWorkspaceIntent={onNewWorkspaceIntent} />,
     validateSearch: () => ({ chat: undefined as string | undefined, tab: undefined as string | undefined }),
   })
   const router = createRouter({
@@ -194,38 +194,39 @@ describe('WorkspaceSidebar', () => {
   it('renders folders, nested folders, and workspaces from the tree', async () => {
     renderSidebar()
 
-    expect((await screen.findAllByText('Zoottle')).length).toBeGreaterThan(0)
-    expect(screen.getByText('zoottle-app')).toBeTruthy()
+    expect((await screen.findAllByText('Kaivo')).length).toBeGreaterThan(0)
+    expect(screen.getByText('kaivo-app')).toBeTruthy()
     expect(screen.getByText('Packages')).toBeTruthy()
     expect(screen.getByText('opencode-plugin')).toBeTruthy()
   })
 
-  it('opens the new agent chat modal in new-workspace mode from a folder plus', async () => {
+  it('opens new-workspace universal menu intent from the header plus', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
-    renderSidebar()
+    const onNewWorkspaceIntent = vi.fn()
+    renderSidebar({ onNewWorkspaceIntent })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Create workspace in Zoottle' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create new workspace' }))
 
-    const select = await screen.findByLabelText('Workspace mode') as HTMLSelectElement
-    expect(select.value).toBe('new')
+    expect(onNewWorkspaceIntent).toHaveBeenCalledTimes(1)
   })
 
-  it('does not render workspace row plus buttons', async () => {
+  it('does not render folder or workspace row plus buttons', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    expect(await screen.findByText('zoottle-app')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Create chat in zoottle-app' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Create workspace in Zoottle' })).toBeTruthy()
+    expect(await screen.findByText('kaivo-app')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Create chat in kaivo-app' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Create workspace in Kaivo' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Create new workspace' })).toBeTruthy()
   })
 
   it('does not expose workspace chat expansion controls', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
     renderSidebar()
 
-    expect(await screen.findByText('zoottle-app')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Expand chats for zoottle-app' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Collapse chats for zoottle-app' })).toBeNull()
+    expect(await screen.findByText('kaivo-app')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Expand chats for kaivo-app' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collapse chats for kaivo-app' })).toBeNull()
 
     expect(window.localStorage.getItem('cloud-code.workspaceChatExpanded')).toBeNull()
     expect(screen.queryByText('No chats')).toBeNull()
@@ -293,7 +294,7 @@ describe('WorkspaceSidebar', () => {
     expect(await screen.findByText('Notifications')).toBeTruthy()
     expect(screen.getByText('Build notifications')).toBeTruthy()
     expect(screen.getByText('Implemented notifications')).toBeTruthy()
-    expect(screen.getAllByText('zoottle-app').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('kaivo-app').length).toBeGreaterThan(1)
     expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Dismiss notification Build notifications' })).toBeTruthy()
   })
@@ -350,7 +351,7 @@ describe('WorkspaceSidebar', () => {
   it('renders folder and workspace rows as separate whole-row draggable targets', async () => {
     renderSidebar()
 
-    const workspaceRow = (await screen.findByText('zoottle-app')).closest('[role="button"]') as HTMLElement
+    const workspaceRow = (await screen.findByText('kaivo-app')).closest('[role="button"]') as HTMLElement
     const folderRow = screen.getByText('Packages').closest('[role="button"]') as HTMLElement
 
     expect(workspaceRow).toBeTruthy()
@@ -358,18 +359,18 @@ describe('WorkspaceSidebar', () => {
     expect(workspaceRow).not.toBe(folderRow)
     expect(workspaceRow.getAttribute('aria-roledescription')).toBe('sortable')
     expect(folderRow.getAttribute('aria-roledescription')).toBe('sortable')
-    expect(workspaceRow.textContent).toContain('zoottle-app')
+    expect(workspaceRow.textContent).toContain('kaivo-app')
     expect(workspaceRow.textContent).not.toContain('Packages')
   })
 
   it('renames folders inline and disables drag handles while editing', async () => {
     renderSidebar()
 
-    fireEvent.doubleClick(await screen.findByText('Zoottle'))
+    fireEvent.doubleClick(await screen.findByText('Kaivo'))
 
     const input = await screen.findByLabelText('Folder name') as HTMLInputElement
-    expect(input.value).toBe('Zoottle')
-    expect(screen.getByText('zoottle-app').closest('[role="button"]')).toBeNull()
+    expect(input.value).toBe('Kaivo')
+    expect(screen.getByText('kaivo-app').closest('[role="button"]')).toBeNull()
 
     fireEvent.change(input, { target: { value: 'Renamed folder' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -380,7 +381,7 @@ describe('WorkspaceSidebar', () => {
   it('groups all cmd-selected sibling workspaces into a new folder', async () => {
     renderSidebar()
 
-    fireEvent.click(await screen.findByText('zoottle-app'), { metaKey: true })
+    fireEvent.click(await screen.findByText('kaivo-app'), { metaKey: true })
     fireEvent.click(await screen.findByText('docs-app'), { metaKey: true })
     fireEvent.keyDown(window, { key: 'g', metaKey: true })
 
@@ -400,7 +401,7 @@ describe('WorkspaceSidebar', () => {
   })
 
   it('includes the active workspace when grouping selected workspaces', async () => {
-    ctx.workspace = { id: 'workspace-tools', name: 'zoottle-app' }
+    ctx.workspace = { id: 'workspace-tools', name: 'kaivo-app' }
     renderSidebar()
 
     fireEvent.click(await screen.findByText('docs-app'), { metaKey: true })

@@ -5,7 +5,7 @@ import { queryCollectionOptions, type QueryCollectionUtils } from '@tanstack/que
 import { appTrpcMutation, appTrpcQuery } from '../../lib/trpc-plain'
 import { trpc } from '../../trpc'
 
-export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'other'
+export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'bookmark' | 'other'
 
 export type WorkspaceResourceRecord = {
   id: string
@@ -22,7 +22,7 @@ type WorkspaceResourcesCollection = Collection<WorkspaceResourceRecord, string> 
   utils: QueryCollectionUtils<WorkspaceResourceRecord, string>
 }
 
-type RawWorkspaceResourceRecord = Omit<WorkspaceResourceRecord, 'shared' | 'createdAt' | 'updatedAt'> & { shared: boolean | number; createdAt: Date | number | string; updatedAt: Date | number | string }
+export type RawWorkspaceResourceRecord = Omit<WorkspaceResourceRecord, 'shared' | 'createdAt' | 'updatedAt'> & { shared: boolean | number; createdAt: Date | number | string; updatedAt: Date | number | string }
 
 type WorkspaceResourcesSnapshot = {
   table: 'workspace_resources'
@@ -30,7 +30,7 @@ type WorkspaceResourcesSnapshot = {
   seq: number
 }
 
-type WorkspaceResourcesChangeEvent = {
+export type WorkspaceResourcesChangeEvent = {
   seq: number
   table: 'workspace_resources'
   op: 'insert' | 'update' | 'delete'
@@ -38,7 +38,7 @@ type WorkspaceResourcesChangeEvent = {
   row: RawWorkspaceResourceRecord | null
 }
 
-function normalizeWorkspaceResourceRecord(record: RawWorkspaceResourceRecord): WorkspaceResourceRecord {
+export function normalizeWorkspaceResourceRecord(record: RawWorkspaceResourceRecord): WorkspaceResourceRecord {
   return {
     ...record,
     shared: record.shared === true || record.shared === 1,
@@ -46,6 +46,32 @@ function normalizeWorkspaceResourceRecord(record: RawWorkspaceResourceRecord): W
     createdAt: record.createdAt instanceof Date ? record.createdAt : new Date(record.createdAt),
     updatedAt: record.updatedAt instanceof Date ? record.updatedAt : new Date(record.updatedAt),
   }
+}
+
+export type WorkspaceResourceCollectionUtils = QueryCollectionUtils<WorkspaceResourceRecord, string>
+
+export function applyWorkspaceResourceChangeEvents(input: {
+  events: WorkspaceResourcesChangeEvent[]
+  collectionUtils: WorkspaceResourceCollectionUtils
+  syncedSeq: number
+}): number {
+  let nextSeq = input.syncedSeq
+  const deduped = new Map<string, WorkspaceResourcesChangeEvent>()
+  for (const event of input.events) {
+    if (event.seq <= nextSeq) continue
+    deduped.set(event.key, event)
+  }
+  input.collectionUtils.writeBatch(() => {
+    for (const event of deduped.values()) {
+      if (event.op === 'delete') {
+        input.collectionUtils.writeDelete(event.key)
+      } else if (event.row) {
+        input.collectionUtils.writeUpsert(normalizeWorkspaceResourceRecord(event.row))
+      }
+      nextSeq = Math.max(nextSeq, event.seq)
+    }
+  })
+  return nextSeq
 }
 
 function normalizeResourceData(data: unknown): Record<string, unknown> {
@@ -105,21 +131,10 @@ export function useWorkspaceResourcesStore(workspaceId?: string) {
     { afterSeq: syncedSeqRef.current, tables: ['workspace_resources'] },
     {
       onData(events) {
-        const batch = events as WorkspaceResourcesChangeEvent[]
-        const deduped = new Map<string, WorkspaceResourcesChangeEvent>()
-        for (const event of batch) {
-          if (event.seq <= syncedSeqRef.current) continue
-          deduped.set(event.key, event)
-        }
-        collection.utils.writeBatch(() => {
-          for (const event of deduped.values()) {
-            if (event.op === 'delete') {
-              collection.utils.writeDelete(event.key)
-            } else if (event.row) {
-              collection.utils.writeUpsert(normalizeWorkspaceResourceRecord(event.row))
-            }
-            syncedSeqRef.current = event.seq
-          }
+        syncedSeqRef.current = applyWorkspaceResourceChangeEvents({
+          events: events as WorkspaceResourcesChangeEvent[],
+          collectionUtils: collection.utils,
+          syncedSeq: syncedSeqRef.current,
         })
       },
     },

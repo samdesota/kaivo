@@ -442,16 +442,16 @@ describe('workspace service', () => {
   it('returns folders and workspaces ordered by parent and position', async () => {
     const { workspaceService } = await import('./service.js')
 
-    const folder = await workspaceService.createFolder({ name: 'Zoottle' })
+    const folder = await workspaceService.createFolder({ name: 'Kaivo' })
     const nested = await workspaceService.createFolder({ name: 'Packages', parentId: folder.id })
     const rootWorkspace = await workspaceService.create({ name: 'Scratch' })
-    const childWorkspace = await workspaceService.create({ name: 'zoottle', folderId: folder.id })
+    const childWorkspace = await workspaceService.create({ name: 'kaivo', folderId: folder.id })
     const nestedWorkspace = await workspaceService.create({ name: 'plugin', folderId: nested.id })
 
     await expect(workspaceService.listTree()).resolves.toMatchObject([
       {
         type: 'folder',
-        folder: { id: folder.id, name: 'Zoottle', position: 0 },
+        folder: { id: folder.id, name: 'Kaivo', position: 0 },
         children: [
           { type: 'folder', folder: { id: nested.id, name: 'Packages', position: 0 }, children: [{ type: 'workspace', workspace: { id: nestedWorkspace.id } }] },
           { type: 'workspace', workspace: { id: childWorkspace.id, position: 1 } },

@@ -29,8 +29,8 @@ import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
-import { browserTabIconForUrl, faviconOriginForUrl, fetchFaviconDataUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
-import { openConfirmOverlay, openNewAgentChatOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
+import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
+import { openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
 import { paneTabIconForType } from '../components/tab-icon'
@@ -38,7 +38,6 @@ import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { NewSessionPopover } from './env/agent/session-tabs'
-import { NewAgentChatOverlayLauncher } from './env/agent/new-agent-chat-modal'
 import type { UniversalMenuContextItem } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
@@ -63,6 +62,7 @@ import {
 } from './workspace/tab-state'
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { useWorkspaceResourcesStore, type WorkspaceResourceRecord } from './workspace/resources-store'
+import { useWorkspaceBookmarksStore } from './workspace/bookmarks-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
@@ -326,7 +326,6 @@ function WorkspaceShell({
   const navigate = useNavigate({ from: '/w/$workspaceId' })
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
-  const [newChatMode, setNewChatMode] = useState<null | 'existing' | 'new'>(null)
   const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
   const [closeAgentTabSignal, setCloseAgentTabSignal] = useState(0)
   const agentCollapsed = ctx.uiState.agentCollapsed
@@ -364,7 +363,7 @@ function WorkspaceShell({
     })
   }, [ctx.workspace.id, dispatchWorkspaceState, navigate])
 
-  const openCommandPalette = useCallback(async () => {
+  const openCommandPalette = useCallback(async (initialIntent: 'default' | 'new-workspace' = 'default') => {
     const target = ctx.localEnvTarget
     if (!target?.available || !target.token) return
     const result = await openUniversalMenuOverlay({
@@ -386,6 +385,7 @@ function WorkspaceShell({
       }),
       canToggleAgentPane: true,
       canToggleSidebar: true,
+      initialIntent,
     })
     if (result.type === 'open-pane') openPane(result.content)
     if (result.type === 'created-agent-chat') void selectCreatedChat(result.sessionId, result.workspaceId)
@@ -407,9 +407,9 @@ function WorkspaceShell({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         void openCommandPalette()
-      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 't') {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
-        void openCommandPalette()
+        void openCommandPalette(e.shiftKey ? 'new-workspace' : 'default')
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
@@ -433,6 +433,7 @@ function WorkspaceShell({
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
           onHide={() => setSidebarHidden(true)}
+          onNewWorkspaceIntent={() => void openCommandPalette('new-workspace')}
         />
       )}
       <ShellChrome
@@ -456,6 +457,7 @@ function WorkspaceShell({
             focused={focusedTabGroup === 'agent'}
             closeActiveTabSignal={closeAgentTabSignal}
             onFocusTabs={() => setFocusedTabGroup('agent')}
+            onOpenUniversalMenu={() => void openCommandPalette()}
           />
         }
         right={
@@ -471,19 +473,6 @@ function WorkspaceShell({
         }
       />
     </div>
-    {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && newChatMode && (
-      <WorkspaceAgentEnvProvider>
-        <NewAgentChatOverlayLauncher
-          open
-          workspaceId={ctx.workspace.id}
-          workspaceName={ctx.workspace.name}
-          initialWorkspaceMode={newChatMode}
-          folderId={newChatMode === 'new' ? null : undefined}
-          onClose={() => setNewChatMode(null)}
-          onCreated={(sessionId, workspaceId) => void selectCreatedChat(sessionId, workspaceId)}
-        />
-      </WorkspaceAgentEnvProvider>
-    )}
     </>
   )
 }
@@ -508,9 +497,11 @@ function WorkspaceEmptyPaneCta({ onOpenPalette }: { onOpenPalette: () => void })
 export function WorkspaceSidebar({
   dispatchWorkspaceState,
   onHide,
+  onNewWorkspaceIntent,
 }: {
   dispatchWorkspaceState: WorkspaceUiDispatch
   onHide: () => void
+  onNewWorkspaceIntent: () => void
 }) {
   const ctx = useWorkspaceContext()
   const navigate = useNavigate()
@@ -540,15 +531,11 @@ export function WorkspaceSidebar({
   const setFolderCollapsed = trpc.workspace.setFolderCollapsed.useMutation({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
   })
-  const archiveFolder = trpc.workspace.archiveFolder.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
-  })
   const moveSidebarNode = trpc.workspace.moveSidebarNode.useMutation({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
     onError: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
   })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
-  const [newChatContext, setNewChatContext] = useState<null | { mode: 'new'; folderId?: string | null } | { mode: 'existing'; workspace: WorkspaceSummary }>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [dragPlacement, setDragPlacement] = useState<DropPlacement>('after')
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
@@ -726,21 +713,6 @@ export function WorkspaceSidebar({
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
-  async function deleteFolder(folder: WorkspaceFolderSummary) {
-    const node = findSidebarFolderNode(displayNodes, folder.id)
-    const workspaceCount = node ? countWorkspacesInSidebarNodes(node.children) : 0
-    if (workspaceCount > 0) {
-      const confirmed = await openConfirmOverlay({
-        title: 'Delete workspace folder?',
-        message: `${folder.name} contains ${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}. Deleting it will also delete all child workspaces and folders.`,
-        confirmLabel: 'Delete folder',
-        destructive: true,
-      })
-      if (!confirmed) return
-    }
-    await archiveFolder.mutateAsync({ id: folder.id })
-  }
-
   async function selectCreatedChat(sessionId: string, workspaceId?: string) {
     if (!workspaceId) return
     if (workspaceId === ctx.workspace.id) {
@@ -880,14 +852,14 @@ export function WorkspaceSidebar({
       />
       <div className="window-drag flex flex-none basis-8 items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-3">
         <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-neutral-300">zoottle</div>
+          <div className="truncate text-xs font-medium text-neutral-300">kaivo</div>
         </div>
         <div className="flex items-center">
           <button
-            onClick={() => setNewChatContext({ mode: 'new', folderId: null })}
+            onClick={onNewWorkspaceIntent}
             className="rounded px-0.5 py-0.5 text-neutral-600 hover:bg-neutral-900 hover:text-neutral-200 disabled:opacity-50"
-            aria-label="Create new workspace from chat"
-            title="New workspace from chat"
+            aria-label="Create new workspace"
+            title="New workspace"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
@@ -927,19 +899,6 @@ export function WorkspaceSidebar({
           <span className="truncate font-medium">Settings</span>
         </Link>
       </div>
-      {ctx.localEnvTarget?.available && ctx.localEnvTarget.token && newChatContext && (
-        <WorkspaceAgentEnvProvider>
-          <NewAgentChatOverlayLauncher
-            open
-            workspaceId={newChatContext.mode === 'existing' ? newChatContext.workspace.id : ctx.workspace.id}
-            workspaceName={newChatContext.mode === 'existing' ? newChatContext.workspace.name : ctx.workspace.name}
-            initialWorkspaceMode={newChatContext.mode}
-            folderId={newChatContext.mode === 'new' ? newChatContext.folderId : undefined}
-            onClose={() => setNewChatContext(null)}
-            onCreated={(sessionId, workspaceId) => void selectCreatedChat(sessionId, workspaceId)}
-          />
-        </WorkspaceAgentEnvProvider>
-      )}
     </aside>
     </>
   )
@@ -1011,29 +970,6 @@ export function WorkspaceSidebar({
                     {folder.name}
                   </span>
                 )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setNewChatContext({ mode: 'new', folderId: folder.id })
-                  }}
-                  className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
-                  aria-label={`Create workspace in ${folder.name}`}
-                  title="New workspace from chat"
-                >
-                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void deleteFolder(folder)
-                  }}
-                  disabled={archiveFolder.isPending}
-                  className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 disabled:opacity-30 group-hover:opacity-100"
-                  aria-label={`Delete folder ${folder.name}`}
-                  title="Delete folder"
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
               </div>
             </div>
           </div>
@@ -1412,25 +1348,6 @@ function findSidebarFolder(nodes: WorkspaceSidebarNode[], id: string): Workspace
   return null
 }
 
-function findSidebarFolderNode(nodes: WorkspaceSidebarNode[], id: string): Extract<WorkspaceSidebarNode, { type: 'folder' }> | null {
-  for (const node of nodes) {
-    if (node.type !== 'folder') continue
-    if (node.folder.id === id) return node
-    const child = findSidebarFolderNode(node.children, id)
-    if (child) return child
-  }
-  return null
-}
-
-function countWorkspacesInSidebarNodes(nodes: WorkspaceSidebarNode[]): number {
-  let count = 0
-  for (const node of nodes) {
-    if (node.type === 'workspace') count++
-    else count += countWorkspacesInSidebarNodes(node.children)
-  }
-  return count
-}
-
 function findSidebarWorkspace(nodes: WorkspaceSidebarNode[], id: string): WorkspaceSummary | null {
   for (const node of nodes) {
     if (node.type === 'workspace') {
@@ -1593,6 +1510,7 @@ function WorkspaceAgentPane({
   focused,
   closeActiveTabSignal,
   onFocusTabs,
+  onOpenUniversalMenu,
 }: {
   collapsed: boolean
   onToggleCollapsed: () => void
@@ -1601,6 +1519,7 @@ function WorkspaceAgentPane({
   focused: boolean
   closeActiveTabSignal: number
   onFocusTabs: () => void
+  onOpenUniversalMenu: () => void
 }) {
   const ctx = useWorkspaceContext()
   const queryClient = useQueryClient()
@@ -1642,8 +1561,6 @@ function WorkspaceAgentPane({
       </AgentPaneFrame>
     )
   }
-  const localEnvTarget = ctx.localEnvTarget
-  const localEnvToken = localEnvTarget.token!
   return (
     <AgentPaneFrame onFocusTabs={onFocusTabs}>
       <WorkspaceAgentEnvProvider>
@@ -1658,13 +1575,10 @@ function WorkspaceAgentPane({
           headerTrailing={agentHeaderTrailing}
           tabsFocused={focused}
           closeActiveTabSignal={closeActiveTabSignal}
-          onOpenNewChat={() =>
-            openNewAgentChatOverlay({
-              workspaceId: ctx.workspace.id,
-              env: localEnvTarget.env,
-              envToken: localEnvToken,
-            })
-          }
+          onOpenNewChat={async () => {
+            onOpenUniversalMenu()
+            return null
+          }}
         />
       </WorkspaceAgentEnvProvider>
     </AgentPaneFrame>
@@ -1778,6 +1692,7 @@ function WorkspaceTabPane({
   const [fileEditorStates, setFileEditorStates] = useState<Record<string, FileEditorState>>({})
   const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
   const pendingFaviconWritesRef = useRef(new Set<string>())
+  const bookmarksStore = useWorkspaceBookmarksStore(ctx.workspace.id)
   const faviconOrigins = useMemo(() => Array.from(new Set(
     ctx.uiState.workspaceTabs
       .filter((tab): tab is Extract<WorkspaceTab, { type: 'browser' }> => tab.type === 'browser')
@@ -1788,7 +1703,7 @@ function WorkspaceTabPane({
     { origins: faviconOrigins },
     { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
   )
-  const upsertFavicon = trpc.favicon.upsert.useMutation()
+  const upsertFavicon = trpc.favicon.cacheFromUrl.useMutation()
 
   tabsRef.current = ctx.uiState.workspaceTabs
 
@@ -1840,9 +1755,8 @@ function WorkspaceTabPane({
     if (pendingFaviconWritesRef.current.has(key)) return
     pendingFaviconWritesRef.current.add(key)
     try {
-      const data = await fetchFaviconDataUrl(input.faviconUrl)
-      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: data.dataUrl }))
-      await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl, dataUrl: data.dataUrl })
+      const record = await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl })
+      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: record.dataUrl }))
       void faviconCache.refetch()
     } catch (error) {
       console.info('Favicon cache update failed', error)
@@ -1913,6 +1827,13 @@ function WorkspaceTabPane({
               dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
             }
             onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
+            bookmarks={bookmarksStore.bookmarks}
+            faviconDataUrl={activeTab.type === 'browser'
+              ? (liveFaviconDataUrls[faviconOriginForUrl(activeTab.url) ?? ''] ?? ((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(activeTab.url) ?? '']?.dataUrl ?? null)
+              : null}
+            faviconUrl={activeTab.type === 'browser'
+              ? (((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(activeTab.url) ?? '']?.iconUrl ?? null)
+              : null}
           />
         ) : (
           <div className="flex h-full items-center justify-center">Workspace tabs</div>
@@ -2039,6 +1960,9 @@ function WorkspaceTabContent({
   onUrlChange,
   onTitleChange,
   onFaviconChange,
+  bookmarks,
+  faviconDataUrl,
+  faviconUrl,
 }: {
   tab: WorkspaceTab
   onClose: () => void
@@ -2048,6 +1972,9 @@ function WorkspaceTabContent({
   onUrlChange: (url: string) => void
   onTitleChange: (title: string) => void
   onFaviconChange: (input: { pageUrl: string; faviconUrl: string }) => void
+  bookmarks?: import('./workspace/bookmarks-store').BookmarkRecord[]
+  faviconDataUrl?: string | null
+  faviconUrl?: string | null
 }) {
   const ctx = useWorkspaceContext()
   if (tab.type === 'shell') {
@@ -2077,8 +2004,13 @@ function WorkspaceTabContent({
     <div className="h-full min-h-0 w-full">
       <BrowserTabContent
         paneId={tab.id}
+        workspaceId={ctx.workspace.id}
         url={tab.url}
+        title={tab.title}
         browserTabId={tab.browserTabId}
+        faviconDataUrl={faviconDataUrl}
+        faviconUrl={faviconUrl}
+        bookmarks={bookmarks}
         active
         onBrowserTabId={onBrowserTabId}
           onUrlChange={onUrlChange}

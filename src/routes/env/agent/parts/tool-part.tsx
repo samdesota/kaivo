@@ -35,7 +35,7 @@ export function ToolPart({
   childTranscript?: TranscriptState
 }) {
   const rawTool = (part as { tool?: string }).tool ?? 'tool'
-  const tool = rawTool === 'zoottle_bash' ? 'bash' : rawTool === 'zoottle_pty' ? 'pty' : rawTool
+  const tool = rawTool === 'kaivo_bash' ? 'bash' : rawTool === 'kaivo_pty' ? 'pty' : rawTool
   const callID = (part as { callID?: string }).callID ?? ''
   const state: ToolState = ((part as { state?: ToolState }).state ?? {}) as ToolState
 
@@ -102,18 +102,6 @@ function ApplyPatchToolPart({
   )
 }
 
-function StatusDot({ status }: { status?: string }) {
-  const cls =
-    status === 'running' || status === 'pending'
-      ? 'bg-neutral-700 animate-pulse'
-      : status === 'error'
-        ? 'bg-red-500'
-        : status === 'completed'
-          ? 'bg-emerald-500'
-          : 'bg-neutral-600'
-  return <span className={`inline-block h-2 w-2 rounded-full ${cls}`} />
-}
-
 function durationMs(state: ToolState): number | null {
   const s = state.time?.start
   const e = state.time?.end
@@ -128,6 +116,35 @@ function lastLine(s: string | undefined): string {
   return idx >= 0 ? trimmed.slice(idx + 1) : trimmed
 }
 
+function isPendingStatus(status?: string): boolean {
+  return status === 'running' || status === 'pending'
+}
+
+function errorReason(state: ToolState): string | null {
+  if (state.status !== 'error') return null
+  return lastLine(state.error) || 'Tool call failed'
+}
+
+function ToolName({
+  pending,
+  className = '',
+  children,
+}: {
+  pending: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      className={`inline-block min-w-0 ${className} ${
+        pending ? 'tool-name-shimmer' : ''
+      }`}
+    >
+      {children}
+    </span>
+  )
+}
+
 function BashToolPart({
   partId,
   callID,
@@ -137,7 +154,7 @@ function BashToolPart({
   callID: string
   state: ToolState
 }) {
-  const running = state.status === 'running' || state.status === 'pending'
+  const running = isPendingStatus(state.status)
   const [open, setOpen] = useOpenState(`tool:${partId}`, running)
   const cmd = String((state.input as { command?: string } | undefined)?.command ?? '')
   const shellId = state.metadata?.cloudcode_shell_id
@@ -146,13 +163,19 @@ function BashToolPart({
       ? state.metadata.cloudcode_exit_code
       : null
   const d = durationMs(state)
+  const reason = errorReason(state)
 
   return (
     <div className="text-xs">
-      <ToolHeader open={open} onToggle={() => setOpen((v) => !v)} status={state.status}>
+      <ToolHeader open={open} onToggle={() => setOpen((v) => !v)}>
         <span className="font-mono text-ui-default">$</span>
-        <span className="truncate font-mono text-header-3">{cmd || '(no command)'}</span>
+        <ToolName pending={running} className="truncate font-mono text-header-3">
+          {cmd || '(no command)'}
+        </ToolName>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-ui-muted">
+          {reason && (
+            <span className="max-w-56 truncate text-red-400" title={state.error}>{reason}</span>
+          )}
           {exitCode !== null && (
             <span className={exitCode === 0 ? 'text-ui-muted' : 'text-red-400'}>
               exit {exitCode}
@@ -198,17 +221,14 @@ function BashToolPart({
 function ToolHeader({
   open,
   onToggle,
-  status,
   children,
 }: {
   open: boolean
   onToggle: () => void
-  status?: string
   children: React.ReactNode
 }) {
   return (
     <DisclosureHeader open={open} onToggle={onToggle}>
-      <StatusDot status={status} />
       {children}
     </DisclosureHeader>
   )
@@ -230,15 +250,20 @@ function PtyToolPart({
     (state.input as { label?: string; cwd?: string } | undefined)?.label ??
     (state.input as { label?: string; cwd?: string } | undefined)?.cwd ??
     (shellId ? shellId.slice(-8) : 'shell')
+  const running = isPendingStatus(state.status)
+  const reason = errorReason(state)
   return (
     <div className="text-xs">
       <div className="flex items-center gap-2 py-0.5">
-        <span className="inline-flex w-3 justify-center font-mono text-neutral-700">·</span>
-        <StatusDot status={state.status} />
-        <span className="text-content-default">Opened shell</span>
+        <ToolName pending={running} className="text-content-default">
+          Opened shell
+        </ToolName>
         <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-header-3">
           {label}
         </span>
+        {reason && (
+          <span className="max-w-56 truncate text-[10px] text-red-400" title={state.error}>{reason}</span>
+        )}
         {shellId && onOpenShell && (
           <button
             onClick={() => onOpenShell({ type: 'shell', shellId })}
@@ -267,7 +292,7 @@ function GenericToolPart({
   childTranscript?: TranscriptState
   onOpenShell?: (content: PaneContent) => void
 }) {
-  const running = state.status === 'running' || state.status === 'pending'
+  const running = isPendingStatus(state.status)
   const [open, setOpen] = useOpenState(`tool:${partId}`, running)
   const isTask = tool === 'task'
   const taskDescription = isTask
@@ -280,10 +305,22 @@ function GenericToolPart({
     return typeof v === 'string' ? v : ''
   })()
   const showPath = filePath && /^(read|edit|write|patch|view|multiedit)$/i.test(tool)
+  const globPattern =
+    tool === 'glob' && typeof state.input?.pattern === 'string'
+      ? state.input.pattern
+      : ''
+  const reason = errorReason(state)
   return (
     <div className="text-xs">
-      <ToolHeader open={open} onToggle={() => setOpen((v) => !v)} status={state.status}>
-        <span className="font-mono text-content-default">{tool}</span>
+      <ToolHeader open={open} onToggle={() => setOpen((v) => !v)}>
+        <ToolName pending={running} className="font-mono text-content-default">
+          {tool}
+        </ToolName>
+        {globPattern && (
+          <span className="min-w-0 truncate font-mono text-[11px] text-ui-default">
+            {globPattern}
+          </span>
+        )}
         {isTask && taskDescription && (
           <span className="truncate text-[11px] text-ui-default">— {taskDescription}</span>
         )}
@@ -296,7 +333,9 @@ function GenericToolPart({
             {filePath}
           </span>
         )}
-        <span className="ml-auto text-[10px] text-ui-muted">{state.status ?? 'idle'}</span>
+        {reason && (
+          <span className="ml-auto max-w-56 truncate text-[10px] text-red-400" title={state.error}>{reason}</span>
+        )}
       </ToolHeader>
       {open && isTask && (
         <ToolBody>
