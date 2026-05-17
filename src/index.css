@@ -59,6 +59,21 @@
   to { opacity: 0.62; }
 }
 
+@keyframes tool-name-shimmer {
+  from { background-position: 140% 0; }
+  to { background-position: -140% 0; }
+}
+
+.tool-name-shimmer {
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tool-name-shimmer 1.35s linear infinite;
+  background-clip: text;
+  background-image: linear-gradient(90deg, var(--color-content-default) 0%, var(--color-header-1) 42%, var(--color-content-default) 84%);
+  background-size: 240% 100%;
+  color: transparent;
+}
+
 :root {
   /* Overridable via the Settings → Appearance control. Drives base
      html font-size, so all rem-based Tailwind sizes scale together. */

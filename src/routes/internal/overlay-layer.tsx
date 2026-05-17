@@ -9,7 +9,7 @@ import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../env/ag
 import { FolderPickerModal } from '../env/agent/folder-picker-modal'
 import { CommandPalette } from '../env/shell/command-palette'
 import type { PaneContent } from '../env/shell/tab-state'
-import { UniversalMenu, type UniversalMenuContextItem } from '../env/universal-menu/universal-menu'
+import { UniversalMenu, type UniversalMenuContextItem, type UniversalMenuInitialIntent } from '../env/universal-menu/universal-menu'
 import { Modal } from '../../components/ui'
 import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
@@ -66,6 +66,7 @@ export type OverlayRequest = {
   contextItems?: UniversalMenuContextItem[]
   canToggleAgentPane?: boolean
   canToggleSidebar?: boolean
+  initialIntent?: UniversalMenuInitialIntent
 } | {
   requestId: string
   type: 'confirm'
@@ -312,6 +313,7 @@ function EnvOverlayRequestRenderer({
               activeSessionId={request.activeSessionId}
               hasActiveTab={request.hasActiveTab}
               contextItems={request.contextItems}
+              initialIntent={request.initialIntent}
               onClose={() => respond({ requestId: request.requestId, type: 'closed' })}
               onOpenContent={(content) => respond({ requestId: request.requestId, type: 'open-pane', content })}
               onCreatedChat={(sessionId: string, workspaceId?: string) => respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })}
