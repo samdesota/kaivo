@@ -1589,7 +1589,10 @@ function WorkspaceAgentPane({
           headerTrailing={agentHeaderTrailing}
           tabsFocused={focused}
           closeActiveTabSignal={closeActiveTabSignal}
-          onOpenNewChat={onOpenUniversalMenu}
+          onOpenNewChat={async () => {
+            onOpenUniversalMenu()
+            return null
+          }}
         />
       </WorkspaceAgentEnvProvider>
     </AgentPaneFrame>
