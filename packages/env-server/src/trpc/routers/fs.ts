@@ -6,6 +6,7 @@ import {
   FsError,
   type FsEvent,
   browseHome,
+  createDirectory,
   listDirectory,
   readFile,
   searchGitTrackedFiles,
@@ -19,9 +20,11 @@ function toTrpcError(err: unknown): TRPCError {
     const code: TRPCError['code'] =
       err.code === 'not_found'
         ? 'NOT_FOUND'
-        : err.code === 'path_traversal'
-          ? 'BAD_REQUEST'
-          : 'BAD_REQUEST'
+        : err.code === 'already_exists'
+          ? 'CONFLICT'
+          : err.code === 'path_traversal'
+            ? 'BAD_REQUEST'
+            : 'BAD_REQUEST'
     return new TRPCError({ code, message: err.message, cause: err })
   }
   return new TRPCError({
@@ -99,6 +102,16 @@ export const fsRouter = router({
     .query(async ({ input }) => {
       try {
         return await browseHome(input.path)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  createDirectory: authedProcedure
+    .input(z.object({ parentPath: z.string().min(1).max(4096), name: z.string().min(1).max(255) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await createDirectory(input.parentPath, input.name)
       } catch (err) {
         throw toTrpcError(err)
       }

@@ -24,6 +24,7 @@ interface RightPaneProps {
 interface ShellRow {
   id: string
   title?: string | null
+  alive?: boolean
 }
 
 export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
@@ -38,7 +39,7 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
 
   const liveShellIds = useMemo(() => {
     if (!shells.data) return null
-    return new Set((shells.data as ShellRow[]).map((s) => s.id))
+    return new Set((shells.data as ShellRow[]).filter((s) => s.alive !== false).map((s) => s.id))
   }, [shells.data])
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
 
   useEffect(() => {
     if (!shells.data) return
-    const shellTitles = new Map((shells.data as ShellRow[]).map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-6)}`]))
+    const shellTitles = new Map((shells.data as ShellRow[]).filter((shell) => shell.alive !== false).map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-6)}`]))
     for (const tab of state.tabs) {
       if (tab.content.type !== 'shell') continue
       if (tab.titleSource === 'explicit') continue

@@ -1928,7 +1928,13 @@ function WorkspaceShellTabTitleSync({
 
   useEffect(() => {
     if (!shells.data) return
-    const shellTitles = new Map((shells.data as Array<{ id: string; title?: string | null }>).map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-8)}`]))
+    const liveShells = (shells.data as Array<{ id: string; alive?: boolean; title?: string | null }>).filter((shell) => shell.alive !== false)
+    const liveShellIds = new Set(liveShells.map((shell) => shell.id))
+    for (const tab of tabs) {
+      if (tab.type === 'shell' && !liveShellIds.has(tab.shellId)) closeWorkspaceTab(tab, dispatchWorkspaceState)
+    }
+
+    const shellTitles = new Map(liveShells.map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-8)}`]))
     for (const tab of tabs) {
       if (tab.type !== 'shell' || tab.titleSource === 'explicit') continue
       const title = shellTitles.get(tab.shellId)

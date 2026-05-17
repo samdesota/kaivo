@@ -26,13 +26,14 @@ const mocks = vi.hoisted(() => ({
   browseInputs: [] as Array<{ path?: string }>,
   startChat: vi.fn(async () => ({ id: 'session-new' })),
   createShell: vi.fn(async () => ({ id: 'shell-new' })),
+  disposeShell: vi.fn(async () => ({ ok: true })),
   cloneConfig: vi.fn(async () => ({ repoId: 'repo-new', workingDir: '/Users/sam/d/standalone/new-tree' })),
   createWorkspace: vi.fn(async () => ({ id: 'workspace-new' })),
   upsertWorkspaceResource: vi.fn(async () => ({ ok: true })),
   recentFolders: [] as Array<{ path: string; label: string | null }>,
   repoConfigs: [] as Array<{ id: string; name: string; originUrl?: string | null; githubFullName?: string | null }>,
   worktrees: [] as Array<{ id: string; name: string; slug: string; worktreeName: string; worktreeSlug: string; workingDir: string; githubFullName: string | null }>,
-  shells: [] as Array<{ id: string; cwd: string; title: string | null }>,
+  shells: [] as Array<{ id: string; cwd: string; title: string | null; alive?: boolean }>,
   gitFiles: [] as Array<{ root: string; path: string; relativePath: string }>,
   workspaceTree: [] as Array<unknown>,
   bookmarks: [] as Array<{
@@ -51,6 +52,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../src/env-trpc', () => ({
   envTrpc: {
+    useUtils: () => ({ shell: { list: { invalidate: vi.fn(async () => undefined) } } }),
     agent: {
       sessionList: {
         useQuery: () => ({ data: mocks.sessions, isLoading: false }),
@@ -90,6 +92,9 @@ vi.mock('../../src/env-trpc', () => ({
       },
       create: {
         useMutation: () => ({ mutateAsync: mocks.createShell, isPending: false }),
+      },
+      dispose: {
+        useMutation: () => ({ mutateAsync: mocks.disposeShell, isPending: false }),
       },
     },
   },
@@ -144,6 +149,7 @@ beforeEach(() => {
   mocks.browseInputs = []
   mocks.startChat.mockClear()
   mocks.createShell.mockClear()
+  mocks.disposeShell.mockClear()
   mocks.cloneConfig.mockClear()
   mocks.createWorkspace.mockClear()
   mocks.upsertWorkspaceResource.mockClear()
@@ -336,6 +342,52 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'http://127.0.0.1' })
   })
 
+  it('hides contextual shell tabs when the backing shell is terminated', () => {
+    mocks.shells = [{ id: 'shell-dead', cwd: '/Users/sam/dead', title: 'terminated shell', alive: false }]
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab
+        contextItems={[{ id: 'tab-shell-dead', kind: 'shell', label: 'dead tab', detail: '/Users/sam/dead', content: { type: 'shell', shellId: 'shell-dead' } }]}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText('dead tab')).toBeNull()
+    expect(screen.queryByText('terminated shell')).toBeNull()
+  })
+
+  it('shows live workspace shells without open tabs and terminates from landing actions', async () => {
+    mocks.shells = [
+      { id: 'shell-live', cwd: '/Users/sam/live', title: 'detached shell', alive: true },
+      { id: 'shell-dead', cwd: '/Users/sam/dead', title: 'terminated shell', alive: false },
+    ]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    expect(screen.getByText('detached shell')).toBeTruthy()
+    expect(screen.queryByText('terminated shell')).toBeNull()
+    expect(screen.getByText('⌥ actions')).toBeTruthy()
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.keyDown(input, { key: 'Alt' })
+    expect(screen.getByText('Terminate shell')).toBeTruthy()
+    fireEvent.keyDown(input, { key: 't' })
+
+    await waitFor(() => expect(mocks.disposeShell).toHaveBeenCalledWith({ id: 'shell-live' }))
+  })
+
+  it('opens landing shell actions from the selected row ellipsis', async () => {
+    mocks.shells = [{ id: 'shell-live', cwd: '/Users/sam/live', title: 'detached shell', alive: true }]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.click(screen.getByLabelText('Actions for detached shell'))
+    fireEvent.click(screen.getByText('Terminate shell'))
+
+    await waitFor(() => expect(mocks.disposeShell).toHaveBeenCalledWith({ id: 'shell-live' }))
+  })
+
   it('navigates contextual landing rows with the keyboard', async () => {
     const onOpenContent = vi.fn()
     render(
@@ -452,6 +504,34 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'shell', shellId: 'shell-1' })
+  })
+
+  it('hides terminated shells from the shell scope', () => {
+    mocks.shells = [
+      { id: 'shell-live', cwd: '/Users/sam/d/live', title: 'live server', alive: true },
+      { id: 'shell-dead', cwd: '/Users/sam/d/dead', title: 'dead server', alive: false },
+    ]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: '$server' } })
+
+    expect(screen.getByText('live server')).toBeTruthy()
+    expect(screen.queryByText('dead server')).toBeNull()
+  })
+
+  it('opens shell scope actions with Option and terminates with t', async () => {
+    mocks.shells = [{ id: 'shell-1', cwd: '/Users/sam/d/foo', title: 'foo server' }]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: '$foo' } })
+
+    await waitFor(() => expect(screen.getByText('⌥ actions')).toBeTruthy())
+    fireEvent.keyDown(input, { key: 'Alt' })
+    expect(screen.getByText('Terminate shell')).toBeTruthy()
+    fireEvent.keyDown(input, { key: 't' })
+
+    await waitFor(() => expect(mocks.disposeShell).toHaveBeenCalledWith({ id: 'shell-1' }))
   })
 
   it('filters web pages and focuses the selected page', () => {
