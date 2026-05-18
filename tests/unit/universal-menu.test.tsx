@@ -38,7 +38,6 @@ const mocks = vi.hoisted(() => ({
   workspaceTree: [] as Array<unknown>,
   bookmarks: [] as Array<{
     id: string
-    workspaceId: string
     title: string
     url: string
     normalizedUrl: string
@@ -122,7 +121,7 @@ vi.mock('../../src/trpc', () => ({
 }))
 
 vi.mock('../../src/routes/workspace/bookmarks-store', () => ({
-  useWorkspaceBookmarksStore: () => ({ bookmarks: mocks.bookmarks, isLoading: false, error: null }),
+  useBookmarksStore: () => ({ bookmarks: mocks.bookmarks, isLoading: false, error: null }),
 }))
 
 afterEach(() => cleanup())
@@ -599,8 +598,8 @@ describe('UniversalMenu baseline shell', () => {
     const onOpenContent = vi.fn()
     const now = new Date('2026-05-16T00:00:00Z')
     mocks.bookmarks = [
-      { id: 'bookmark-foozam', workspaceId: 'workspace-1', title: 'foozam', url: 'https://example.com/foozam', normalizedUrl: 'https://example.com/foozam', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
-      { id: 'bookmark-foo', workspaceId: 'workspace-1', title: 'foo', url: 'https://example.com/foo', normalizedUrl: 'https://example.com/foo', origin: 'https://example.com', faviconDataUrl: 'data:image/png;base64,abc', faviconUrl: null, createdAt: now, updatedAt: now },
+      { id: 'bookmark-foozam', title: 'foozam', url: 'https://example.com/foozam', normalizedUrl: 'https://example.com/foozam', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+      { id: 'bookmark-foo', title: 'foo', url: 'https://example.com/foo', normalizedUrl: 'https://example.com/foo', origin: 'https://example.com', faviconDataUrl: 'data:image/png;base64,abc', faviconUrl: null, createdAt: now, updatedAt: now },
     ]
     render(
       <UniversalMenu
@@ -626,7 +625,7 @@ describe('UniversalMenu baseline shell', () => {
   it('marks open browser tabs separately from bookmarks in web search', () => {
     const now = new Date('2026-05-16T00:00:00Z')
     mocks.bookmarks = [
-      { id: 'bookmark-docs', workspaceId: 'workspace-1', title: 'Docs bookmark', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+      { id: 'bookmark-docs', title: 'Docs bookmark', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
     ]
     render(
       <UniversalMenu
@@ -648,8 +647,8 @@ describe('UniversalMenu baseline shell', () => {
   it('ignores malformed web bookmark rows without breaking search', () => {
     const now = new Date('2026-05-16T00:00:00Z')
     mocks.bookmarks = [
-      { id: 'bad', workspaceId: 'workspace-1', title: null, url: null, normalizedUrl: null, origin: null, createdAt: now, updatedAt: null } as never,
-      { id: 'bookmark-docs', workspaceId: 'workspace-1', title: 'Docs', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+      { id: 'bad', title: null, url: null, normalizedUrl: null, origin: null, createdAt: now, updatedAt: null } as never,
+      { id: 'bookmark-docs', title: 'Docs', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
     ]
     render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onOpenContent={vi.fn()} onClose={vi.fn()} onCloseTab={vi.fn()} />)
 

@@ -313,10 +313,9 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   }
 
   async function openBookmarkOverlay() {
-    if (!workspaceId || !bookmarkableUrl) return
+    if (!bookmarkableUrl) return
     window.localStorage?.setItem('__zoottle_bookmark_overlay_requested', bookmarkableUrl)
     await openCreateBookmarkOverlay({
-      workspaceId,
       initialTitle: pageTitle || defaultBrowserBookmarkTitle(bookmarkableUrl),
       initialUrl: bookmarkableUrl,
       initialFaviconDataUrl: faviconDataUrl ?? null,
@@ -450,7 +449,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
         </BrowserControlButton>
         <BrowserControlButton
           label="Bookmark page"
-          disabled={!workspaceId || !bookmarkableUrl}
+          disabled={!bookmarkableUrl}
           onClick={() => void openBookmarkOverlay()}
         >
           ☆

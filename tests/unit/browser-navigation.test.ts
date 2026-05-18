@@ -5,7 +5,6 @@ import type { BookmarkRecord } from '../../src/routes/workspace/bookmarks-store'
 function bookmark(input: Partial<BookmarkRecord> & { title: string; url?: string; updatedAt?: Date }): BookmarkRecord {
   return {
     id: input.id ?? input.title,
-    workspaceId: 'workspace-1',
     title: input.title,
     url: input.url ?? `https://example.com/${input.title}`,
     normalizedUrl: input.normalizedUrl ?? input.url ?? `https://example.com/${input.title}`,

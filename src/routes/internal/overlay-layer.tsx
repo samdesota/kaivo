@@ -15,7 +15,7 @@ import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
 import { WorkspaceCleanupOverlay } from '../workspace/workspace-cleanup-overlay'
 import type { WorkspaceResourceRecord } from '../workspace/resources-store'
-import { bookmarkOriginForUrl, upsertWorkspaceBookmark } from '../workspace/bookmarks-store'
+import { bookmarkOriginForUrl, upsertBookmark } from '../workspace/bookmarks-store'
 import { resolveBrowserAddress } from '../../lib/browser-navigation'
 
 /**
@@ -110,7 +110,6 @@ export type OverlayRequest = {
 } | {
   requestId: string
   type: 'create-bookmark'
-  workspaceId: string
   initialTitle?: string
   initialUrl: string
   initialFaviconDataUrl?: string | null
@@ -518,7 +517,7 @@ function CreateBookmarkOverlay({
     setBusy(true)
     setError(null)
     try {
-      const saved = await upsertWorkspaceBookmark(request.workspaceId, {
+      const saved = await upsertBookmark({
         title: titleValue,
         url: decision.url,
         faviconDataUrl: request.initialFaviconDataUrl ?? null,

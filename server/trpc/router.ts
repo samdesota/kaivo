@@ -19,6 +19,7 @@ import { logsRouter } from './routers/logs.js'
 import { workspaceRouter } from './routers/workspace.js'
 import { syncRouter } from './routers/sync.js'
 import { faviconRouter } from './routers/favicon.js'
+import { bookmarksRouter } from './routers/bookmarks.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -41,6 +42,7 @@ export const appRouter = router({
   workspace: workspaceRouter,
   sync: syncRouter,
   favicon: faviconRouter,
+  bookmarks: bookmarksRouter,
 })
 
 export type AppRouter = typeof appRouter

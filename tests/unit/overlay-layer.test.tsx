@@ -59,7 +59,17 @@ describe('OverlayLayerApp', () => {
     channels.clear()
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
-      json: async () => ({ result: { data: { json: { id: 'bookmark-1' } } } }),
+      json: async () => ({ result: { data: { json: {
+        id: 'bookmark-1',
+        title: 'Example Docs',
+        url: 'https://example.com/docs',
+        normalizedUrl: 'https://example.com/docs',
+        origin: 'https://example.com',
+        faviconDataUrl: 'data:image/png;base64,abc',
+        faviconUrl: 'https://example.com/favicon.ico',
+        createdAt: '2026-05-16T00:00:00Z',
+        updatedAt: '2026-05-16T00:00:00Z',
+      } } } }),
     })))
     Object.defineProperty(globalThis, 'BroadcastChannel', {
       value: TestBroadcastChannel,
@@ -124,7 +134,6 @@ describe('OverlayLayerApp', () => {
         initialRequest={{
           requestId: 'bookmark-request',
           type: 'create-bookmark',
-          workspaceId: 'workspace-1',
           initialTitle: 'Example Docs',
           initialUrl: 'https://example.com/docs',
           initialFaviconDataUrl: 'data:image/png;base64,abc',
@@ -142,7 +151,7 @@ describe('OverlayLayerApp', () => {
       type: 'bookmark-saved',
       bookmarkId: 'bookmark-1',
     }))
-    expect(fetch).toHaveBeenCalledWith('/trpc/workspace.upsertResource', expect.objectContaining({ method: 'POST' }))
+    expect(fetch).toHaveBeenCalledWith('/trpc/bookmarks.upsert', expect.objectContaining({ method: 'POST' }))
   })
 
   it('keeps bookmark save disabled for search-like URLs', () => {
@@ -151,7 +160,6 @@ describe('OverlayLayerApp', () => {
         initialRequest={{
           requestId: 'bookmark-request',
           type: 'create-bookmark',
-          workspaceId: 'workspace-1',
           initialTitle: 'Search',
           initialUrl: 'foo bar',
         }}

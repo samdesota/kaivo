@@ -114,6 +114,21 @@ CREATE INDEX IF NOT EXISTS workspace_resources_workspace_idx
 CREATE INDEX IF NOT EXISTS workspace_resources_resource_idx
   ON workspace_resources(type, resource_key);
 
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  normalized_url TEXT NOT NULL UNIQUE,
+  origin TEXT,
+  favicon_data_url TEXT,
+  favicon_url TEXT,
+  created_at INTEGER NOT NULL DEFAULT ${nowMs},
+  updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+);
+
+CREATE INDEX IF NOT EXISTS bookmarks_updated_idx
+  ON bookmarks(updated_at);
+
 CREATE TABLE IF NOT EXISTS favicon_cache (
   page_origin TEXT PRIMARY KEY,
   icon_url TEXT NOT NULL,
@@ -533,6 +548,67 @@ function migrateFaviconCache(sqlite: Database.Database) {
   `)
 }
 
+function migrateBookmarks(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS bookmarks (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      normalized_url TEXT NOT NULL UNIQUE,
+      origin TEXT,
+      favicon_data_url TEXT,
+      favicon_url TEXT,
+      created_at INTEGER NOT NULL DEFAULT ${nowMs},
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+    CREATE INDEX IF NOT EXISTS bookmarks_updated_idx
+      ON bookmarks(updated_at);
+  `)
+
+  if (!tableExists(sqlite, 'workspace_resources')) return
+  const rows = sqlite.prepare(`
+    SELECT id, data, created_at, updated_at FROM workspace_resources
+    WHERE type = 'bookmark'
+    ORDER BY created_at ASC, id ASC
+  `).all() as Array<{ id: string; data: string; created_at: number; updated_at: number }>
+  const insert = sqlite.prepare(`
+    INSERT INTO bookmarks (id, title, url, normalized_url, origin, favicon_data_url, favicon_url, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(normalized_url) DO UPDATE SET
+      title = excluded.title,
+      url = excluded.url,
+      origin = excluded.origin,
+      favicon_data_url = excluded.favicon_data_url,
+      favicon_url = excluded.favicon_url,
+      updated_at = excluded.updated_at
+  `)
+  for (const row of rows) {
+    let data: Record<string, unknown>
+    try {
+      const parsed = JSON.parse(row.data) as unknown
+      data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+    } catch {
+      data = {}
+    }
+    const title = typeof data.title === 'string' ? data.title.trim() : ''
+    const url = typeof data.url === 'string' ? data.url.trim() : ''
+    const normalizedUrl = typeof data.normalizedUrl === 'string' ? data.normalizedUrl.trim() : url
+    if (!title || !url || !normalizedUrl) continue
+    insert.run(
+      row.id,
+      title,
+      url,
+      normalizedUrl,
+      typeof data.origin === 'string' ? data.origin : null,
+      typeof data.faviconDataUrl === 'string' ? data.faviconDataUrl : null,
+      typeof data.faviconUrl === 'string' ? data.faviconUrl : null,
+      row.created_at,
+      row.updated_at,
+    )
+  }
+  sqlite.prepare("DELETE FROM workspace_resources WHERE type = 'bookmark'").run()
+}
+
 function migrateWorkspaceFolders(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS workspace_folders (
@@ -701,6 +777,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(faviconCacheMigrationName)
     }
 
+    const bookmarksMigrationName = '0011_bookmarks'
+    const bookmarksMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(bookmarksMigrationName)
+    if (!bookmarksMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateBookmarks(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(bookmarksMigrationName)
+      })()
+      applied.push(bookmarksMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -718,6 +806,7 @@ export const localAppTables = [
   'workspace_tabs',
   'workspace_agent_tabs',
   'workspace_resources',
+  'bookmarks',
   'favicon_cache',
   'agent_notifications',
   'sandboxes',

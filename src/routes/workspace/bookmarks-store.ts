@@ -5,19 +5,11 @@ import { queryCollectionOptions, type QueryCollectionUtils } from '@tanstack/que
 import { bookmarkOriginForUrl, normalizeBookmarkUrl } from '../../lib/browser-navigation'
 import { appTrpcMutation, appTrpcQuery } from '../../lib/trpc-plain'
 import { trpc } from '../../trpc'
-import {
-  applyWorkspaceResourceChangeEvents,
-  normalizeWorkspaceResourceRecord,
-  type RawWorkspaceResourceRecord,
-  type WorkspaceResourceRecord,
-  type WorkspaceResourcesChangeEvent,
-} from './resources-store'
 
 export { bookmarkOriginForUrl, normalizeBookmarkUrl } from '../../lib/browser-navigation'
 
 export type BookmarkRecord = {
   id: string
-  workspaceId: string
   title: string
   url: string
   normalizedUrl: string
@@ -36,129 +28,131 @@ export type BookmarkInput = {
   createdFrom?: 'browser-pane' | 'universal-menu' | 'migration'
 }
 
-type WorkspaceResourcesCollection = Collection<WorkspaceResourceRecord, string> & {
-  utils: QueryCollectionUtils<WorkspaceResourceRecord, string>
+type BookmarksCollection = Collection<BookmarkRecord, string> & {
+  utils: QueryCollectionUtils<BookmarkRecord, string>
 }
 
-type WorkspaceResourcesSnapshot = {
-  table: 'workspace_resources'
-  rows: RawWorkspaceResourceRecord[]
+export type RawBookmarkRecord = Omit<BookmarkRecord, 'createdAt' | 'updatedAt'> & { createdAt: Date | number | string; updatedAt: Date | number | string }
+
+type BookmarksSnapshot = {
+  table: 'bookmarks'
+  rows: RawBookmarkRecord[]
   seq: number
 }
 
-export function bookmarkResourceKeyForUrl(url: string): string {
-  return `bookmark:${normalizeBookmarkUrl(url)}`
+export type BookmarksChangeEvent = {
+  seq: number
+  table: 'bookmarks'
+  op: 'insert' | 'update' | 'delete'
+  key: string
+  row: RawBookmarkRecord | null
 }
 
-export function bookmarkResourceData(input: BookmarkInput): Record<string, unknown> {
+export function bookmarkInput(input: BookmarkInput): BookmarkInput {
   const normalizedUrl = normalizeBookmarkUrl(input.url)
   return {
     title: input.title.trim(),
     url: normalizedUrl,
-    normalizedUrl,
-    origin: bookmarkOriginForUrl(normalizedUrl),
     faviconDataUrl: input.faviconDataUrl ?? null,
     faviconUrl: input.faviconUrl ?? null,
     createdFrom: input.createdFrom,
   }
 }
 
-export function bookmarkResourceInput(input: BookmarkInput): Pick<WorkspaceResourceRecord, 'type' | 'resourceKey' | 'shared' | 'data'> {
-  const data = bookmarkResourceData(input)
+export async function upsertBookmark(input: BookmarkInput): Promise<BookmarkRecord> {
+  return normalizeBookmarkRecord(await appTrpcMutation<RawBookmarkRecord>('bookmarks.upsert', bookmarkInput(input)))
+}
+
+export async function deleteBookmark(id: string): Promise<void> {
+  await appTrpcMutation('bookmarks.delete', { id })
+}
+
+export function normalizeBookmarkRecord(record: RawBookmarkRecord): BookmarkRecord {
+  const normalizedUrl = record.normalizedUrl || normalizeBookmarkUrl(record.url)
   return {
-    type: 'bookmark',
-    resourceKey: `bookmark:${data.normalizedUrl}`,
-    shared: true,
-    data,
-  }
-}
-
-export async function upsertWorkspaceBookmark(workspaceId: string, input: BookmarkInput): Promise<WorkspaceResourceRecord> {
-  return await appTrpcMutation<WorkspaceResourceRecord>('workspace.upsertResource', {
-    workspaceId,
-    resource: bookmarkResourceInput(input),
-  })
-}
-
-export async function deleteWorkspaceBookmark(id: string): Promise<void> {
-  await appTrpcMutation('workspace.deleteResource', { id })
-}
-
-export function bookmarkFromResource(resource: WorkspaceResourceRecord): BookmarkRecord | null {
-  if (resource.type !== 'bookmark') return null
-  const data = resource.data
-  const title = typeof data.title === 'string' ? data.title.trim() : ''
-  const url = typeof data.url === 'string' ? data.url.trim() : ''
-  const normalizedUrl = typeof data.normalizedUrl === 'string' ? data.normalizedUrl.trim() : normalizeBookmarkUrl(url)
-  if (!title || !url || !normalizedUrl) return null
-  return {
-    id: resource.id,
-    workspaceId: resource.workspaceId,
-    title,
-    url,
+    ...record,
+    url: record.url || normalizedUrl,
     normalizedUrl,
-    origin: typeof data.origin === 'string' ? data.origin : bookmarkOriginForUrl(normalizedUrl),
-    faviconDataUrl: typeof data.faviconDataUrl === 'string' ? data.faviconDataUrl : null,
-    faviconUrl: typeof data.faviconUrl === 'string' ? data.faviconUrl : null,
-    createdAt: resource.createdAt,
-    updatedAt: resource.updatedAt,
+    origin: record.origin ?? bookmarkOriginForUrl(normalizedUrl),
+    faviconDataUrl: record.faviconDataUrl ?? null,
+    faviconUrl: record.faviconUrl ?? null,
+    createdAt: record.createdAt instanceof Date ? record.createdAt : new Date(record.createdAt),
+    updatedAt: record.updatedAt instanceof Date ? record.updatedAt : new Date(record.updatedAt),
   }
 }
 
-export function bookmarksFromResources(resources: WorkspaceResourceRecord[], workspaceId?: string): BookmarkRecord[] {
-  return resources
-    .filter((resource) => !workspaceId || resource.workspaceId === workspaceId)
-    .map(bookmarkFromResource)
-    .filter((bookmark): bookmark is BookmarkRecord => bookmark !== null)
+export function validBookmarks(records: BookmarkRecord[]): BookmarkRecord[] {
+  return records.filter((bookmark) => Boolean(
+    typeof bookmark.id === 'string'
+      && typeof bookmark.title === 'string'
+      && typeof bookmark.url === 'string'
+      && typeof bookmark.normalizedUrl === 'string'
+      && bookmark.id
+      && bookmark.title.trim()
+      && bookmark.url.trim()
+      && bookmark.normalizedUrl.trim(),
+  ))
 }
 
-export function useWorkspaceBookmarksStore(workspaceId?: string) {
+export type BookmarkCollectionUtils = QueryCollectionUtils<BookmarkRecord, string>
+
+export function applyBookmarkChangeEvents(input: {
+  events: BookmarksChangeEvent[]
+  collectionUtils: BookmarkCollectionUtils
+  syncedSeq: number
+}): number {
+  let nextSeq = input.syncedSeq
+  const deduped = new Map<string, BookmarksChangeEvent>()
+  for (const event of input.events) {
+    if (event.seq <= nextSeq) continue
+    deduped.set(event.key, event)
+  }
+  input.collectionUtils.writeBatch(() => {
+    for (const event of deduped.values()) {
+      if (event.op === 'delete') {
+        input.collectionUtils.writeDelete(event.key)
+      } else if (event.row) {
+        input.collectionUtils.writeUpsert(normalizeBookmarkRecord(event.row))
+      }
+      nextSeq = Math.max(nextSeq, event.seq)
+    }
+  })
+  return nextSeq
+}
+
+export function useBookmarksStore() {
   const queryClient = useQueryClient()
   const syncedSeqRef = useRef(0)
   const collection = useMemo(() => {
     const options = queryCollectionOptions({
-      id: 'workspace-bookmarks-resources',
-      queryKey: ['sync', 'workspace_resources', 'bookmarks'],
+      id: 'bookmarks',
+      queryKey: ['sync', 'bookmarks'],
       queryClient,
-      getKey: (record: WorkspaceResourceRecord) => record.id,
+      getKey: (record: BookmarkRecord) => record.id,
       queryFn: async () => {
-        const snapshot = await appTrpcQuery<WorkspaceResourcesSnapshot>('sync.snapshot', { table: 'workspace_resources' })
+        const snapshot = await appTrpcQuery<BookmarksSnapshot>('sync.snapshot', { table: 'bookmarks' })
         syncedSeqRef.current = Math.max(syncedSeqRef.current, snapshot.seq)
-        return snapshot.rows.map(normalizeWorkspaceResourceRecord)
+        return snapshot.rows.map(normalizeBookmarkRecord)
       },
       onInsert: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
-        for (const mutation of transaction.mutations) {
-          const record = mutation.modified as WorkspaceResourceRecord
-          await appTrpcMutation('workspace.upsertResource', {
-            workspaceId: record.workspaceId,
-            resource: { type: record.type, resourceKey: record.resourceKey, shared: record.shared, data: record.data },
-          })
-        }
+        for (const mutation of transaction.mutations) await appTrpcMutation('bookmarks.upsert', bookmarkInput(mutation.modified as BookmarkRecord))
       },
       onUpdate: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
-        for (const mutation of transaction.mutations) {
-          const record = mutation.modified as WorkspaceResourceRecord
-          await appTrpcMutation('workspace.upsertResource', {
-            workspaceId: record.workspaceId,
-            resource: { type: record.type, resourceKey: record.resourceKey, shared: record.shared, data: record.data },
-          })
-        }
+        for (const mutation of transaction.mutations) await appTrpcMutation('bookmarks.upsert', bookmarkInput(mutation.modified as BookmarkRecord))
       },
       onDelete: async ({ transaction }: { transaction: { mutations: Array<{ key: unknown }> } }) => {
-        for (const mutation of transaction.mutations) {
-          await appTrpcMutation('workspace.deleteResource', { id: String(mutation.key) })
-        }
+        for (const mutation of transaction.mutations) await appTrpcMutation('bookmarks.delete', { id: String(mutation.key) })
       },
     })
-    return createCollection(options as never) as unknown as WorkspaceResourcesCollection
+    return createCollection(options as never) as unknown as BookmarksCollection
   }, [queryClient])
 
   trpc.sync.changes.useSubscription(
-    { afterSeq: syncedSeqRef.current, tables: ['workspace_resources'] },
+    { afterSeq: syncedSeqRef.current, tables: ['bookmarks'] },
     {
       onData(events) {
-        syncedSeqRef.current = applyWorkspaceResourceChangeEvents({
-          events: events as WorkspaceResourcesChangeEvent[],
+        syncedSeqRef.current = applyBookmarkChangeEvents({
+          events: events as BookmarksChangeEvent[],
           collectionUtils: collection.utils,
           syncedSeq: syncedSeqRef.current,
         })
@@ -167,13 +161,11 @@ export function useWorkspaceBookmarksStore(workspaceId?: string) {
   )
 
   const live = useLiveQuery(() => collection, [collection])
-  const records = (live.data ?? []).filter((record) => !workspaceId || record.workspaceId === workspaceId)
-  const bookmarks = bookmarksFromResources(records)
+  const bookmarks = validBookmarks(live.data ?? [])
 
   return {
     ...live,
     collection,
-    records,
     bookmarks,
   }
 }

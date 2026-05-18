@@ -44,7 +44,6 @@ let rect = { x: 10, y: 20, width: 300, height: 200 }
 function bookmark(input: Partial<BookmarkRecord> & { title: string; url: string }): BookmarkRecord {
   return {
     id: input.id ?? input.title,
-    workspaceId: 'workspace-1',
     title: input.title,
     url: input.url,
     normalizedUrl: input.normalizedUrl ?? input.url,
@@ -281,7 +280,6 @@ describe('BrowserPane', () => {
     await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
     fireEvent.click(view.getByLabelText('Bookmark page'))
     await waitFor(() => expect(openCreateBookmarkOverlay).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1',
       initialTitle: 'Example Docs',
       initialUrl: 'https://example.com/docs',
       initialFaviconDataUrl: 'data:image/png;base64,abc',

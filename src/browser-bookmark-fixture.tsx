@@ -16,7 +16,6 @@ const faviconDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCA
 const seededBookmarks: BookmarkRecord[] = [
   {
     id: 'seed-bookmark',
-    workspaceId: 'workspace-e2e',
     title: 'Seed Bookmark',
     url: 'https://example.com/seed',
     normalizedUrl: 'https://example.com/seed',

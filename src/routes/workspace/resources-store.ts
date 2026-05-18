@@ -5,7 +5,7 @@ import { queryCollectionOptions, type QueryCollectionUtils } from '@tanstack/que
 import { appTrpcMutation, appTrpcQuery } from '../../lib/trpc-plain'
 import { trpc } from '../../trpc'
 
-export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'bookmark' | 'other'
+export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'other'
 
 export type WorkspaceResourceRecord = {
   id: string

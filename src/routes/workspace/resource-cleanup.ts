@@ -112,23 +112,6 @@ export function createWorkspaceResourceCleanupRegistry(services: WorkspaceResour
         await ignoreAlreadyCleaned(services.deleteWorktree(repoId))
       },
     },
-    bookmark: {
-      async exists() {
-        return true
-      },
-      row(resource) {
-        return {
-          id: resource.id,
-          type: 'bookmark',
-          label: resourceLabel(resource),
-          detail: resource.resourceKey,
-          shared: resource.shared,
-          orphan: false,
-          canCleanup: false,
-        }
-      },
-      async cleanup() {},
-    },
     other: {
       async exists() {
         return true

@@ -61,6 +61,21 @@ export function getAppRealtime(): SqliteRealtimeEngine {
         { name: 'updated_at', jsonName: 'updatedAt' },
       ],
     },
+    {
+      table: 'bookmarks',
+      keyColumns: ['id'],
+      columns: [
+        { name: 'id' },
+        { name: 'title' },
+        { name: 'url' },
+        { name: 'normalized_url', jsonName: 'normalizedUrl' },
+        { name: 'origin' },
+        { name: 'favicon_data_url', jsonName: 'faviconDataUrl' },
+        { name: 'favicon_url', jsonName: 'faviconUrl' },
+        { name: 'created_at', jsonName: 'createdAt' },
+        { name: 'updated_at', jsonName: 'updatedAt' },
+      ],
+    },
   ])
   return appRealtime
 }

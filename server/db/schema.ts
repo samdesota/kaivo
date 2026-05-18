@@ -12,7 +12,7 @@ export type ShellOwnerKind = 'human' | 'agent'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 export type WorkspaceNameSource = 'explicit' | 'folder_path' | 'worktree' | 'derived'
 export type WorkspaceSourceKind = 'folder' | 'worktree' | 'repo_config'
-export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'bookmark' | 'other'
+export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'other'
 
 export type WorkspaceUiState = {
   activeAgentSessionId: string | null
@@ -63,6 +63,18 @@ export type WorkspaceResourceRow = {
   resourceKey: string
   shared: boolean
   data: Record<string, unknown>
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type BookmarkRow = {
+  id: string
+  title: string
+  url: string
+  normalizedUrl: string
+  origin: string | null
+  faviconDataUrl: string | null
+  faviconUrl: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -205,6 +217,18 @@ export const workspaceResources = sqliteTable('workspace_resources', {
   resourceKey: text('resource_key').notNull(),
   shared: integer('shared', { mode: 'boolean' }).notNull().default(false),
   data: jsonText<Record<string, unknown>>('data').notNull(),
+  createdAt: timestamp('created_at').notNull().default(nowMs),
+  updatedAt: timestamp('updated_at').notNull().default(nowMs),
+})
+
+export const bookmarks = sqliteTable('bookmarks', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  url: text('url').notNull(),
+  normalizedUrl: text('normalized_url').notNull().unique(),
+  origin: text('origin'),
+  faviconDataUrl: text('favicon_data_url'),
+  faviconUrl: text('favicon_url'),
   createdAt: timestamp('created_at').notNull().default(nowMs),
   updatedAt: timestamp('updated_at').notNull().default(nowMs),
 })

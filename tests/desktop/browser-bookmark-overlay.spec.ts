@@ -103,18 +103,9 @@ test('browser pane bookmark action opens overlay and saves a bookmark', async ({
         return await page.evaluate(() => JSON.parse(window.localStorage.getItem('__zoottle_mock_bookmark_mutation_calls') || '[]'))
       }).toEqual([
         expect.objectContaining({
-          workspaceId: 'workspace-e2e',
-          resource: expect.objectContaining({
-            type: 'bookmark',
-            resourceKey: 'bookmark:https://example.com/docs',
-            shared: true,
-            data: expect.objectContaining({
-              url: 'https://example.com/docs',
-              normalizedUrl: 'https://example.com/docs',
-              faviconDataUrl,
-              faviconUrl: 'https://example.com/favicon.ico',
-            }),
-          }),
+          url: 'https://example.com/docs',
+          faviconDataUrl,
+          faviconUrl: 'https://example.com/favicon.ico',
         }),
       ])
 

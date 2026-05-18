@@ -50,7 +50,6 @@ export type UniversalMenuOverlayResult =
   | { type: 'closed' }
 
 export type CreateBookmarkOverlayInput = {
-  workspaceId: string
   initialTitle?: string
   initialUrl: string
   initialFaviconDataUrl?: string | null

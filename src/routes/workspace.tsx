@@ -62,7 +62,7 @@ import {
 } from './workspace/tab-state'
 import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { useWorkspaceResourcesStore, type WorkspaceResourceRecord } from './workspace/resources-store'
-import { useWorkspaceBookmarksStore } from './workspace/bookmarks-store'
+import { useBookmarksStore } from './workspace/bookmarks-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
@@ -1696,7 +1696,7 @@ function WorkspaceTabPane({
   const [fileEditorStates, setFileEditorStates] = useState<Record<string, FileEditorState>>({})
   const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
   const pendingFaviconWritesRef = useRef(new Set<string>())
-  const bookmarksStore = useWorkspaceBookmarksStore(ctx.workspace.id)
+  const bookmarksStore = useBookmarksStore()
   const faviconOrigins = useMemo(() => Array.from(new Set(
     ctx.uiState.workspaceTabs
       .filter((tab): tab is Extract<WorkspaceTab, { type: 'browser' }> => tab.type === 'browser')

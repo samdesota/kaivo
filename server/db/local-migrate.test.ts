@@ -13,7 +13,7 @@ describe('runLocalAppMigrations', () => {
 
     expect(result).toEqual({
       sqlitePath,
-        applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache'],
+        applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks'],
     })
     const sqlite = new Database(sqlitePath, { readonly: true })
     try {
@@ -77,7 +77,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT * FROM workspace_view_states').get()).toMatchObject({
@@ -137,7 +137,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()
@@ -155,6 +155,67 @@ describe('runLocalAppMigrations', () => {
         { id: 'b', folder_id: null, position: 1, name_source: 'explicit' },
         { id: 'c', folder_id: null, position: 2, name_source: 'explicit' },
       ])
+    } finally {
+      migrated.close()
+    }
+  })
+
+  it('migrates bookmark workspace resources into global bookmarks', () => {
+    const sqlitePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cc-app-sqlite-test-')), 'app.db')
+    const sqlite = new Database(sqlitePath)
+    try {
+      sqlite.exec(`
+        CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, run_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000));
+        CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE workspace_resources (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          resource_key TEXT NOT NULL,
+          shared INTEGER NOT NULL DEFAULT 0,
+          data TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE favicon_cache (page_origin TEXT PRIMARY KEY, icon_url TEXT NOT NULL, data_url TEXT NOT NULL, media_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL);
+      `)
+      for (const name of ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache']) {
+        sqlite.prepare('INSERT INTO schema_migrations (name) VALUES (?)').run(name)
+      }
+      sqlite.prepare('INSERT INTO workspaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run('workspace-1', 'Workspace', 1, 1)
+      sqlite.prepare('INSERT INTO workspace_resources (id, workspace_id, type, resource_key, shared, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+        'bookmark-1',
+        'workspace-1',
+        'bookmark',
+        'bookmark:https://example.com/docs',
+        1,
+        JSON.stringify({ title: 'Docs', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: 'data:image/png;base64,abc', faviconUrl: 'https://example.com/favicon.ico' }),
+        100,
+        200,
+      )
+    } finally {
+      sqlite.close()
+    }
+
+    const result = runLocalAppMigrations(sqlitePath)
+
+    expect(result).toEqual({ sqlitePath, applied: ['0011_bookmarks'] })
+    const migrated = new Database(sqlitePath, { readonly: true })
+    try {
+      expect(migrated.prepare('SELECT id, title, url, normalized_url, origin, favicon_data_url, favicon_url, created_at, updated_at FROM bookmarks').all()).toEqual([
+        {
+          id: 'bookmark-1',
+          title: 'Docs',
+          url: 'https://example.com/docs',
+          normalized_url: 'https://example.com/docs',
+          origin: 'https://example.com',
+          favicon_data_url: 'data:image/png;base64,abc',
+          favicon_url: 'https://example.com/favicon.ico',
+          created_at: 100,
+          updated_at: 200,
+        },
+      ])
+      expect(migrated.prepare("SELECT COUNT(*) AS count FROM workspace_resources WHERE type = 'bookmark'").get()).toEqual({ count: 0 })
     } finally {
       migrated.close()
     }

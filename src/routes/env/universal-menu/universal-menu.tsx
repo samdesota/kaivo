@@ -12,7 +12,7 @@ import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { defaultWorkspaceName, newAgentChatStartInput, resolveWorkspaceName, type NewAgentChatSelection } from '../agent/new-agent-chat-state'
 import { WorkspaceModeControl } from '../agent/new-agent-chat-modal'
-import { useWorkspaceBookmarksStore, type BookmarkRecord } from '../../workspace/bookmarks-store'
+import { useBookmarksStore, type BookmarkRecord } from '../../workspace/bookmarks-store'
 
 export type UniversalMenuResultKind =
   | 'action'
@@ -278,7 +278,7 @@ export function UniversalMenu({
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
-  const bookmarksStore = useWorkspaceBookmarksStore(workspaceId)
+  const bookmarksStore = useBookmarksStore()
   const folderBrowse = envTrpc.fs.browseHome.useQuery(
     { path: folderBrowsePlan ? folderBrowsePlan.dir : folderPath },
     { enabled: open && scope?.definition.id === 'open-folder', refetchOnWindowFocus: false },
@@ -288,10 +288,10 @@ export function UniversalMenu({
       ...contextItems
         .filter((item) => item.kind === 'browser-tab' && item.content.type === 'browser')
         .map((item) => item.content.type === 'browser' ? faviconOriginForUrl(item.content.url) : null),
-      ...(workspaceId ? bookmarksStore.bookmarks.map((bookmark) => bookmark.origin) : []),
+      ...bookmarksStore.bookmarks.map((bookmark) => bookmark.origin),
     ]
       .filter((origin): origin is string => Boolean(origin)),
-  )), [bookmarksStore.bookmarks, contextItems, workspaceId])
+  )), [bookmarksStore.bookmarks, contextItems])
   const faviconCache = trpc.favicon.getByOrigins.useQuery(
     { origins: faviconOrigins },
     { enabled: open && faviconOrigins.length > 0, staleTime: 60_000 },
@@ -512,7 +512,7 @@ export function UniversalMenu({
     if (scope?.definition.id === 'web') {
       return webScopeResults({
         items: contextItems,
-        bookmarks: workspaceId ? bookmarksStore.bookmarks : [],
+        bookmarks: bookmarksStore.bookmarks,
         query,
         faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
         openContent: (content) => onOpenContent?.(content),
@@ -1666,7 +1666,7 @@ function webScopeResults({
       run: () => openContent({ type: 'browser', url: directDecision.url }),
     })
   }
-  return rows.length ? rows : [disabledRow('web-empty', q ? 'No matching pages or bookmarks.' : 'No browser pages or bookmarks in this workspace.')]
+  return rows.length ? rows : [disabledRow('web-empty', q ? 'No matching pages or bookmarks.' : 'No browser pages or bookmarks.')]
 }
 
 function bookmarkIcon(bookmark: BookmarkRecord, faviconRecords: Record<string, FaviconCacheRecord>): TabIcon {

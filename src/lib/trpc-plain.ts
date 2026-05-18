@@ -29,11 +29,22 @@ function maybeMockTrpcMutation<T>(path: string, input?: unknown): Promise<T> | n
   const dev = (import.meta as { env?: { DEV?: boolean } }).env?.DEV
   if (!dev || typeof window === 'undefined') return null
   if (window.localStorage.getItem('__zoottle_mock_bookmark_mutations') !== 'true') return null
-  if (path !== 'workspace.upsertResource') return null
+  if (path !== 'bookmarks.upsert') return null
   const calls = JSON.parse(window.localStorage.getItem('__zoottle_mock_bookmark_mutation_calls') || '[]') as unknown[]
   calls.push(input)
   window.localStorage.setItem('__zoottle_mock_bookmark_mutation_calls', JSON.stringify(calls))
-  return Promise.resolve({ id: 'bookmark-e2e' } as T)
+  const bookmark = input as { title?: string; url?: string; faviconDataUrl?: string | null; faviconUrl?: string | null }
+  return Promise.resolve({
+    id: 'bookmark-e2e',
+    title: bookmark.title ?? 'Bookmark',
+    url: bookmark.url ?? 'https://example.com',
+    normalizedUrl: bookmark.url ?? 'https://example.com',
+    origin: 'https://example.com',
+    faviconDataUrl: bookmark.faviconDataUrl ?? null,
+    faviconUrl: bookmark.faviconUrl ?? null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } as T)
 }
 
 async function parseTrpcResponse<T>(path: string, res: Response): Promise<T> {

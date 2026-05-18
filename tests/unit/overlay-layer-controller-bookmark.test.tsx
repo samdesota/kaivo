@@ -32,16 +32,16 @@ const { openCreateBookmarkOverlay } = await import('../../src/lib/overlay-layer-
 describe('openCreateBookmarkOverlay', () => {
   it('resolves bookmark id on save', async () => {
     overlayResponseType.current = 'bookmark-saved'
-    await expect(openCreateBookmarkOverlay({ workspaceId: 'workspace-1', initialUrl: 'https://example.com' })).resolves.toBe('bookmark-1')
+    await expect(openCreateBookmarkOverlay({ initialUrl: 'https://example.com' })).resolves.toBe('bookmark-1')
   })
 
   it('resolves null on close', async () => {
     overlayResponseType.current = 'closed'
-    await expect(openCreateBookmarkOverlay({ workspaceId: 'workspace-1', initialUrl: 'https://example.com' })).resolves.toBeNull()
+    await expect(openCreateBookmarkOverlay({ initialUrl: 'https://example.com' })).resolves.toBeNull()
   })
 
   it('throws on unexpected response', async () => {
     overlayResponseType.current = 'confirmed'
-    await expect(openCreateBookmarkOverlay({ workspaceId: 'workspace-1', initialUrl: 'https://example.com' })).rejects.toThrow('unexpected overlay response: confirmed')
+    await expect(openCreateBookmarkOverlay({ initialUrl: 'https://example.com' })).rejects.toThrow('unexpected overlay response: confirmed')
   })
 })
