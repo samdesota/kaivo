@@ -128,6 +128,7 @@ export function SessionTabs({
         activeId={sessionId}
         onSelect={onSelect}
         onClose={(id) => void onClose(id)}
+        onResort={workspaceId ? (ids) => agentTabs.reorderSessions(ids) : undefined}
         focused={focused}
       />
       {!workspaceId && <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />}

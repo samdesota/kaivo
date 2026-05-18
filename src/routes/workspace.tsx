@@ -207,6 +207,8 @@ export function WorkspacePage() {
         viewStateStore.setActiveWorkspaceTab(tabs[idx]?.id ?? tabs[idx - 1]?.id ?? null)
       }
       tabsStore.closeTab(action.tabId)
+    } else if (action.type === 'reorderTabs') {
+      tabsStore.reorderTabs(action.tabIds)
     } else if (action.type === 'setBrowserTabId') {
       tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
       const tab = tabsStore.tabs.find((candidate) => candidate.id === action.tabId)
@@ -324,6 +326,7 @@ function WorkspaceShell({
 }) {
   const ctx = useWorkspaceContext()
   const navigate = useNavigate({ from: '/w/$workspaceId' })
+  const queryClient = useQueryClient()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
   const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
@@ -353,6 +356,7 @@ function WorkspaceShell({
 
   const selectCreatedChat = useCallback(async (sessionId: string, workspaceId?: string) => {
     if (!workspaceId) return
+    await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId }) })
     if (workspaceId === ctx.workspace.id) {
       dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
     }
@@ -361,7 +365,7 @@ function WorkspaceShell({
       params: { workspaceId },
       search: { chat: sessionId, tab: undefined },
     })
-  }, [ctx.workspace.id, dispatchWorkspaceState, navigate])
+  }, [ctx.workspace.id, dispatchWorkspaceState, navigate, queryClient])
 
   const openCommandPalette = useCallback(async (initialIntent: 'default' | 'new-workspace' = 'default') => {
     const target = ctx.localEnvTarget
@@ -1796,6 +1800,7 @@ function WorkspaceTabPane({
               const tab = ctx.uiState.workspaceTabs.find((candidate) => candidate.id === tabId)
               if (tab) closeWorkspaceTab(tab, dispatchWorkspaceState)
             }}
+            onResort={(tabIds) => dispatchWorkspaceState({ type: 'reorderTabs', tabIds })}
             focused={focused}
           />
         )}
@@ -1879,6 +1884,7 @@ function WorkspaceShellTabStrip({
           event.preventDefault()
           setContextMenu({ tabId, x: event.clientX, y: event.clientY })
         }}
+        onResort={(tabIds) => dispatchWorkspaceState({ type: 'reorderTabs', tabIds })}
         focused={focused}
       />
       {contextMenu && contextTab?.type === 'shell' && (

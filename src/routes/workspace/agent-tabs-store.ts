@@ -149,5 +149,18 @@ export function useWorkspaceAgentTabsStore(workspaceId: string | undefined) {
       const key = workspaceAgentTabRecordKey({ workspaceId, sessionId })
       if (collection.has(key)) collection.delete(key)
     },
+    reorderSessions(sessionIds: string[]): void {
+      if (!workspaceId) return
+      const positionById = new Map(sessionIds.map((id, index) => [id, index]))
+      collection.utils.writeBatch(() => {
+        for (const record of records) {
+          const position = positionById.get(record.sessionId)
+          if (position === undefined || position === record.position) continue
+          collection.update(workspaceAgentTabRecordKey(record), (draft) => {
+            draft.position = position
+          })
+        }
+      })
+    },
   }
 }

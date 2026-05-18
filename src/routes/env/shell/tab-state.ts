@@ -26,6 +26,7 @@ export type RightPaneAction =
   | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
   | { type: 'setBrowserUrl'; tabId: string; url: string }
   | { type: 'pruneShells'; liveShellIds: ReadonlySet<string> }
+  | { type: 'reorder'; tabIds: string[] }
   | { type: 'hydrate'; state: RightPaneState }
 
 function makeTabId(): string {
@@ -109,6 +110,12 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
         active = neighbor?.id ?? ''
       }
       return { tabs: nextTabs, activeTabId: active }
+    }
+    case 'reorder': {
+      const tabsById = new Map(state.tabs.map((tab) => [tab.id, tab]))
+      const reordered = action.tabIds.map((id) => tabsById.get(id)).filter((tab): tab is Tab => Boolean(tab))
+      if (reordered.length !== state.tabs.length) return state
+      return { ...state, tabs: reordered }
     }
     case 'setTitle': {
       return {

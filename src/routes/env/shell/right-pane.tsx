@@ -95,6 +95,7 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
           activeId={state.activeTabId}
           onSelect={(tabId) => dispatch({ type: 'activate', tabId })}
           onClose={(tabId) => dispatch({ type: 'close', tabId })}
+          onResort={(tabIds) => dispatch({ type: 'reorder', tabIds })}
           onContextMenu={(tabId, event) => {
             const tab = state.tabs.find((candidate) => candidate.id === tabId)
             if (tab?.content.type !== 'shell') return

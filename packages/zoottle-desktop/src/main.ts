@@ -81,6 +81,7 @@ function installAppShortcutMenu(): void {
   const appShortcuts: Array<{ label: string; accelerator: string; input: AppShortcutInput }> = [
     { label: 'Command Palette', accelerator: 'CommandOrControl+K', input: shortcutInput('k', 'KeyK') },
     { label: 'New Browser Tab', accelerator: 'CommandOrControl+T', input: shortcutInput('t', 'KeyT') },
+    { label: 'New Workspace Chat', accelerator: 'CommandOrControl+Shift+T', input: shortcutInput('T', 'KeyT', { shiftKey: true }) },
     { label: 'Close Focused Tab', accelerator: 'CommandOrControl+W', input: shortcutInput('w', 'KeyW') },
     { label: 'Toggle Sidebar', accelerator: 'CommandOrControl+B', input: shortcutInput('b', 'KeyB') },
     { label: 'Toggle Agent Pane', accelerator: 'CommandOrControl+G', input: shortcutInput('g', 'KeyG') },
@@ -117,14 +118,14 @@ function installAppShortcutMenu(): void {
   ]))
 }
 
-function shortcutInput(key: string, code: string): AppShortcutInput {
+function shortcutInput(key: string, code: string, options?: { shiftKey?: boolean }): AppShortcutInput {
   return {
     key,
     code,
     metaKey: process.platform === 'darwin',
     ctrlKey: process.platform !== 'darwin',
     altKey: false,
-    shiftKey: false,
+    shiftKey: options?.shiftKey ?? false,
   }
 }
 

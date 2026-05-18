@@ -187,6 +187,18 @@ export function useWorkspaceTabsStore(workspaceId: string) {
       const record = records.find((tab) => tab.id === tabId)
       if (record) collection.delete(workspaceTabRecordKey(record))
     },
+    reorderTabs(tabIds: string[]) {
+      const positionById = new Map(tabIds.map((id, index) => [id, index]))
+      collection.utils.writeBatch(() => {
+        for (const record of records) {
+          const position = positionById.get(record.id)
+          if (position === undefined || position === record.position) continue
+          collection.update(workspaceTabRecordKey(record), (draft) => {
+            draft.position = position
+          })
+        }
+      })
+    },
     setBrowserTabId(tabId: string, browserTabId: string) {
       const record = records.find((tab) => tab.id === tabId)
       if (!record) return

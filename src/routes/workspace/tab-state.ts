@@ -18,6 +18,7 @@ export type WorkspaceUiAction =
   | { type: 'openTab'; tab: WorkspaceTab; activate?: boolean }
   | { type: 'activateTab'; tabId: string }
   | { type: 'closeTab'; tabId: string }
+  | { type: 'reorderTabs'; tabIds: string[] }
   | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
   | { type: 'setTabUrl'; tabId: string; url: string }
   | { type: 'setTabTitle'; tabId: string; title: string }
@@ -80,6 +81,12 @@ export function workspaceUiReducer(
       activeWorkspaceTabId = tabs[idx]?.id ?? tabs[idx - 1]?.id ?? null
     }
     return normalizeState({ ...state, workspaceTabs: tabs, activeWorkspaceTabId })
+  }
+  if (action.type === 'reorderTabs') {
+    const tabsById = new Map(state.workspaceTabs.map((tab) => [tab.id, tab]))
+    const workspaceTabs = action.tabIds.map((id) => tabsById.get(id)).filter((tab): tab is WorkspaceTab => Boolean(tab))
+    if (workspaceTabs.length !== state.workspaceTabs.length) return state
+    return normalizeState({ ...state, workspaceTabs })
   }
   if (action.type === 'setBrowserTabId') {
     return {
