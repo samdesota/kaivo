@@ -61,6 +61,25 @@ export interface UniversalMenuContextItem {
 
 export type UniversalMenuInitialIntent = 'default' | 'new-workspace'
 
+export type UniversalMenuWorkspaceBootstrap =
+  | { type: 'folder'; workspaceId: string; path: string }
+  | { type: 'worktree'; workspaceId: string; path: string; repoId: string; name?: string }
+  | { type: 'repoConfig'; workspaceId: string; configId: string; worktreeName: string }
+
+export type UniversalMenuWorkspaceBootstrapRequest = {
+  workspaceCreate: {
+    name: string
+    folderId?: string | null
+    nameSource: 'explicit' | 'folder_path' | 'worktree'
+    sourceKind: 'folder' | 'worktree' | 'repo_config'
+    sourcePath: string
+  }
+  bootstrap:
+    | { type: 'folder'; path: string }
+    | { type: 'worktree'; path: string; repoId: string; name?: string }
+    | { type: 'repoConfig'; configId: string; worktreeName: string }
+}
+
 interface AgentSessionRow {
   id: string
   workingDir: string | null
@@ -216,6 +235,7 @@ export function UniversalMenu({
   onClose,
   onOpenContent,
   onCreatedChat,
+  onBootstrapWorkspace,
   onSwitchWorkspace,
   onCloseTab,
   onToggleAgentPane,
@@ -233,6 +253,7 @@ export function UniversalMenu({
   onClose: () => void
   onOpenContent?: (content: PaneContent) => void
   onCreatedChat?: (sessionId: string, workspaceId?: string) => void
+  onBootstrapWorkspace?: (request: UniversalMenuWorkspaceBootstrapRequest) => void
   onSwitchWorkspace?: (workspaceId: string) => void
   onCloseTab: () => void
   onToggleAgentPane?: () => void
@@ -539,7 +560,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [bookmarksStore.bookmarks, commandResults, contextItems, disposeShell, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, newWorkspaceIntent, newWorkspaceResults, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, commandResults, contextItems, disposeShell, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, newWorkspaceIntent, newWorkspaceResults, onBootstrapWorkspace, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -809,6 +830,27 @@ export function UniversalMenu({
     if (!detailsSelection) return
     setDetailsError(null)
     try {
+      if (newWorkspaceIntent) {
+        if (detailsSelection.type === 'repoConfig' && !detailsSelection.worktreeName.trim()) {
+          setDetailsError('Name the work tree.')
+          return
+        }
+        const resolved = resolveWorkspaceName(detailsSelection, workspaceNameDraft)
+        const workspaceCreate: UniversalMenuWorkspaceBootstrapRequest['workspaceCreate'] = {
+          name: resolved.name,
+          folderId: parentFolderId,
+          nameSource: resolved.source,
+          sourceKind: detailsSelection.type === 'folder' ? 'folder' : detailsSelection.type === 'worktree' ? 'worktree' : 'repo_config',
+          sourcePath: detailsSelection.type === 'repoConfig' ? detailsSelection.worktreeName.trim() : detailsSelection.path,
+        }
+        const bootstrap: UniversalMenuWorkspaceBootstrapRequest['bootstrap'] = detailsSelection.type === 'folder'
+          ? { type: 'folder', path: detailsSelection.path }
+          : detailsSelection.type === 'worktree'
+            ? { type: 'worktree', path: detailsSelection.path, repoId: detailsSelection.repoId, name: detailsSelection.name }
+            : { type: 'repoConfig', configId: detailsSelection.configId, worktreeName: detailsSelection.worktreeName.trim() }
+        onBootstrapWorkspace?.({ workspaceCreate, bootstrap })
+        return
+      }
       let workingDir: string
       let worktreeRepoId: string | undefined
       if (detailsSelection.type === 'folder') {
@@ -843,11 +885,6 @@ export function UniversalMenu({
             data: { repoId: worktreeRepoId, workingDir, name: detailsSelection.type === 'repoConfig' ? detailsSelection.worktreeName : detailsSelection.name },
           },
         })
-      }
-      if (newWorkspaceIntent) {
-        onSwitchWorkspace?.(workspace.id)
-        onClose()
-        return
       }
       const session = await startChat.mutateAsync(newAgentChatStartInput(workspace.id, workingDir)) as { id: string }
       onCreatedChat?.(session.id, workspace.id)

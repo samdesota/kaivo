@@ -9,7 +9,7 @@ import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../env/ag
 import { FolderPickerModal } from '../env/agent/folder-picker-modal'
 import { CommandPalette } from '../env/shell/command-palette'
 import type { PaneContent } from '../env/shell/tab-state'
-import { UniversalMenu, type UniversalMenuContextItem, type UniversalMenuInitialIntent } from '../env/universal-menu/universal-menu'
+import { UniversalMenu, type UniversalMenuContextItem, type UniversalMenuInitialIntent, type UniversalMenuWorkspaceBootstrapRequest } from '../env/universal-menu/universal-menu'
 import { Modal } from '../../components/ui'
 import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
@@ -130,6 +130,7 @@ export type OverlayResponse =
   | { requestId: string; type: 'ready' }
   | { requestId: string; type: 'closed' }
   | { requestId: string; type: 'created-agent-chat'; sessionId: string; workspaceId?: string }
+  | { requestId: string; type: 'workspace-bootstrap'; request: UniversalMenuWorkspaceBootstrapRequest }
   | { requestId: string; type: 'switch-workspace'; workspaceId: string }
   | { requestId: string; type: 'selected-folder'; path: string }
   | { requestId: string; type: 'open-pane'; content: PaneContent }
@@ -316,6 +317,7 @@ function EnvOverlayRequestRenderer({
               onClose={() => respond({ requestId: request.requestId, type: 'closed' })}
               onOpenContent={(content) => respond({ requestId: request.requestId, type: 'open-pane', content })}
               onCreatedChat={(sessionId: string, workspaceId?: string) => respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })}
+              onBootstrapWorkspace={(bootstrapRequest) => respond({ requestId: request.requestId, type: 'workspace-bootstrap', request: bootstrapRequest })}
               onSwitchWorkspace={(workspaceId: string) => respond({ requestId: request.requestId, type: 'switch-workspace', workspaceId })}
               onCloseTab={() => respond({ requestId: request.requestId, type: 'close-tab' })}
               onToggleAgentPane={request.canToggleAgentPane ? () => respond({ requestId: request.requestId, type: 'toggle-agent-pane' }) : undefined}

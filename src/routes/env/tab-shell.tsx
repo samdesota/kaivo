@@ -9,6 +9,8 @@ import { type PaneContent, useRightPaneState } from './shell/tab-state'
 import type { EnvRef } from '../../lib/env-client'
 import { openUniversalMenuOverlay } from '../../lib/overlay-layer-controller'
 import type { UniversalMenuContextItem } from './universal-menu/universal-menu'
+import { trpc } from '../../trpc'
+import { enqueueWorkspaceBootstrap, workspaceBootstrapWithId } from '../workspace'
 
 interface OpenPaneOptions {
   title?: string
@@ -25,6 +27,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const envContext = useEnv()
   const navigate = useNavigate()
+  const createWorkspace = trpc.workspace.create.useMutation()
 
   const openContent = (content: PaneContent, options?: OpenPaneOptions) => {
     dispatch({ type: 'open', content, title: options?.title, activate: options?.activate ?? true })
@@ -58,6 +61,11 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
       initialIntent,
     })
     if (result.type === 'open-pane') openContent(result.content)
+    if (result.type === 'workspace-bootstrap') {
+      const workspace = await createWorkspace.mutateAsync(result.request.workspaceCreate) as { id: string }
+      enqueueWorkspaceBootstrap(workspaceBootstrapWithId(result.request, workspace.id))
+      void navigate({ to: '/w/$workspaceId', params: { workspaceId: workspace.id }, search: { chat: undefined, tab: undefined } })
+    }
     if (result.type === 'switch-workspace') void navigate({ to: '/w/$workspaceId', params: { workspaceId: result.workspaceId }, search: { chat: undefined, tab: undefined } })
     if (result.type === 'close-tab' && state.activeTabId) dispatch({ type: 'close', tabId: state.activeTabId })
     if (result.type === 'open-settings') void navigate({ to: '/settings' })

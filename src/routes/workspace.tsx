@@ -38,7 +38,7 @@ import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { NewSessionPopover } from './env/agent/session-tabs'
-import type { UniversalMenuContextItem } from './env/universal-menu/universal-menu'
+import type { UniversalMenuContextItem, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -108,6 +108,72 @@ const WORKSPACE_SIDEBAR_WIDTH_KEY = 'cloud-code.workspaceSidebarWidth'
 const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
 const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
+const WORKSPACE_BOOTSTRAP_EVENT = 'cloud-code.workspaceBootstrapChanged'
+
+type WorkspaceBootstrapStatus = {
+  message: string
+  error?: boolean
+}
+
+const pendingWorkspaceBootstraps = new Map<string, UniversalMenuWorkspaceBootstrap>()
+const runningWorkspaceBootstraps = new Set<string>()
+const workspaceBootstrapStatuses = new Map<string, WorkspaceBootstrapStatus>()
+
+export function enqueueWorkspaceBootstrap(bootstrap: UniversalMenuWorkspaceBootstrap) {
+  pendingWorkspaceBootstraps.set(bootstrap.workspaceId, bootstrap)
+  setWorkspaceBootstrapStatus(bootstrap.workspaceId, {
+    message: bootstrap.type === 'repoConfig' ? 'Cloning worktree…' : 'Creating chat…',
+  })
+}
+
+export function workspaceBootstrapWithId(request: UniversalMenuWorkspaceBootstrapRequest, workspaceId: string): UniversalMenuWorkspaceBootstrap {
+  if (request.bootstrap.type === 'folder') return { ...request.bootstrap, workspaceId }
+  if (request.bootstrap.type === 'worktree') return { ...request.bootstrap, workspaceId }
+  return { ...request.bootstrap, workspaceId }
+}
+
+function takeWorkspaceBootstrap(workspaceId: string): UniversalMenuWorkspaceBootstrap | null {
+  if (runningWorkspaceBootstraps.has(workspaceId)) return null
+  const bootstrap = pendingWorkspaceBootstraps.get(workspaceId)
+  if (!bootstrap) return null
+  pendingWorkspaceBootstraps.delete(workspaceId)
+  runningWorkspaceBootstraps.add(workspaceId)
+  return bootstrap
+}
+
+function finishWorkspaceBootstrap(workspaceId: string) {
+  runningWorkspaceBootstraps.delete(workspaceId)
+  workspaceBootstrapStatuses.delete(workspaceId)
+  dispatchWorkspaceBootstrapChanged()
+}
+
+function failWorkspaceBootstrap(workspaceId: string, message: string) {
+  runningWorkspaceBootstraps.delete(workspaceId)
+  setWorkspaceBootstrapStatus(workspaceId, { message, error: true })
+}
+
+function setWorkspaceBootstrapStatus(workspaceId: string, status: WorkspaceBootstrapStatus) {
+  workspaceBootstrapStatuses.set(workspaceId, status)
+  dispatchWorkspaceBootstrapChanged()
+}
+
+function useWorkspaceBootstrapStatus(workspaceId: string): WorkspaceBootstrapStatus | null {
+  const [status, setStatus] = useState(() => workspaceBootstrapStatuses.get(workspaceId) ?? null)
+  useEffect(() => {
+    function update() {
+      setStatus(workspaceBootstrapStatuses.get(workspaceId) ?? null)
+    }
+    window.addEventListener(WORKSPACE_BOOTSTRAP_EVENT, update)
+    update()
+    return () => window.removeEventListener(WORKSPACE_BOOTSTRAP_EVENT, update)
+  }, [workspaceId])
+  return status
+}
+
+function dispatchWorkspaceBootstrapChanged() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event(WORKSPACE_BOOTSTRAP_EVENT))
+}
 
 type WorkspaceEnvResources = {
   queryClient: QueryClient
@@ -327,6 +393,7 @@ function WorkspaceShell({
   const ctx = useWorkspaceContext()
   const navigate = useNavigate({ from: '/w/$workspaceId' })
   const queryClient = useQueryClient()
+  const createWorkspace = trpc.workspace.create.useMutation()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
   const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
@@ -353,6 +420,12 @@ function WorkspaceShell({
     const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
     if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
   }, [ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState])
+
+  const bootstrapWorkspace = useCallback(async (request: UniversalMenuWorkspaceBootstrapRequest) => {
+    const workspace = await createWorkspace.mutateAsync(request.workspaceCreate) as { id: string }
+    enqueueWorkspaceBootstrap(workspaceBootstrapWithId(request, workspace.id))
+    await navigate({ to: '/w/$workspaceId', params: { workspaceId: workspace.id }, search: { chat: undefined, tab: undefined } })
+  }, [createWorkspace, navigate])
 
   const selectCreatedChat = useCallback(async (sessionId: string, workspaceId?: string) => {
     if (!workspaceId) return
@@ -393,6 +466,9 @@ function WorkspaceShell({
     })
     if (result.type === 'open-pane') openPane(result.content)
     if (result.type === 'created-agent-chat') void selectCreatedChat(result.sessionId, result.workspaceId)
+    if (result.type === 'workspace-bootstrap') {
+      void bootstrapWorkspace(result.request)
+    }
     if (result.type === 'switch-workspace') {
       void navigate({ to: '/w/$workspaceId', params: { workspaceId: result.workspaceId }, search: { chat: undefined, tab: undefined } })
     }
@@ -400,7 +476,7 @@ function WorkspaceShell({
     if (result.type === 'toggle-agent-pane') setAgentCollapsed(!agentCollapsed)
     if (result.type === 'toggle-sidebar') setSidebarHidden((v) => !v)
     if (result.type === 'open-settings') void navigate({ to: '/settings' })
-  }, [agentCollapsed, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openPane, selectCreatedChat, setAgentCollapsed])
+  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openPane, selectCreatedChat, setAgentCollapsed])
 
   useEffect(() => {
     prewarmOverlayLayer()
@@ -432,6 +508,9 @@ function WorkspaceShell({
 
   return (
     <>
+    <WorkspaceEnvTargetProvider>
+      <WorkspaceBootstrapRunner dispatchWorkspaceState={dispatchWorkspaceState} appQueryClient={queryClient} />
+    </WorkspaceEnvTargetProvider>
     <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
       {!sidebarHidden && (
         <WorkspaceSidebar
@@ -479,6 +558,82 @@ function WorkspaceShell({
     </div>
     </>
   )
+}
+
+function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { dispatchWorkspaceState: WorkspaceUiDispatch; appQueryClient: QueryClient }) {
+  const ctx = useWorkspaceContext()
+  const navigate = useNavigate({ from: '/w/$workspaceId' })
+  const envQueryClient = useQueryClient()
+  const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
+  const startChat = envTrpc.agent.sessionStart.useMutation()
+  const upsertResource = trpc.workspace.upsertResource.useMutation()
+  const servicesRef = useRef({ appQueryClient, cloneConfig, dispatchWorkspaceState, envQueryClient, navigate, startChat, upsertResource })
+
+  useEffect(() => {
+    servicesRef.current = { appQueryClient, cloneConfig, dispatchWorkspaceState, envQueryClient, navigate, startChat, upsertResource }
+  }, [appQueryClient, cloneConfig, dispatchWorkspaceState, envQueryClient, navigate, startChat, upsertResource])
+
+  useEffect(() => {
+    const bootstrap = takeWorkspaceBootstrap(ctx.workspace.id)
+    if (!bootstrap) return
+    const job = bootstrap
+    let cancelled = false
+    async function run() {
+      try {
+        let workingDir: string
+        let repoId: string | undefined
+        let resourceName: string | undefined
+        if (job.type === 'repoConfig') {
+          setWorkspaceBootstrapStatus(job.workspaceId, { message: 'Cloning worktree…' })
+          const cloned = await servicesRef.current.cloneConfig.mutateAsync({ configId: job.configId, worktreeName: job.worktreeName }) as { repoId: string; workingDir: string }
+          workingDir = cloned.workingDir
+          repoId = cloned.repoId
+          resourceName = job.worktreeName
+        } else if (job.type === 'worktree') {
+          workingDir = job.path
+          repoId = job.repoId
+          resourceName = job.name
+        } else {
+          workingDir = job.path
+        }
+
+        if (job.type !== 'folder') {
+          setWorkspaceBootstrapStatus(job.workspaceId, { message: 'Linking worktree…' })
+          await servicesRef.current.upsertResource.mutateAsync({
+            workspaceId: job.workspaceId,
+            resource: {
+              type: 'worktree',
+              resourceKey: repoId ? `repo:${repoId}` : `path:${workingDir}`,
+              shared: true,
+              data: { repoId, workingDir, name: resourceName },
+            },
+          })
+        }
+
+        setWorkspaceBootstrapStatus(job.workspaceId, { message: 'Creating chat…' })
+        const session = await servicesRef.current.startChat.mutateAsync({ workspaceId: job.workspaceId, directory: workingDir }) as { id: string }
+        await Promise.all([
+          servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId: job.workspaceId }) }),
+          servicesRef.current.appQueryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
+          servicesRef.current.appQueryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
+          servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listRecentFolders') }),
+          servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') }),
+        ])
+        if (cancelled) return
+        servicesRef.current.dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: session.id })
+        await servicesRef.current.navigate({ search: (prev) => ({ ...prev, chat: session.id, tab: undefined }), replace: true })
+        finishWorkspaceBootstrap(job.workspaceId)
+      } catch (error) {
+        if (!cancelled) failWorkspaceBootstrap(job.workspaceId, extractTrpcMessage(error))
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [ctx.workspace.id])
+
+  return null
 }
 
 function WorkspaceEmptyPaneCta({ onOpenPalette }: { onOpenPalette: () => void }) {
@@ -1526,6 +1681,7 @@ function WorkspaceAgentPane({
   onOpenUniversalMenu: () => void
 }) {
   const ctx = useWorkspaceContext()
+  const bootstrapStatus = useWorkspaceBootstrapStatus(ctx.workspace.id)
   const queryClient = useQueryClient()
   const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
   const refreshWorkspacePanes = useCallback(() => {
@@ -1562,6 +1718,13 @@ function WorkspaceAgentPane({
     return (
       <AgentPaneFrame onFocusTabs={onFocusTabs}>
         <AgentPlaceholder message="Local env token unavailable" trailing={collapseButton} />
+      </AgentPaneFrame>
+    )
+  }
+  if (bootstrapStatus) {
+    return (
+      <AgentPaneFrame onFocusTabs={onFocusTabs}>
+        <AgentPlaceholder message={bootstrapStatus.error ? `Workspace setup failed: ${bootstrapStatus.message}` : bootstrapStatus.message} trailing={collapseButton} />
       </AgentPaneFrame>
     )
   }

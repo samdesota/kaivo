@@ -7,7 +7,7 @@ import { OVERLAY_CHANNEL, OverlayLayerApp, type BrowserUrlPopoverResult, type Ov
 import type { PaneContent } from '../routes/env/shell/tab-state'
 import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
 import type { WorkspaceResourceRecord } from '../routes/workspace/resources-store'
-import type { UniversalMenuContextItem, UniversalMenuInitialIntent } from '../routes/env/universal-menu/universal-menu'
+import type { UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuWorkspaceBootstrapRequest } from '../routes/env/universal-menu/universal-menu'
 
 /**
  * Desktop modals must be opened through this controller so they render in the
@@ -42,6 +42,7 @@ export type CommandPaletteOverlayResult =
 export type UniversalMenuOverlayResult =
   | { type: 'open-pane'; content: PaneContent }
   | { type: 'created-agent-chat'; sessionId: string; workspaceId?: string }
+  | { type: 'workspace-bootstrap'; request: UniversalMenuWorkspaceBootstrapRequest }
   | { type: 'switch-workspace'; workspaceId: string }
   | { type: 'close-tab' }
   | { type: 'toggle-agent-pane' }
@@ -149,6 +150,7 @@ export async function openUniversalMenuOverlay(
   })
   if (response.type === 'open-pane') return { type: 'open-pane', content: response.content }
   if (response.type === 'created-agent-chat') return { type: 'created-agent-chat', sessionId: response.sessionId, workspaceId: response.workspaceId }
+  if (response.type === 'workspace-bootstrap') return { type: 'workspace-bootstrap', request: response.request }
   if (response.type === 'switch-workspace') return { type: 'switch-workspace', workspaceId: response.workspaceId }
   if (response.type === 'close-tab') return { type: 'close-tab' }
   if (response.type === 'toggle-agent-pane') return { type: 'toggle-agent-pane' }
