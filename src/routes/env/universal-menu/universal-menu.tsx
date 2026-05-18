@@ -1259,6 +1259,7 @@ export function UniversalMenuResultRow({ result, state }: { result: UniversalMen
         {result.icon && <TabIconView icon={result.icon} />}
         <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
         {detailNode ? <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
+        {result.kind === 'browser-tab' && <UniversalMenuBrowserTabMarker />}
       </button>
       {showActions && (
         <button
@@ -1339,7 +1340,20 @@ export function UniversalMenuHierarchyRow({ result, state }: { result: Universal
       {result.icon && <TabIconView icon={result.icon} />}
       <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
       {detailNode ? <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
+      {result.kind === 'browser-tab' && <UniversalMenuBrowserTabMarker />}
     </button>
+  )
+}
+
+function UniversalMenuBrowserTabMarker() {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="universal-menu-browser-tab-marker"
+      className="ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border border-neutral-700 text-neutral-500"
+    >
+      <span className="h-2.5 w-2.5 rounded-[2px] border border-current border-t-2" />
+    </span>
   )
 }
 

@@ -623,6 +623,28 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/foo' })
   })
 
+  it('marks open browser tabs separately from bookmarks in web search', () => {
+    const now = new Date('2026-05-16T00:00:00Z')
+    mocks.bookmarks = [
+      { id: 'bookmark-docs', workspaceId: 'workspace-1', title: 'Docs bookmark', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+    ]
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab
+        contextItems={[{ id: 'browser-docs', kind: 'browser-tab', label: 'Docs tab', detail: 'https://example.com/docs', content: { type: 'browser', url: 'https://example.com/docs' } }]}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: '@docs' } })
+
+    expect(screen.getByRole('button', { name: /Docs tab/ }).querySelector('[data-testid="universal-menu-browser-tab-marker"]')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Docs bookmark/ }).querySelector('[data-testid="universal-menu-browser-tab-marker"]')).toBeNull()
+  })
+
   it('ignores malformed web bookmark rows without breaking search', () => {
     const now = new Date('2026-05-16T00:00:00Z')
     mocks.bookmarks = [
