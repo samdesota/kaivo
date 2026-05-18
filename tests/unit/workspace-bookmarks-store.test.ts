@@ -9,7 +9,10 @@ import {
   type BookmarkRecord,
 } from '../../src/routes/workspace/bookmarks-store'
 import { createWorkspaceResourceCleanupRegistry } from '../../src/routes/workspace/resource-cleanup'
-import type { WorkspaceResourceRecord } from '../../src/routes/workspace/resources-store'
+import {
+  applyWorkspaceResourceChangeEvents,
+  type WorkspaceResourceRecord,
+} from '../../src/routes/workspace/resources-store'
 
 function bookmark(overrides: Partial<BookmarkRecord> = {}): BookmarkRecord {
   const now = new Date('2026-05-16T12:00:00Z')
@@ -94,6 +97,46 @@ describe('global bookmarks store', () => {
       events: [{ seq: 3, table: 'bookmarks', op: 'delete', key: 'bookmark-1', row: null }],
     })
     expect([...records.values()]).toEqual([])
+  })
+
+  it('skips realtime bookmark deletes for rows outside the observed collection', () => {
+    const collectionUtils = {
+      writeBatch: vi.fn((callback: () => void) => callback()),
+      writeUpsert: vi.fn(),
+      writeDelete: vi.fn(() => {
+        throw new Error('missing key')
+      }),
+    }
+
+    const seq = applyBookmarkChangeEvents({
+      syncedSeq: 0,
+      collectionUtils: collectionUtils as never,
+      collectionHas: () => false,
+      events: [{ seq: 1, table: 'bookmarks', op: 'delete', key: 'missing-bookmark', row: null }],
+    })
+
+    expect(seq).toBe(1)
+    expect(collectionUtils.writeDelete).not.toHaveBeenCalled()
+  })
+
+  it('skips realtime workspace resource deletes for rows outside the observed collection', () => {
+    const collectionUtils = {
+      writeBatch: vi.fn((callback: () => void) => callback()),
+      writeUpsert: vi.fn(),
+      writeDelete: vi.fn(() => {
+        throw new Error('missing key')
+      }),
+    }
+
+    const seq = applyWorkspaceResourceChangeEvents({
+      syncedSeq: 0,
+      collectionUtils: collectionUtils as never,
+      collectionHas: () => false,
+      events: [{ seq: 1, table: 'workspace_resources', op: 'delete', key: 'missing-resource', row: null }],
+    })
+
+    expect(seq).toBe(1)
+    expect(collectionUtils.writeDelete).not.toHaveBeenCalled()
   })
 
   it('does not have bookmark-specific workspace resource cleanup', async () => {

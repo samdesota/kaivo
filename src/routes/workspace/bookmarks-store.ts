@@ -99,6 +99,7 @@ export type BookmarkCollectionUtils = QueryCollectionUtils<BookmarkRecord, strin
 export function applyBookmarkChangeEvents(input: {
   events: BookmarksChangeEvent[]
   collectionUtils: BookmarkCollectionUtils
+  collectionHas?: (key: string) => boolean
   syncedSeq: number
 }): number {
   let nextSeq = input.syncedSeq
@@ -110,7 +111,7 @@ export function applyBookmarkChangeEvents(input: {
   input.collectionUtils.writeBatch(() => {
     for (const event of deduped.values()) {
       if (event.op === 'delete') {
-        input.collectionUtils.writeDelete(event.key)
+        if (!input.collectionHas || input.collectionHas(event.key)) input.collectionUtils.writeDelete(event.key)
       } else if (event.row) {
         input.collectionUtils.writeUpsert(normalizeBookmarkRecord(event.row))
       }
@@ -154,6 +155,7 @@ export function useBookmarksStore() {
         syncedSeqRef.current = applyBookmarkChangeEvents({
           events: events as BookmarksChangeEvent[],
           collectionUtils: collection.utils,
+          collectionHas: (key) => collection.has(key),
           syncedSeq: syncedSeqRef.current,
         })
       },

@@ -53,6 +53,7 @@ export type WorkspaceResourceCollectionUtils = QueryCollectionUtils<WorkspaceRes
 export function applyWorkspaceResourceChangeEvents(input: {
   events: WorkspaceResourcesChangeEvent[]
   collectionUtils: WorkspaceResourceCollectionUtils
+  collectionHas?: (key: string) => boolean
   syncedSeq: number
 }): number {
   let nextSeq = input.syncedSeq
@@ -64,7 +65,7 @@ export function applyWorkspaceResourceChangeEvents(input: {
   input.collectionUtils.writeBatch(() => {
     for (const event of deduped.values()) {
       if (event.op === 'delete') {
-        input.collectionUtils.writeDelete(event.key)
+        if (!input.collectionHas || input.collectionHas(event.key)) input.collectionUtils.writeDelete(event.key)
       } else if (event.row) {
         input.collectionUtils.writeUpsert(normalizeWorkspaceResourceRecord(event.row))
       }
@@ -134,6 +135,7 @@ export function useWorkspaceResourcesStore(workspaceId?: string) {
         syncedSeqRef.current = applyWorkspaceResourceChangeEvents({
           events: events as WorkspaceResourcesChangeEvent[],
           collectionUtils: collection.utils,
+          collectionHas: (key) => collection.has(key),
           syncedSeq: syncedSeqRef.current,
         })
       },

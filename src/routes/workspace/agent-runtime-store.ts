@@ -78,7 +78,7 @@ export function useAgentRuntimeStore(workspaceId: string | undefined) {
         collection.utils.writeBatch(() => {
           for (const event of deduped.values()) {
             if (event.op === 'delete') {
-              collection.utils.writeDelete(event.key)
+              if (collection.has(event.key)) collection.utils.writeDelete(event.key)
             } else if (event.row) {
               collection.utils.writeUpsert(normalizeAgentRuntimeRecord(event.row))
             }
