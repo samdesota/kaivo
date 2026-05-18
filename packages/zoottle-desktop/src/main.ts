@@ -17,6 +17,11 @@ let serviceSupervisor: ServiceSupervisor | undefined
 let browserAgentBridge: BrowserAgentBridge | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
+const devToolsWindows = new Map<number, BrowserWindow>()
+
+type WindowBounds = { x?: number; y?: number; width: number; height: number }
+
+const devToolsBoundsPath = path.join(stateDir ?? app.getPath('userData'), 'devtools-window-bounds.json')
 
 function chromeUserAgent(): string {
   const chromeVersion = process.versions.chrome
@@ -52,6 +57,11 @@ function trackWebContents(contents: WebContents): void {
   if (trackedWebContentsIds.has(contents.id)) return
   trackedWebContentsIds.add(contents.id)
   contents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && isReloadShortcut(input) && findChromeWebContentsForShortcutSender(contents)) {
+      event.preventDefault()
+      contents.reload()
+      return
+    }
     if (input.type !== 'keyDown' || !isAppShortcut(input)) return
     const chrome = findChromeWebContentsForShortcutSender(contents)
     if (!chrome) return
@@ -157,6 +167,12 @@ function isAppShortcut(input: Electron.Input): boolean {
   return key === 'k' || key === 't' || key === 'w' || key === 'b' || key === 'g'
 }
 
+function isReloadShortcut(input: Electron.Input): boolean {
+  if (!input.meta && !input.control) return false
+  if (input.alt || input.shift) return false
+  return input.key.toLowerCase() === 'r'
+}
+
 function findChromeWebContentsForShortcutSender(contents: WebContents): WebContents | null {
   const bridge = webframeApp?._debug.bridge as unknown as {
     callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
@@ -205,7 +221,7 @@ function installIpcHandlers(): void {
     if (!browserTabId) throw new Error('browserTabId is required')
     const contents = findTabWebContents(browserTabId)
     if (!contents) throw new Error(`Browser tab ${browserTabId} not found`)
-    contents.openDevTools({ mode: 'detach', activate: true })
+    openFloatingDevTools(contents)
     return { ok: true as const }
   })
   ipcMain.handle('cloud-code/browser/agent-connections', () => ({
@@ -231,6 +247,78 @@ function installIpcHandlers(): void {
     await serviceSupervisor.restartTerminal()
     return { ok: true as const }
   })
+}
+
+function openFloatingDevTools(contents: WebContents): void {
+  const existing = devToolsWindows.get(contents.id)
+  if (existing && !existing.isDestroyed()) {
+    existing.setAlwaysOnTop(true, 'floating')
+    existing.focus()
+    return
+  }
+
+  const devToolsWindow = new BrowserWindow({
+    ...readDevToolsWindowBounds(),
+    title: contents.getDevToolsTitle(),
+    show: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+  devToolsWindows.set(contents.id, devToolsWindow)
+  devToolsWindow.setAlwaysOnTop(true, 'floating')
+  if (process.platform === 'darwin') devToolsWindow.setVisibleOnAllWorkspaces(true)
+  devToolsWindow.on('moved', () => saveDevToolsWindowBounds(devToolsWindow))
+  devToolsWindow.on('resized', () => saveDevToolsWindowBounds(devToolsWindow))
+
+  const cleanup = () => {
+    if (devToolsWindows.get(contents.id) === devToolsWindow) devToolsWindows.delete(contents.id)
+    if (!contents.isDestroyed()) {
+      contents.off('devtools-closed', cleanup)
+      contents.off('destroyed', cleanup)
+    }
+    if (!devToolsWindow.isDestroyed()) devToolsWindow.destroy()
+  }
+
+  devToolsWindow.on('closed', () => {
+    if (devToolsWindows.get(contents.id) === devToolsWindow) devToolsWindows.delete(contents.id)
+    if (!contents.isDestroyed() && contents.isDevToolsOpened()) contents.closeDevTools()
+  })
+  contents.once('devtools-closed', cleanup)
+  contents.once('destroyed', cleanup)
+  contents.setDevToolsWebContents(devToolsWindow.webContents)
+  contents.openDevTools({ mode: 'detach', activate: true })
+  devToolsWindow.focus()
+  writeLog('main', 'info', 'opened floating browser devtools', {
+    inspectedWebContentsId: contents.id,
+    devToolsWindowId: devToolsWindow.id,
+    devToolsWebContentsId: devToolsWindow.webContents.id,
+  })
+}
+
+function readDevToolsWindowBounds(): WindowBounds {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(devToolsBoundsPath, 'utf8')) as WindowBounds
+    if (Number.isFinite(parsed.width) && Number.isFinite(parsed.height)) {
+      return {
+        x: Number.isFinite(parsed.x) ? parsed.x : undefined,
+        y: Number.isFinite(parsed.y) ? parsed.y : undefined,
+        width: Math.max(480, parsed.width),
+        height: Math.max(360, parsed.height),
+      }
+    }
+  } catch {
+    // Use the default bounds until the user moves/resizes DevTools.
+  }
+  return { width: 820, height: 560 }
+}
+
+function saveDevToolsWindowBounds(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  const bounds = win.getBounds()
+  fs.mkdirSync(path.dirname(devToolsBoundsPath), { recursive: true })
+  fs.writeFileSync(devToolsBoundsPath, JSON.stringify(bounds))
 }
 
 process.on('uncaughtException', (error) => {
