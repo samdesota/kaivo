@@ -18,6 +18,10 @@ export type BrowserTabCreated = {
   presentation?: 'embedded' | 'popup'
 }
 
+export type BrowserTabFocus = {
+  browserTabId: string
+}
+
 export type BrowserApi = {
   isAvailable(): boolean
   getWindowId(): Promise<string>
@@ -30,6 +34,7 @@ export type BrowserApi = {
   forward(input: { browserTabId: string }): Promise<void>
   reload(input: { browserTabId: string; ignoreCache?: boolean }): Promise<void>
   openDevTools(input: { browserTabId: string }): Promise<void>
+  registerTabFocusOwner(input: { browserTabId: string }): void
   getAgentConnections(): Promise<{ browserTabIds: string[] }>
   disconnectAgent(input: { browserTabId: string }): Promise<void>
   closeTab(input: { browserTabId: string }): Promise<void>
@@ -41,6 +46,7 @@ export type BrowserApi = {
   closeOverlay(input: { overlayId: string }): Promise<void>
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
   onWindowTabCreated(handler: (event: BrowserTabCreated) => void): () => void
+  onTabFocus(handler: (event: BrowserTabFocus) => void): () => void
 }
 
 type WebframeGlobal = {
@@ -95,6 +101,8 @@ type DesktopWindowLike = Window & {
       openBrowserDevTools?: (input: { browserTabId: string }) => Promise<unknown>
       getAgentBrowserConnections?: () => Promise<{ browserTabIds: string[] }>
       disconnectAgentBrowser?: (input: { browserTabId: string }) => Promise<unknown>
+      registerBrowserTabFocusOwner?: (input: { browserTabId: string }) => void
+      onBrowserTabFocus?: (handler: (input: BrowserTabFocus) => void) => () => void
       focusOverlay?: (input: { overlayId: string }) => Promise<unknown>
     }
 }
@@ -195,6 +203,11 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const desktop = win as DesktopWindowLike | undefined
       if (!desktop?.cloudCodeDesktop?.openBrowserDevTools) throw new Error('browser devtools unavailable')
       await desktop.cloudCodeDesktop.openBrowserDevTools({ browserTabId: input.browserTabId })
+    },
+
+    registerTabFocusOwner(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      desktop?.cloudCodeDesktop?.registerBrowserTabFocusOwner?.(input)
     },
 
     async getAgentConnections() {
@@ -299,6 +312,11 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
         unsubscribed = true
         sub?.unsubscribe()
       }
+    },
+
+    onTabFocus(handler) {
+      const desktop = win as DesktopWindowLike | undefined
+      return desktop?.cloudCodeDesktop?.onBrowserTabFocus?.(handler) ?? (() => undefined)
     },
   }
 }

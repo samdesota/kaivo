@@ -18,6 +18,7 @@ let browserAgentBridge: BrowserAgentBridge | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 const devToolsWindows = new Map<number, BrowserWindow>()
+const browserTabFocusOwners = new Map<string, number>()
 
 type WindowBounds = { x?: number; y?: number; width: number; height: number }
 
@@ -56,6 +57,12 @@ function trackWindow(win: BrowserWindow): void {
 function trackWebContents(contents: WebContents): void {
   if (trackedWebContentsIds.has(contents.id)) return
   trackedWebContentsIds.add(contents.id)
+  contents.on('focus', () => {
+    notifyChromeOfFocusedBrowserTab(contents)
+  })
+  contents.on('before-mouse-event', (_event, mouse) => {
+    if (mouse.type === 'mouseDown') notifyChromeOfFocusedBrowserTab(contents)
+  })
   contents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && isReloadShortcut(input) && findChromeWebContentsForShortcutSender(contents)) {
       event.preventDefault()
@@ -85,6 +92,21 @@ function trackWebContents(contents: WebContents): void {
   contents.on('unresponsive', () => {
     writeLog('crash', 'error', 'renderer-unresponsive', { webContentsId: contents.id })
   })
+}
+
+function notifyChromeOfFocusedBrowserTab(contents: WebContents): void {
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
+  } | undefined
+  const caller = bridge?.callerForWebContents?.(contents)
+  if (caller?.kind !== 'tab' || !caller.tabId) return
+  const registeredChromeId = browserTabFocusOwners.get(caller.tabId)
+  const registeredChrome = registeredChromeId === undefined ? null : electronWebContents.fromId(registeredChromeId)
+  const chrome = registeredChrome && !registeredChrome.isDestroyed() && chromeWebContentsIds.has(registeredChrome.id)
+    ? registeredChrome
+    : findChromeWebContentsForShortcutSender(contents)
+  if (!chrome || chrome.isDestroyed()) return
+  chrome.send('cloud-code/browser-tab-focused', { browserTabId: caller.tabId })
 }
 
 function installAppShortcutMenu(): void {
@@ -174,6 +196,9 @@ function isReloadShortcut(input: Electron.Input): boolean {
 }
 
 function findChromeWebContentsForShortcutSender(contents: WebContents): WebContents | null {
+  const host = contents.hostWebContents
+  if (host && !host.isDestroyed() && chromeWebContentsIds.has(host.id)) return host
+
   const bridge = webframeApp?._debug.bridge as unknown as {
     callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
   } | undefined
@@ -241,6 +266,11 @@ function installIpcHandlers(): void {
     owner?.focus()
     contents.focus()
     return { ok: true as const }
+  })
+  ipcMain.on('cloud-code/browser/register-tab-focus-owner', (event, input: { browserTabId?: string }) => {
+    if (!input.browserTabId) return
+    if (!chromeWebContentsIds.has(event.sender.id)) return
+    browserTabFocusOwners.set(input.browserTabId, event.sender.id)
   })
   ipcMain.handle('cloud-code/services/restart-terminal', async () => {
     if (!serviceSupervisor) throw new Error('desktop service supervisor unavailable')

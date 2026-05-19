@@ -184,6 +184,7 @@ function TabContent({
         }
         onUrlChange={(url) => dispatch({ type: 'setBrowserUrl', tabId, url })}
         onTitleChange={(title) => dispatch({ type: 'setTitle', tabId, title: truncateTabTitle(title) })}
+        onNativeFocus={() => dispatch({ type: 'activate', tabId })}
       />
     )
   }

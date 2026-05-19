@@ -20,6 +20,7 @@ interface BrowserPaneProps {
   onUrlChange?: (url: string) => void
   onTitleChange?: (title: string) => void
   onFaviconChange?: (input: { pageUrl: string; faviconUrl: string }) => void
+  onNativeFocus?: () => void
 }
 
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 }
@@ -44,7 +45,7 @@ type AddressResult =
   | { kind: 'bookmark'; id: string; bookmark: BookmarkRecord; match: BookmarkMatch }
   | { kind: 'search'; id: string; query: string; url: string }
 
-export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, active, closeOnUnmount = true, faviconDataUrl, faviconUrl, bookmarks = [], onBrowserTabId, onUrlChange, onTitleChange, onFaviconChange }: BrowserPaneProps) {
+export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, active, closeOnUnmount = true, faviconDataUrl, faviconUrl, bookmarks = [], onBrowserTabId, onUrlChange, onTitleChange, onFaviconChange, onNativeFocus }: BrowserPaneProps) {
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
   const addressInputRef = useRef<HTMLInputElement | null>(null)
@@ -55,6 +56,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   const onUrlChangeRef = useRef(onUrlChange)
   const onTitleChangeRef = useRef(onTitleChange)
   const onFaviconChangeRef = useRef(onFaviconChange)
+  const onNativeFocusRef = useRef(onNativeFocus)
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
   const slotReadyRef = useRef<Promise<void>>(Promise.resolve())
@@ -70,6 +72,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   onUrlChangeRef.current = onUrlChange
   onTitleChangeRef.current = onTitleChange
   onFaviconChangeRef.current = onFaviconChange
+  onNativeFocusRef.current = onNativeFocus
 
   useEffect(() => {
     setAddress(url ?? '')
@@ -190,6 +193,19 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
       }
     })
   }, [address, url])
+
+  useEffect(() => {
+    if (!browserApi.isAvailable()) return
+    return browserApi.onTabFocus((event) => {
+      if (event.browserTabId !== browserTabIdRef.current) return
+      onNativeFocusRef.current?.()
+    })
+  }, [paneId])
+
+  useEffect(() => {
+    if (!browserApi.isAvailable() || !browserTabId) return
+    browserApi.registerTabFocusOwner({ browserTabId })
+  }, [browserTabId])
 
   useEffect(() => {
     if (!browserApi.isAvailable()) return

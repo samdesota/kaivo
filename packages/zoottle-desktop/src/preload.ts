@@ -31,6 +31,12 @@ contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   openBrowserDevTools: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/open-devtools', input),
   getAgentBrowserConnections: () => ipcRenderer.invoke('cloud-code/browser/agent-connections'),
   disconnectAgentBrowser: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/disconnect-agent', input),
+  registerBrowserTabFocusOwner: (input: { browserTabId: string }) => ipcRenderer.send('cloud-code/browser/register-tab-focus-owner', input),
+  onBrowserTabFocus: (handler: (input: { browserTabId: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, input: { browserTabId: string }) => handler(input)
+    ipcRenderer.on('cloud-code/browser-tab-focused', listener)
+    return () => ipcRenderer.removeListener('cloud-code/browser-tab-focused', listener)
+  },
   focusOverlay: (input: { overlayId: string }) => ipcRenderer.invoke('cloud-code/browser/focus-overlay', input),
   restartTerminalService: () => ipcRenderer.invoke('cloud-code/services/restart-terminal'),
 })

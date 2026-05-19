@@ -13,11 +13,13 @@ const api = {
   forward: vi.fn(async () => undefined),
   reload: vi.fn(async () => undefined),
   openDevTools: vi.fn(async () => undefined),
+  registerTabFocusOwner: vi.fn(() => undefined),
   getAgentConnections: vi.fn(async () => ({ browserTabIds: [] })),
   disconnectAgent: vi.fn(async () => undefined),
   closeTab: vi.fn(async () => undefined),
   setSlot: vi.fn(async () => undefined),
   onTabChange: vi.fn(() => () => undefined),
+  onTabFocus: vi.fn(() => () => undefined),
 }
 
 vi.mock('../../src/lib/browser-api', () => ({
@@ -59,6 +61,7 @@ describe('BrowserPane', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.onTabChange.mockReturnValue(() => undefined)
+    api.onTabFocus.mockReturnValue(() => undefined)
     api.isAvailable.mockReturnValue(true)
     api.getAgentConnections.mockResolvedValue({ browserTabIds: [] })
     openCreateBookmarkOverlay.mockClear()
@@ -370,6 +373,37 @@ describe('BrowserPane', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(api.navigate).not.toHaveBeenCalled()
     expect(api.reload).not.toHaveBeenCalled()
+  })
+
+  it('reports matching native focus events', async () => {
+    let onFocusEvent: ((event: { browserTabId: string }) => void) | undefined
+    api.onTabFocus.mockImplementation((handler) => {
+      onFocusEvent = handler
+      return () => undefined
+    })
+    const onNativeFocus = vi.fn()
+
+    render(
+      <BrowserPane
+        paneId="pane-1"
+        browserTabId="native-tab-1"
+        url="https://example.com"
+        active={true}
+        onNativeFocus={onNativeFocus}
+      />,
+    )
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalledWith({
+      paneId: 'pane-1',
+      browserTabId: 'native-tab-1',
+    }))
+
+    act(() => {
+      onFocusEvent?.({ browserTabId: 'other-tab' })
+      onFocusEvent?.({ browserTabId: 'native-tab-1' })
+    })
+
+    expect(onNativeFocus).toHaveBeenCalledTimes(1)
   })
 
   it('reports favicon changes with the current page URL', async () => {

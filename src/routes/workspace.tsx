@@ -2030,6 +2030,7 @@ function WorkspaceTabPane({
               dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
             }
             onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
+            onNativeFocus={onFocusTabs}
             bookmarks={bookmarksStore.bookmarks}
             faviconDataUrl={activeTab.type === 'browser'
               ? (liveFaviconDataUrls[faviconOriginForUrl(activeTab.url) ?? ''] ?? ((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(activeTab.url) ?? '']?.dataUrl ?? null)
@@ -2164,6 +2165,7 @@ function WorkspaceTabContent({
   onUrlChange,
   onTitleChange,
   onFaviconChange,
+  onNativeFocus,
   bookmarks,
   faviconDataUrl,
   faviconUrl,
@@ -2176,6 +2178,7 @@ function WorkspaceTabContent({
   onUrlChange: (url: string) => void
   onTitleChange: (title: string) => void
   onFaviconChange: (input: { pageUrl: string; faviconUrl: string }) => void
+  onNativeFocus?: () => void
   bookmarks?: import('./workspace/bookmarks-store').BookmarkRecord[]
   faviconDataUrl?: string | null
   faviconUrl?: string | null
@@ -2217,11 +2220,12 @@ function WorkspaceTabContent({
         bookmarks={bookmarks}
         active
         onBrowserTabId={onBrowserTabId}
-          onUrlChange={onUrlChange}
-          onTitleChange={onTitleChange}
-          onFaviconChange={onFaviconChange}
-          closeOnUnmount={false}
-        />
+        onUrlChange={onUrlChange}
+        onTitleChange={onTitleChange}
+        onFaviconChange={onFaviconChange}
+        onNativeFocus={onNativeFocus}
+        closeOnUnmount={false}
+      />
     </div>
   )
 }

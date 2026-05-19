@@ -165,4 +165,24 @@ describe('browser API adapter', () => {
       presentation: 'embedded',
     })
   })
+
+  it('maps desktop native focus events to browser tab focus events', () => {
+    const { win } = makeWindow()
+    let listener: ((event: { browserTabId: string }) => void) | undefined
+    const api = createBrowserApi({
+      ...win,
+      cloudCodeDesktop: {
+        onBrowserTabFocus: vi.fn((callback) => {
+          listener = callback
+          return vi.fn()
+        }),
+      },
+    } as Parameters<typeof createBrowserApi>[0])
+    const onFocus = vi.fn()
+
+    api.onTabFocus(onFocus)
+    listener?.({ browserTabId: 'tab-1' })
+
+    expect(onFocus).toHaveBeenCalledWith({ browserTabId: 'tab-1' })
+  })
 })
