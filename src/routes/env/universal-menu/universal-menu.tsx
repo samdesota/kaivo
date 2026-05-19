@@ -828,10 +828,16 @@ export function UniversalMenu({
 
   async function createDetailsChat() {
     if (!detailsSelection) return
+    console.info('[universal-menu] create details submit', {
+      selectionType: detailsSelection.type,
+      newWorkspaceIntent,
+      workspaceId,
+    })
     setDetailsError(null)
     try {
       if (newWorkspaceIntent) {
         if (detailsSelection.type === 'repoConfig' && !detailsSelection.worktreeName.trim()) {
+          console.info('[universal-menu] create details validation failed', { reason: 'missing-worktree-name' })
           setDetailsError('Name the work tree.')
           return
         }
@@ -848,6 +854,11 @@ export function UniversalMenu({
           : detailsSelection.type === 'worktree'
             ? { type: 'worktree', path: detailsSelection.path, repoId: detailsSelection.repoId, name: detailsSelection.name }
             : { type: 'repoConfig', configId: detailsSelection.configId, worktreeName: detailsSelection.worktreeName.trim() }
+        console.info('[universal-menu] emit workspace bootstrap', {
+          bootstrapType: bootstrap.type,
+          workspaceName: workspaceCreate.name,
+          sourceKind: workspaceCreate.sourceKind,
+        })
         onBootstrapWorkspace?.({ workspaceCreate, bootstrap })
         return
       }
@@ -890,6 +901,7 @@ export function UniversalMenu({
       onCreatedChat?.(session.id, workspace.id)
       onClose()
     } catch (error) {
+      console.error('[universal-menu] create details failed', error)
       setDetailsError(extractTrpcMessage(error))
     }
   }

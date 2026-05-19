@@ -120,6 +120,7 @@ const runningWorkspaceBootstraps = new Set<string>()
 const workspaceBootstrapStatuses = new Map<string, WorkspaceBootstrapStatus>()
 
 export function enqueueWorkspaceBootstrap(bootstrap: UniversalMenuWorkspaceBootstrap) {
+  console.info('[workspace-bootstrap] enqueue', { workspaceId: bootstrap.workspaceId, type: bootstrap.type })
   pendingWorkspaceBootstraps.set(bootstrap.workspaceId, bootstrap)
   setWorkspaceBootstrapStatus(bootstrap.workspaceId, {
     message: bootstrap.type === 'repoConfig' ? 'Cloning worktree…' : 'Creating chat…',
@@ -133,21 +134,27 @@ export function workspaceBootstrapWithId(request: UniversalMenuWorkspaceBootstra
 }
 
 function takeWorkspaceBootstrap(workspaceId: string): UniversalMenuWorkspaceBootstrap | null {
-  if (runningWorkspaceBootstraps.has(workspaceId)) return null
+  if (runningWorkspaceBootstraps.has(workspaceId)) {
+    console.info('[workspace-bootstrap] take skipped already running', { workspaceId })
+    return null
+  }
   const bootstrap = pendingWorkspaceBootstraps.get(workspaceId)
   if (!bootstrap) return null
+  console.info('[workspace-bootstrap] take', { workspaceId, type: bootstrap.type })
   pendingWorkspaceBootstraps.delete(workspaceId)
   runningWorkspaceBootstraps.add(workspaceId)
   return bootstrap
 }
 
 function finishWorkspaceBootstrap(workspaceId: string) {
+  console.info('[workspace-bootstrap] finish', { workspaceId })
   runningWorkspaceBootstraps.delete(workspaceId)
   workspaceBootstrapStatuses.delete(workspaceId)
   dispatchWorkspaceBootstrapChanged()
 }
 
 function failWorkspaceBootstrap(workspaceId: string, message: string) {
+  console.error('[workspace-bootstrap] fail', { workspaceId, message })
   runningWorkspaceBootstraps.delete(workspaceId)
   setWorkspaceBootstrapStatus(workspaceId, { message, error: true })
 }
@@ -422,9 +429,18 @@ function WorkspaceShell({
   }, [ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState])
 
   const bootstrapWorkspace = useCallback(async (request: UniversalMenuWorkspaceBootstrapRequest) => {
-    const workspace = await createWorkspace.mutateAsync(request.workspaceCreate) as { id: string }
-    enqueueWorkspaceBootstrap(workspaceBootstrapWithId(request, workspace.id))
-    await navigate({ to: '/w/$workspaceId', params: { workspaceId: workspace.id }, search: { chat: undefined, tab: undefined } })
+    console.info('[workspace-bootstrap] create workspace start', { type: request.bootstrap.type, name: request.workspaceCreate.name, sourceKind: request.workspaceCreate.sourceKind })
+    try {
+      const workspace = await createWorkspace.mutateAsync(request.workspaceCreate) as { id: string }
+      console.info('[workspace-bootstrap] create workspace success', { workspaceId: workspace.id, type: request.bootstrap.type })
+      enqueueWorkspaceBootstrap(workspaceBootstrapWithId(request, workspace.id))
+      console.info('[workspace-bootstrap] navigate start', { workspaceId: workspace.id })
+      await navigate({ to: '/w/$workspaceId', params: { workspaceId: workspace.id }, search: { chat: undefined, tab: undefined } })
+      console.info('[workspace-bootstrap] navigate complete', { workspaceId: workspace.id })
+    } catch (error) {
+      console.error('[workspace-bootstrap] create workspace failed', error)
+      throw error
+    }
   }, [createWorkspace, navigate])
 
   const selectCreatedChat = useCallback(async (sessionId: string, workspaceId?: string) => {
@@ -442,6 +458,7 @@ function WorkspaceShell({
 
   const openCommandPalette = useCallback(async (initialIntent: 'default' | 'new-workspace' = 'default') => {
     const target = ctx.localEnvTarget
+    console.info('[universal-menu] open from workspace', { initialIntent, workspaceId: ctx.workspace.id, envAvailable: Boolean(target?.available), hasToken: Boolean(target?.token) })
     if (!target?.available || !target.token) return
     const result = await openUniversalMenuOverlay({
       env: target.env,
@@ -464,6 +481,7 @@ function WorkspaceShell({
       canToggleSidebar: true,
       initialIntent,
     })
+    console.info('[universal-menu] result in workspace', { type: result.type, workspaceId: ctx.workspace.id })
     if (result.type === 'open-pane') openPane(result.content)
     if (result.type === 'created-agent-chat') void selectCreatedChat(result.sessionId, result.workspaceId)
     if (result.type === 'workspace-bootstrap') {
@@ -574,18 +592,26 @@ function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { 
   }, [appQueryClient, cloneConfig, dispatchWorkspaceState, envQueryClient, navigate, startChat, upsertResource])
 
   useEffect(() => {
+    console.info('[workspace-bootstrap] runner check', {
+      workspaceId: ctx.workspace.id,
+      pending: pendingWorkspaceBootstraps.has(ctx.workspace.id),
+      running: runningWorkspaceBootstraps.has(ctx.workspace.id),
+    })
     const bootstrap = takeWorkspaceBootstrap(ctx.workspace.id)
     if (!bootstrap) return
     const job = bootstrap
     let cancelled = false
     async function run() {
       try {
+        console.info('[workspace-bootstrap] runner start', { workspaceId: job.workspaceId, type: job.type })
         let workingDir: string
         let repoId: string | undefined
         let resourceName: string | undefined
         if (job.type === 'repoConfig') {
           setWorkspaceBootstrapStatus(job.workspaceId, { message: 'Cloning worktree…' })
+          console.info('[workspace-bootstrap] clone start', { workspaceId: job.workspaceId, configId: job.configId, worktreeName: job.worktreeName })
           const cloned = await servicesRef.current.cloneConfig.mutateAsync({ configId: job.configId, worktreeName: job.worktreeName }) as { repoId: string; workingDir: string }
+          console.info('[workspace-bootstrap] clone success', { workspaceId: job.workspaceId, repoId: cloned.repoId, workingDir: cloned.workingDir })
           workingDir = cloned.workingDir
           repoId = cloned.repoId
           resourceName = job.worktreeName
@@ -599,6 +625,7 @@ function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { 
 
         if (job.type !== 'folder') {
           setWorkspaceBootstrapStatus(job.workspaceId, { message: 'Linking worktree…' })
+          console.info('[workspace-bootstrap] resource upsert start', { workspaceId: job.workspaceId, repoId, workingDir })
           await servicesRef.current.upsertResource.mutateAsync({
             workspaceId: job.workspaceId,
             resource: {
@@ -608,10 +635,13 @@ function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { 
               data: { repoId, workingDir, name: resourceName },
             },
           })
+          console.info('[workspace-bootstrap] resource upsert success', { workspaceId: job.workspaceId })
         }
 
         setWorkspaceBootstrapStatus(job.workspaceId, { message: 'Creating chat…' })
+        console.info('[workspace-bootstrap] session start start', { workspaceId: job.workspaceId, workingDir })
         const session = await servicesRef.current.startChat.mutateAsync({ workspaceId: job.workspaceId, directory: workingDir }) as { id: string }
+        console.info('[workspace-bootstrap] session start success', { workspaceId: job.workspaceId, sessionId: session.id })
         await Promise.all([
           servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId: job.workspaceId }) }),
           servicesRef.current.appQueryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
@@ -619,16 +649,21 @@ function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { 
           servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listRecentFolders') }),
           servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') }),
         ])
+        console.info('[workspace-bootstrap] invalidate complete', { workspaceId: job.workspaceId })
         if (cancelled) return
         servicesRef.current.dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: session.id })
+        console.info('[workspace-bootstrap] chat navigate start', { workspaceId: job.workspaceId, sessionId: session.id })
         await servicesRef.current.navigate({ search: (prev) => ({ ...prev, chat: session.id, tab: undefined }), replace: true })
+        console.info('[workspace-bootstrap] chat navigate complete', { workspaceId: job.workspaceId, sessionId: session.id })
         finishWorkspaceBootstrap(job.workspaceId)
       } catch (error) {
+        console.error('[workspace-bootstrap] runner error', error)
         if (!cancelled) failWorkspaceBootstrap(job.workspaceId, extractTrpcMessage(error))
       }
     }
     void run()
     return () => {
+      console.info('[workspace-bootstrap] runner cleanup', { workspaceId: job.workspaceId, type: job.type })
       cancelled = true
     }
   }, [ctx.workspace.id])

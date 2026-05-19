@@ -256,6 +256,9 @@ function EnvOverlayRequestRenderer({
   request: Extract<OverlayRequest, { type: 'new-agent-chat' | 'folder-picker' | 'command-palette' | 'universal-menu' | 'workspace-cleanup' }>
   respond: (response: OverlayResponse) => void
 }) {
+  useEffect(() => {
+    console.info('[overlay-layer] render env request', { requestId: request.requestId, type: request.type })
+  }, [request.requestId, request.type])
   const queryClient = useMemo(() => new QueryClient(), [request.requestId])
   const managedEnvClient = useMemo(
     () => makeManagedEnvReactClient(request.env, request.envToken),
@@ -314,11 +317,23 @@ function EnvOverlayRequestRenderer({
               hasActiveTab={request.hasActiveTab}
               contextItems={request.contextItems}
               initialIntent={request.initialIntent}
-              onClose={() => respond({ requestId: request.requestId, type: 'closed' })}
+              onClose={() => {
+                console.info('[overlay-layer] universal-menu close', { requestId: request.requestId })
+                respond({ requestId: request.requestId, type: 'closed' })
+              }}
               onOpenContent={(content) => respond({ requestId: request.requestId, type: 'open-pane', content })}
-              onCreatedChat={(sessionId: string, workspaceId?: string) => respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })}
-              onBootstrapWorkspace={(bootstrapRequest) => respond({ requestId: request.requestId, type: 'workspace-bootstrap', request: bootstrapRequest })}
-              onSwitchWorkspace={(workspaceId: string) => respond({ requestId: request.requestId, type: 'switch-workspace', workspaceId })}
+              onCreatedChat={(sessionId: string, workspaceId?: string) => {
+                console.info('[overlay-layer] universal-menu created chat', { requestId: request.requestId, sessionId, workspaceId })
+                respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })
+              }}
+              onBootstrapWorkspace={(bootstrapRequest) => {
+                console.info('[overlay-layer] universal-menu bootstrap', { requestId: request.requestId, kind: bootstrapRequest.bootstrap.type, name: bootstrapRequest.workspaceCreate.name })
+                respond({ requestId: request.requestId, type: 'workspace-bootstrap', request: bootstrapRequest })
+              }}
+              onSwitchWorkspace={(workspaceId: string) => {
+                console.info('[overlay-layer] universal-menu switch workspace', { requestId: request.requestId, workspaceId })
+                respond({ requestId: request.requestId, type: 'switch-workspace', workspaceId })
+              }}
               onCloseTab={() => respond({ requestId: request.requestId, type: 'close-tab' })}
               onToggleAgentPane={request.canToggleAgentPane ? () => respond({ requestId: request.requestId, type: 'toggle-agent-pane' }) : undefined}
               onToggleSidebar={request.canToggleSidebar ? () => respond({ requestId: request.requestId, type: 'toggle-sidebar' }) : undefined}

@@ -44,6 +44,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
   const hasTabs = state.tabs.length > 0
 
   async function openCommandPalette(initialIntent: 'default' | 'new-workspace' = 'default') {
+    console.info('[universal-menu] open from env shell', { initialIntent, envId: envContext.env.id })
     const result = await openUniversalMenuOverlay({
       env: envContext.env,
       envToken: envContext.envToken,
@@ -60,9 +61,12 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
       }),
       initialIntent,
     })
+    console.info('[universal-menu] result in env shell', { type: result.type })
     if (result.type === 'open-pane') openContent(result.content)
     if (result.type === 'workspace-bootstrap') {
+      console.info('[workspace-bootstrap] env shell create workspace start', { type: result.request.bootstrap.type, name: result.request.workspaceCreate.name })
       const workspace = await createWorkspace.mutateAsync(result.request.workspaceCreate) as { id: string }
+      console.info('[workspace-bootstrap] env shell create workspace success', { workspaceId: workspace.id })
       enqueueWorkspaceBootstrap(workspaceBootstrapWithId(result.request, workspace.id))
       void navigate({ to: '/w/$workspaceId', params: { workspaceId: workspace.id }, search: { chat: undefined, tab: undefined } })
     }

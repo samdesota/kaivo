@@ -298,6 +298,7 @@ export async function openBrowserUrlPopoverOverlay(input: BrowserUrlPopoverInput
 }
 
 async function openOverlayRequest(request: OverlayRequest): Promise<OverlayResponse> {
+  console.info('[overlay] open request', { requestId: request.requestId, type: request.type })
   if (request.type !== 'confirm'
     && request.type !== 'text-input'
     && request.type !== 'repo-config'
@@ -320,13 +321,16 @@ async function openOverlayRequest(request: OverlayRequest): Promise<OverlayRespo
 }
 
 async function openElectronOverlay(request: OverlayRequest): Promise<OverlayResponse> {
+  console.info('[overlay] electron start', { requestId: request.requestId, type: request.type })
   await ensureElectronOverlay()
   if (!detachedOverlayId) throw new Error('overlay did not initialize')
 
   const width = Math.max(1, window.innerWidth)
   const height = Math.max(1, window.innerHeight)
+  console.info('[overlay] electron attach', { requestId: request.requestId, type: request.type, overlayId: detachedOverlayId, width, height })
   await browserApi.attachOverlay({ overlayId: detachedOverlayId, placement: { x: 0, y: 0, w: width, h: height } })
   await browserApi.focusOverlay({ overlayId: detachedOverlayId })
+  console.info('[overlay] electron focused', { requestId: request.requestId, type: request.type, overlayId: detachedOverlayId })
 
   const channel = new BroadcastChannel(OVERLAY_CHANNEL)
   try {
@@ -335,14 +339,17 @@ async function openElectronOverlay(request: OverlayRequest): Promise<OverlayResp
       channel.onmessage = (event: MessageEvent<OverlayResponse>) => {
         const response = event.data
         if (response.requestId !== request.requestId) return
+        console.info('[overlay] electron response', { requestId: request.requestId, requestType: request.type, responseType: response.type })
         window.clearTimeout(timeout)
         if (response.type === 'error') reject(new Error(response.message))
         else resolve(response)
       }
       channel.postMessage(request)
+      console.info('[overlay] electron posted', { requestId: request.requestId, type: request.type })
     })
   } finally {
     channel.close()
+    console.info('[overlay] electron detach', { requestId: request.requestId, type: request.type, overlayId: detachedOverlayId })
     await browserApi.detachOverlay({ overlayId: detachedOverlayId })
   }
 }
