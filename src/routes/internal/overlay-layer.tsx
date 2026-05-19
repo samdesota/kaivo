@@ -163,28 +163,31 @@ export function OverlayLayerPage() {
     }
   }, [])
 
-  return <OverlayLayerApp />
+  const channelName = new URLSearchParams(window.location.search).get('channel') || OVERLAY_CHANNEL
+  return <OverlayLayerApp channelName={channelName} />
 }
 
 export function OverlayLayerApp({
   initialRequest,
   onResponse,
+  channelName = OVERLAY_CHANNEL,
 }: {
   initialRequest?: OverlayRequest
   onResponse?: (response: OverlayResponse) => void
+  channelName?: string
 }) {
   const [request, setRequest] = useState<OverlayRequest | null>(initialRequest ?? null)
 
   useEffect(() => {
     if (initialRequest) return
-    const channel = new BroadcastChannel(OVERLAY_CHANNEL)
+    const channel = new BroadcastChannel(channelName)
     channel.postMessage({ requestId: 'overlay-layer', type: 'ready' } satisfies OverlayResponse)
     channel.onmessage = (event: MessageEvent<OverlayRequest | OverlayResponse | { type: 'close' }>) => {
       if (isOverlayRequest(event.data)) setRequest(event.data)
       if (event.data.type === 'close') setRequest(null)
     }
     return () => channel.close()
-  }, [initialRequest])
+  }, [channelName, initialRequest])
 
   function respond(response: OverlayResponse) {
     setRequest(null)
@@ -192,7 +195,7 @@ export function OverlayLayerApp({
       onResponse(response)
       return
     }
-    const channel = new BroadcastChannel(OVERLAY_CHANNEL)
+    const channel = new BroadcastChannel(channelName)
     channel.postMessage(response)
     channel.close()
   }

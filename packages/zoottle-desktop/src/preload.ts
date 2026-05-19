@@ -38,5 +38,8 @@ contextBridge.exposeInMainWorld('cloudCodeDesktop', {
     return () => ipcRenderer.removeListener('cloud-code/browser-tab-focused', listener)
   },
   focusOverlay: (input: { overlayId: string }) => ipcRenderer.invoke('cloud-code/browser/focus-overlay', input),
+  registerOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('cloud-code/browser/register-overlay-owner', input),
+  unregisterOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('cloud-code/browser/unregister-overlay-owner', input),
+  diagnosticsPing: (input: { seq: number; rendererNow: number }) => ipcRenderer.invoke('cloud-code/diagnostics/ping', input),
   restartTerminalService: () => ipcRenderer.invoke('cloud-code/services/restart-terminal'),
 })

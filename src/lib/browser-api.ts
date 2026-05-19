@@ -1,3 +1,5 @@
+import { clientLogger } from './client-logger'
+
 export type BrowserSlotUpdate = {
   paneId: string
   rect: { x: number; y: number; width: number; height: number }
@@ -104,6 +106,9 @@ type DesktopWindowLike = Window & {
       registerBrowserTabFocusOwner?: (input: { browserTabId: string }) => void
       onBrowserTabFocus?: (handler: (input: BrowserTabFocus) => void) => () => void
       focusOverlay?: (input: { overlayId: string }) => Promise<unknown>
+      registerOverlayOwner?: (input: { overlayId: string }) => Promise<unknown>
+      unregisterOverlayOwner?: (input: { overlayId: string }) => Promise<unknown>
+      diagnosticsPing?: (input: { seq: number; rendererNow: number }) => Promise<unknown>
     }
 }
 
@@ -145,58 +150,60 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
 
     async createTab(input) {
       const webframe = getWebframe(win)
-      const record = await webframe.trpc.tabs.create.mutate({
+      const windowId = await getWindowId()
+      const record = await trackBrowserCommand('tabs.create', { paneId: input.paneId, url: input.url }, () => webframe.trpc.tabs.create.mutate({
         url: input.url ?? 'about:blank',
-        windowId: await getWindowId(),
+        windowId,
         placement: { slot: paneSlotName(input.paneId) },
         active: true,
-      })
+      }))
       return { browserTabId: record.id, favicon: record.favicon }
     },
 
     async attachTab(input) {
       const webframe = getWebframe(win)
       const windowId = await getWindowId()
-      const moved = await webframe.trpc.tabs.move.mutate({
+      const moved = await trackBrowserCommand('tabs.move', { browserTabId: input.browserTabId, paneId: input.paneId }, () => webframe.trpc.tabs.move.mutate({
         tabId: input.browserTabId,
         windowId,
         placement: { slot: paneSlotName(input.paneId) },
-      })
+      }))
       assertTabFound(moved, input.browserTabId)
-      const activated = await webframe.trpc.tabs.setActive.mutate({ tabId: input.browserTabId, windowId })
+      const activated = await trackBrowserCommand('tabs.setActive', { browserTabId: input.browserTabId }, () => webframe.trpc.tabs.setActive.mutate({ tabId: input.browserTabId, windowId }))
       assertTabFound(activated, input.browserTabId)
     },
 
     async focusTab(input) {
       const webframe = getWebframe(win)
-      const result = await webframe.trpc.tabs.setActive.mutate({
+      const windowId = await getWindowId()
+      const result = await trackBrowserCommand('tabs.setActive', { browserTabId: input.browserTabId }, () => webframe.trpc.tabs.setActive.mutate({
         tabId: input.browserTabId,
-        windowId: await getWindowId(),
-      })
+        windowId,
+      }))
       assertTabFound(result, input.browserTabId)
     },
 
     async navigate(input) {
       const webframe = getWebframe(win)
-      await webframe.trpc.navigation.goto.mutate({ tabId: input.browserTabId, url: input.url })
+      await trackBrowserCommand('navigation.goto', input, () => webframe.trpc.navigation.goto.mutate({ tabId: input.browserTabId, url: input.url }))
     },
 
     async back(input) {
       const webframe = getWebframe(win)
-      await webframe.trpc.navigation.back.mutate({ tabId: input.browserTabId })
+      await trackBrowserCommand('navigation.back', input, () => webframe.trpc.navigation.back.mutate({ tabId: input.browserTabId }))
     },
 
     async forward(input) {
       const webframe = getWebframe(win)
-      await webframe.trpc.navigation.forward.mutate({ tabId: input.browserTabId })
+      await trackBrowserCommand('navigation.forward', input, () => webframe.trpc.navigation.forward.mutate({ tabId: input.browserTabId }))
     },
 
     async reload(input) {
       const webframe = getWebframe(win)
-      await webframe.trpc.navigation.reload.mutate({
+      await trackBrowserCommand('navigation.reload', input, () => webframe.trpc.navigation.reload.mutate({
         tabId: input.browserTabId,
         ignoreCache: input.ignoreCache ?? false,
-      })
+      }))
     },
 
     async openDevTools(input) {
@@ -224,7 +231,7 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
 
     async closeTab(input) {
       const webframe = getWebframe(win)
-      await webframe.trpc.tabs.close.mutate({ tabId: input.browserTabId })
+      await trackBrowserCommand('tabs.close', input, () => webframe.trpc.tabs.close.mutate({ tabId: input.browserTabId }))
     },
 
     async setSlot(input) {
@@ -237,45 +244,50 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
           h: input.rect.height,
         },
       })
-      await setSlots()
+      await trackBrowserCommand('windows.setSlots', { paneId: input.paneId, rect: input.rect }, setSlots)
     },
 
     async createDetachedOverlay(input) {
       const webframe = getWebframe(win)
       if (!webframe.trpc.overlays?.createDetached) throw new Error('webframe detached overlays unavailable')
-      const overlay = await webframe.trpc.overlays.createDetached.mutate({
+      const overlay = await trackBrowserCommand('overlays.createDetached', { url: input.url }, () => webframe.trpc.overlays!.createDetached!.mutate({
         url: input.url,
         transparent: input.transparent ?? true,
         clickThrough: input.clickThrough ?? false,
-      })
+      }))
+      const desktop = win as DesktopWindowLike | undefined
+      await desktop?.cloudCodeDesktop?.registerOverlayOwner?.({ overlayId: overlay.id })
       return { overlayId: overlay.id }
     },
 
     async attachOverlay(input) {
       const webframe = getWebframe(win)
       if (!webframe.trpc.overlays?.attach) throw new Error('webframe overlay attach unavailable')
-      await webframe.trpc.overlays.attach.mutate({
+      const windowId = await getWindowId()
+      await trackBrowserCommand('overlays.attach', { overlayId: input.overlayId, placement: input.placement }, () => webframe.trpc.overlays!.attach!.mutate({
         overlayId: input.overlayId,
-        windowId: await getWindowId(),
+        windowId,
         placement: input.placement,
-      })
+      }))
     },
 
     async focusOverlay(input) {
       const desktop = win as DesktopWindowLike | undefined
-      await desktop?.cloudCodeDesktop?.focusOverlay?.(input)
+      await trackBrowserCommand('desktop.focusOverlay', input, () => desktop?.cloudCodeDesktop?.focusOverlay?.(input) ?? Promise.resolve())
     },
 
     async detachOverlay(input) {
       const webframe = getWebframe(win)
       if (!webframe.trpc.overlays?.detach) throw new Error('webframe overlay detach unavailable')
-      await webframe.trpc.overlays.detach.mutate({ overlayId: input.overlayId })
+      await trackBrowserCommand('overlays.detach', input, () => webframe.trpc.overlays!.detach!.mutate({ overlayId: input.overlayId }))
     },
 
     async closeOverlay(input) {
       const webframe = getWebframe(win)
       if (!webframe.trpc.overlays?.close) throw new Error('webframe overlay close unavailable')
-      await webframe.trpc.overlays.close.mutate({ overlayId: input.overlayId })
+      const desktop = win as DesktopWindowLike | undefined
+      await desktop?.cloudCodeDesktop?.unregisterOverlayOwner?.({ overlayId: input.overlayId })
+      await trackBrowserCommand('overlays.close', input, () => webframe.trpc.overlays!.close!.mutate({ overlayId: input.overlayId }))
     },
 
     onTabChange(handler) {
@@ -346,4 +358,35 @@ function isTabNotFoundResult(result: unknown): result is { ok: false; code: 'TAB
   return typeof result === 'object' && result !== null && 'ok' in result && 'code' in result
     && result.ok === false
     && result.code === 'TAB_NOT_FOUND'
+}
+
+async function trackBrowserCommand<T>(name: string, ctx: Record<string, unknown>, run: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now()
+  let settled = false
+  const timeout = window.setTimeout(() => {
+    if (settled) return
+    logBrowserCommand('pending', name, startedAt, ctx)
+  }, 5_000)
+  try {
+    const result = await run()
+    settled = true
+    window.clearTimeout(timeout)
+    const elapsedMs = performance.now() - startedAt
+    if (elapsedMs > 750) logBrowserCommand('slow', name, startedAt, ctx, elapsedMs)
+    return result
+  } catch (error) {
+    settled = true
+    window.clearTimeout(timeout)
+    logBrowserCommand('failed', name, startedAt, {
+      ...ctx,
+      message: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
+}
+
+function logBrowserCommand(state: 'pending' | 'slow' | 'failed', name: string, startedAt: number, ctx: Record<string, unknown>, elapsedMs = performance.now() - startedAt): void {
+  const payload = { command: name, elapsedMs: Math.round(elapsedMs), ...ctx, url: window.location.href }
+  console.warn(`[browser-api] command ${state} ${JSON.stringify(payload)}`)
+  clientLogger.warn(`[browser-api] command ${state}`, payload)
 }

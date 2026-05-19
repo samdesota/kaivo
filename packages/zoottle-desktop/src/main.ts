@@ -19,6 +19,7 @@ const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 const devToolsWindows = new Map<number, BrowserWindow>()
 const browserTabFocusOwners = new Map<string, number>()
+const overlayOwners = new Map<number, Set<string>>()
 
 type WindowBounds = { x?: number; y?: number; width: number; height: number }
 
@@ -60,12 +61,22 @@ function trackWebContents(contents: WebContents): void {
   contents.on('focus', () => {
     notifyChromeOfFocusedBrowserTab(contents)
   })
+  contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) closeOwnedOverlays(contents.id, 'owner navigation')
+  })
+  contents.on('destroyed', () => {
+    closeOwnedOverlays(contents.id, 'owner destroyed')
+  })
   contents.on('before-mouse-event', (_event, mouse) => {
     if (mouse.type === 'mouseDown') notifyChromeOfFocusedBrowserTab(contents)
   })
   contents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && isReloadShortcut(input) && findChromeWebContentsForShortcutSender(contents)) {
       event.preventDefault()
+      writeLog('main', 'info', 'reload shortcut handled by focused webcontents', {
+        senderWebContentsId: contents.id,
+        url: safeWebContentsUrl(contents),
+      })
       contents.reload()
       return
     }
@@ -88,10 +99,55 @@ function trackWebContents(contents: WebContents): void {
   })
   contents.on('render-process-gone', (_event, details) => {
     writeLog('crash', 'error', 'render-process-gone', { webContentsId: contents.id, details })
+    closeOwnedOverlays(contents.id, 'owner render process gone')
   })
   contents.on('unresponsive', () => {
     writeLog('crash', 'error', 'renderer-unresponsive', { webContentsId: contents.id })
   })
+}
+
+function registerOverlayOwner(ownerWebContentsId: number, overlayId: string): void {
+  let overlays = overlayOwners.get(ownerWebContentsId)
+  if (!overlays) {
+    overlays = new Set<string>()
+    overlayOwners.set(ownerWebContentsId, overlays)
+  }
+  overlays.add(overlayId)
+  writeLog('main', 'info', 'registered overlay owner', { ownerWebContentsId, overlayId })
+}
+
+function unregisterOverlayOwner(ownerWebContentsId: number, overlayId: string): void {
+  const overlays = overlayOwners.get(ownerWebContentsId)
+  if (!overlays) return
+  overlays.delete(overlayId)
+  if (overlays.size === 0) overlayOwners.delete(ownerWebContentsId)
+  writeLog('main', 'info', 'unregistered overlay owner', { ownerWebContentsId, overlayId })
+}
+
+function closeOwnedOverlays(ownerWebContentsId: number, reason: string): void {
+  const overlays = overlayOwners.get(ownerWebContentsId)
+  if (!overlays?.size) return
+  overlayOwners.delete(ownerWebContentsId)
+  const overlayIds = Array.from(overlays)
+  writeLog('main', 'info', 'closing owned overlays', { ownerWebContentsId, reason, overlayIds })
+  for (const overlayId of overlayIds) {
+    void closeOverlayFromMain(overlayId, reason).catch((error) => {
+      writeLog('exception', 'error', 'owned overlay close failed', {
+        ownerWebContentsId,
+        overlayId,
+        reason,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+}
+
+async function closeOverlayFromMain(overlayId: string, reason: string): Promise<void> {
+  const caller = webframeApp?.caller as unknown as {
+    overlays?: { close?: { mutate: (input: { overlayId: string }) => Promise<unknown> } }
+  } | undefined
+  await caller?.overlays?.close?.mutate({ overlayId })
+  writeLog('main', 'info', 'closed overlay from main', { overlayId, reason })
 }
 
 function notifyChromeOfFocusedBrowserTab(contents: WebContents): void {
@@ -162,7 +218,16 @@ function shortcutInput(key: string, code: string, options?: { shiftKey?: boolean
 }
 
 function sendAppShortcut(chrome: WebContents | null, input: AppShortcutInput): void {
-  if (!chrome || chrome.isDestroyed() || !chromeWebContentsIds.has(chrome.id)) return
+  if (!chrome || chrome.isDestroyed() || !chromeWebContentsIds.has(chrome.id)) {
+    writeLog('main', 'error', 'app shortcut dropped: chrome webcontents unavailable', { input })
+    return
+  }
+  writeLog('main', 'info', 'app shortcut sent to chrome', {
+    chromeWebContentsId: chrome.id,
+    input,
+    focusedWebContentsId: electronWebContents.getFocusedWebContents()?.id,
+    focusedWindowWebContentsId: BrowserWindow.getFocusedWindow()?.webContents.id,
+  })
   chrome.send('cloud-code/app-shortcut', input)
 }
 
@@ -241,6 +306,17 @@ function findOverlayWebContents(overlayId: string): WebContents | null {
 }
 
 function installIpcHandlers(): void {
+  ipcMain.handle('cloud-code/diagnostics/ping', (event, input: { seq?: number; rendererNow?: number }) => ({
+    ok: true as const,
+    seq: input.seq,
+    rendererNow: input.rendererNow,
+    mainNow: Date.now(),
+    senderWebContentsId: event.sender.id,
+    focusedWebContentsId: electronWebContents.getFocusedWebContents()?.id,
+    focusedWindowWebContentsId: BrowserWindow.getFocusedWindow()?.webContents.id,
+    trackedWebContentsCount: trackedWebContentsIds.size,
+    chromeWebContentsIds: Array.from(chromeWebContentsIds),
+  }))
   ipcMain.handle('cloud-code/browser/open-devtools', (_event, input: { browserTabId?: string }) => {
     const browserTabId = input.browserTabId
     if (!browserTabId) throw new Error('browserTabId is required')
@@ -267,6 +343,17 @@ function installIpcHandlers(): void {
     contents.focus()
     return { ok: true as const }
   })
+  ipcMain.handle('cloud-code/browser/register-overlay-owner', (event, input: { overlayId?: string }) => {
+    if (!input.overlayId) throw new Error('overlayId is required')
+    if (!chromeWebContentsIds.has(event.sender.id)) throw new Error('overlay owner must be a chrome webContents')
+    registerOverlayOwner(event.sender.id, input.overlayId)
+    return { ok: true as const }
+  })
+  ipcMain.handle('cloud-code/browser/unregister-overlay-owner', (event, input: { overlayId?: string }) => {
+    if (!input.overlayId) throw new Error('overlayId is required')
+    unregisterOverlayOwner(event.sender.id, input.overlayId)
+    return { ok: true as const }
+  })
   ipcMain.on('cloud-code/browser/register-tab-focus-owner', (event, input: { browserTabId?: string }) => {
     if (!input.browserTabId) return
     if (!chromeWebContentsIds.has(event.sender.id)) return
@@ -277,6 +364,31 @@ function installIpcHandlers(): void {
     await serviceSupervisor.restartTerminal()
     return { ok: true as const }
   })
+}
+
+function installMainDiagnostics(): void {
+  let expected = Date.now() + 2_000
+  setInterval(() => {
+    const now = Date.now()
+    const lagMs = now - expected
+    expected = now + 2_000
+    if (lagMs < 750) return
+    writeLog('main', 'error', 'main event loop lag detected', {
+      lagMs,
+      focusedWebContentsId: electronWebContents.getFocusedWebContents()?.id,
+      focusedWindowWebContentsId: BrowserWindow.getFocusedWindow()?.webContents.id,
+      trackedWebContentsCount: trackedWebContentsIds.size,
+      chromeWebContentsIds: Array.from(chromeWebContentsIds),
+    })
+  }, 2_000).unref()
+}
+
+function safeWebContentsUrl(contents: WebContents): string | undefined {
+  try {
+    return contents.getURL()
+  } catch {
+    return undefined
+  }
 }
 
 function openFloatingDevTools(contents: WebContents): void {
@@ -361,6 +473,7 @@ process.on('unhandledRejection', (reason) => {
 
 async function main(): Promise<void> {
   await app.whenReady()
+  installMainDiagnostics()
   installAppShortcutMenu()
   installIpcHandlers()
   const baseEnv: NodeJS.ProcessEnv = {

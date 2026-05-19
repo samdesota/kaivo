@@ -71,6 +71,7 @@ export type BrowserUrlPopoverSession = {
 
 let detachedOverlayId: string | null = null
 let readyPromise: Promise<void> | null = null
+let detachedOverlayChannel: string | null = null
 
 export function prewarmOverlayLayer(): void {
   if (!browserApi.isAvailable()) return
@@ -264,8 +265,8 @@ export async function openBrowserUrlPopoverOverlay(input: BrowserUrlPopoverInput
   const requestId = makeOverlayRequestId()
   let closed = false
   await ensureElectronOverlay()
-  if (!detachedOverlayId) return null
-  const channel = new BroadcastChannel(OVERLAY_CHANNEL)
+  if (!detachedOverlayId || !detachedOverlayChannel) return null
+  const channel = new BroadcastChannel(detachedOverlayChannel)
   const post = (next: BrowserUrlPopoverInput) => {
     channel.postMessage({ requestId, type: 'browser-url-popover', ...next } satisfies OverlayRequest)
   }
@@ -323,7 +324,7 @@ async function openOverlayRequest(request: OverlayRequest): Promise<OverlayRespo
 async function openElectronOverlay(request: OverlayRequest): Promise<OverlayResponse> {
   console.info('[overlay] electron start', { requestId: request.requestId, type: request.type })
   await ensureElectronOverlay()
-  if (!detachedOverlayId) throw new Error('overlay did not initialize')
+  if (!detachedOverlayId || !detachedOverlayChannel) throw new Error('overlay did not initialize')
 
   const width = Math.max(1, window.innerWidth)
   const height = Math.max(1, window.innerHeight)
@@ -332,7 +333,7 @@ async function openElectronOverlay(request: OverlayRequest): Promise<OverlayResp
   await browserApi.focusOverlay({ overlayId: detachedOverlayId })
   console.info('[overlay] electron focused', { requestId: request.requestId, type: request.type, overlayId: detachedOverlayId })
 
-  const channel = new BroadcastChannel(OVERLAY_CHANNEL)
+  const channel = new BroadcastChannel(detachedOverlayChannel)
   try {
     return await new Promise<OverlayResponse>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error('overlay modal timed out')), 120_000)
@@ -356,11 +357,13 @@ async function openElectronOverlay(request: OverlayRequest): Promise<OverlayResp
 
 async function ensureElectronOverlay(): Promise<void> {
   if (detachedOverlayId) return readyPromise ?? Promise.resolve()
-  const pendingReady = waitForOverlayReady()
+  const channelName = `${OVERLAY_CHANNEL}:${makeOverlayRequestId()}`
+  detachedOverlayChannel = channelName
+  const pendingReady = waitForOverlayReady(channelName)
   readyPromise = pendingReady
   try {
     const { overlayId } = await withTimeout(browserApi.createDetachedOverlay({
-      url: `${window.location.origin}/internal/overlay-layer`,
+      url: `${window.location.origin}/internal/overlay-layer?channel=${encodeURIComponent(channelName)}`,
       transparent: true,
       clickThrough: false,
     }), 5_000, 'overlay create timed out')
@@ -369,6 +372,7 @@ async function ensureElectronOverlay(): Promise<void> {
   } catch (e) {
     const overlayId = detachedOverlayId
     detachedOverlayId = null
+    detachedOverlayChannel = null
     readyPromise = null
     if (overlayId) {
       await browserApi.closeOverlay({ overlayId }).catch(() => undefined)
@@ -377,9 +381,9 @@ async function ensureElectronOverlay(): Promise<void> {
   }
 }
 
-function waitForOverlayReady(): Promise<void> {
+function waitForOverlayReady(channelName: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const channel = new BroadcastChannel(OVERLAY_CHANNEL)
+    const channel = new BroadcastChannel(channelName)
     const timeout = window.setTimeout(() => {
       channel.close()
       reject(new Error('overlay layer did not become ready'))
