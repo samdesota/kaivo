@@ -1,6 +1,6 @@
 import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
-import { resolveSession, type Session } from '../auth/service.js'
-import { SESSION_COOKIE, clearSessionCookie } from '../auth/cookie.js'
+import { refreshDesktopSession, resolveSession, type Session } from '../auth/service.js'
+import { SESSION_COOKIE, clearSessionCookie, setSessionCookie } from '../auth/cookie.js'
 
 export interface Context {
   req: CreateFastifyContextOptions['req']
@@ -38,7 +38,19 @@ export async function createContext({ req, res }: CreateFastifyContextOptions): 
   const sid =
     (req as unknown as { cookies?: Record<string, string> }).cookies?.[SESSION_COOKIE] ??
     parseCookieHeader(req.headers?.cookie as string | undefined, SESSION_COOKIE)
-  const session = sid ? await resolveSession(sid) : null
+  const resolvedSession = sid ? await resolveSession(sid) : null
+  let session = resolvedSession
+  if (session && 'setCookie' in (res as object)) {
+    try {
+      const refreshed = await refreshDesktopSession(session)
+      if (refreshed.expiresAt.getTime() !== session.expiresAt.getTime()) {
+        setSessionCookie(res as unknown as Parameters<typeof setSessionCookie>[0], refreshed.id, refreshed.expiresAt)
+        session = refreshed
+      }
+    } catch {
+      // Keep the already-resolved session if the opportunistic refresh fails.
+    }
+  }
   // If the client sent a cookie but it didn't resolve (session expired,
   // DB wiped, different env) clear it on the response. Otherwise the stale
   // cookie keeps riding along on every request and, combined with SPA auth

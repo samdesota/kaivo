@@ -16,6 +16,7 @@ import {
 const BCRYPT_COST = 12
 export const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 export const ABSOLUTE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const DESKTOP_REFRESH_WINDOW_MS = 24 * 60 * 60 * 1000
 
 export class AuthError extends Error {
   constructor(
@@ -108,13 +109,26 @@ export async function resolveSession(sessionId: string): Promise<Session | null>
   if (!row) return null
 
   const idleCutoff = new Date(now.getTime() - IDLE_TIMEOUT_MS)
-  if (row.expiresAt <= now || row.lastSeen <= idleCutoff) {
+  if (row.expiresAt <= now || (!isDesktopAuthEnabled() && row.lastSeen <= idleCutoff)) {
     await db.delete(webSessions).where(eq(webSessions.id, sessionId))
     return null
   }
 
   await db.update(webSessions).set({ lastSeen: now }).where(eq(webSessions.id, sessionId))
   return { id: row.id, expiresAt: row.expiresAt, lastSeen: now }
+}
+
+export async function refreshDesktopSession(session: Session): Promise<Session> {
+  if (!isDesktopAuthEnabled()) return session
+  const now = new Date()
+  if (session.expiresAt.getTime() - now.getTime() > DESKTOP_REFRESH_WINDOW_MS) return session
+
+  const expiresAt = new Date(now.getTime() + ABSOLUTE_TTL_MS)
+  await db
+    .update(webSessions)
+    .set({ lastSeen: now, expiresAt })
+    .where(eq(webSessions.id, session.id))
+  return { id: session.id, lastSeen: now, expiresAt }
 }
 
 export async function createSession(): Promise<Session> {
@@ -143,6 +157,10 @@ export function verifyDesktopAuthToken(token: string): boolean {
  */
 export async function purgeExpiredSessions(): Promise<number> {
   const now = new Date()
+  if (isDesktopAuthEnabled()) {
+    const result = await db.delete(webSessions).where(lt(webSessions.expiresAt, now)).returning({ id: webSessions.id })
+    return result.length
+  }
   const idleCutoff = new Date(now.getTime() - IDLE_TIMEOUT_MS)
   const result = await db
     .delete(webSessions)
