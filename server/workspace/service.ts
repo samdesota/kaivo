@@ -19,10 +19,14 @@ import {
   type WorkspaceViewState,
   type WorkspaceResourceRow,
   type WorkspaceResourceType,
+  type WorkspaceSystemKey,
 } from '../db/schema.js'
 
 export type Workspace = typeof workspaces.$inferSelect
 export type WorkspaceFolder = typeof workspaceFolders.$inferSelect
+
+export const GLOBAL_TABS_SYSTEM_WORKSPACE_KEY = 'global-tabs' satisfies WorkspaceSystemKey
+export const GLOBAL_TABS_SYSTEM_WORKSPACE_NAME = 'Global tabs'
 
 export type WorkspaceSidebarNode =
   | { type: 'folder'; folder: WorkspaceFolder; children: WorkspaceSidebarNode[] }
@@ -36,6 +40,16 @@ export class WorkspaceError extends Error {
     message: string,
   ) {
     super(message)
+  }
+}
+
+function isHiddenSystemWorkspace(workspace: Workspace): boolean {
+  return workspace.kind === 'system' || workspace.hidden
+}
+
+function assertMutableWorkspace(workspace: Workspace): void {
+  if (workspace.protected || workspace.kind === 'system') {
+    throw new WorkspaceError('invalid_name', 'system workspace cannot be modified')
   }
 }
 
@@ -229,12 +243,50 @@ export function createWorkspaceService(database: Db = db) {
       .orderBy(asc(workspaceFolders.position), asc(workspaceFolders.createdAt), asc(workspaceFolders.id))
   }
 
-  async function listActiveWorkspaces(): Promise<Workspace[]> {
-    return await database
+  async function listActiveWorkspaces(input?: { includeSystem?: boolean }): Promise<Workspace[]> {
+    const rows = await database
       .select()
       .from(workspaces)
       .where(isNull(workspaces.archivedAt))
       .orderBy(asc(workspaces.position), asc(workspaces.createdAt), asc(workspaces.id))
+    return input?.includeSystem ? rows : rows.filter((workspace) => !isHiddenSystemWorkspace(workspace))
+  }
+
+  async function getSystemWorkspace(systemKey: WorkspaceSystemKey): Promise<Workspace | null> {
+    const rows = await database
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.systemKey, systemKey))
+      .limit(1)
+    const row = rows[0]
+    return row && !row.archivedAt ? row : null
+  }
+
+  async function getOrCreateGlobalTabsWorkspace(): Promise<Workspace> {
+    const existing = await getSystemWorkspace(GLOBAL_TABS_SYSTEM_WORKSPACE_KEY)
+    if (existing) return existing
+    const id = ulid()
+    const now = new Date()
+    const row: Workspace = {
+      id,
+      name: GLOBAL_TABS_SYSTEM_WORKSPACE_NAME,
+      folderId: null,
+      position: 0,
+      nameSource: 'explicit',
+      sourceKind: null,
+      sourcePath: null,
+      kind: 'system',
+      systemKey: GLOBAL_TABS_SYSTEM_WORKSPACE_KEY,
+      hidden: true,
+      protected: true,
+      createdAt: now,
+      updatedAt: now,
+      lastOpenedAt: null,
+      archivedAt: null,
+    }
+    await database.insert(workspaces).values(row)
+    await database.insert(workspaceViewStates).values(emptyWorkspaceViewState(id, now))
+    return row
   }
 
   async function nextSiblingPosition(parentId?: string | null): Promise<number> {
@@ -305,7 +357,7 @@ export function createWorkspaceService(database: Db = db) {
         if (descendants.has(parentFolderId)) throw new WorkspaceError('invalid_name', 'cannot move folder into its descendant')
       }
     } else {
-      await get(input.nodeId)
+      assertMutableWorkspace(await get(input.nodeId))
     }
 
     const before = parseMoveBeforeNodeId(input.beforeNodeId)
@@ -315,6 +367,7 @@ export function createWorkspaceService(database: Db = db) {
         if ((row.parentId ?? null) !== parentFolderId) throw new WorkspaceError('invalid_name', 'before folder is not in target parent')
       } else {
         const row = await get(before.id)
+        if (isHiddenSystemWorkspace(row)) throw new WorkspaceError('invalid_name', 'before workspace is not in target parent')
         if ((row.folderId ?? null) !== parentFolderId) throw new WorkspaceError('invalid_name', 'before workspace is not in target parent')
       }
     }
@@ -658,15 +711,16 @@ export function createWorkspaceService(database: Db = db) {
       const now = new Date()
       const folders = await listActiveFolders()
       const folderIds = new Set([id, ...folderDescendantIds(folders, id)])
+      const workspaceRows = await listActiveWorkspaces({ includeSystem: true })
+      const workspacesToArchive = workspaceRows.filter((workspace) => workspace.folderId && folderIds.has(workspace.folderId))
+      for (const workspace of workspacesToArchive) assertMutableWorkspace(workspace)
       for (const folderId of folderIds) {
         await database
           .update(workspaceFolders)
           .set({ archivedAt: now, updatedAt: now })
           .where(eq(workspaceFolders.id, folderId))
       }
-      const workspaceRows = await listActiveWorkspaces()
-      for (const workspace of workspaceRows) {
-        if (!workspace.folderId || !folderIds.has(workspace.folderId)) continue
+      for (const workspace of workspacesToArchive) {
         await database
           .update(workspaces)
           .set({ archivedAt: now, updatedAt: now })
@@ -687,6 +741,8 @@ export function createWorkspaceService(database: Db = db) {
 
     get,
 
+    getOrCreateGlobalTabsWorkspace,
+
     async create(input?: {
       name?: string
       folderId?: string | null
@@ -705,6 +761,10 @@ export function createWorkspaceService(database: Db = db) {
         nameSource: input?.nameSource ?? 'explicit',
         sourceKind: input?.sourceKind ?? null,
         sourcePath: input?.sourcePath ?? null,
+        kind: 'user',
+        systemKey: null,
+        hidden: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
         lastOpenedAt: now,
@@ -725,7 +785,7 @@ export function createWorkspaceService(database: Db = db) {
     async rename(id: string, name: string): Promise<Workspace> {
       const nextName = name.trim()
       if (!nextName) throw new WorkspaceError('invalid_name', 'workspace name is required')
-      await get(id)
+      assertMutableWorkspace(await get(id))
       const now = new Date()
       const rows = await database
         .update(workspaces)
@@ -761,7 +821,7 @@ export function createWorkspaceService(database: Db = db) {
     },
 
     async archive(id: string): Promise<void> {
-      await get(id)
+      assertMutableWorkspace(await get(id))
       const now = new Date()
       await database
         .update(workspaces)

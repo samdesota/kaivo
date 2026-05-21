@@ -29,16 +29,17 @@ import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { browserApi } from '../lib/browser-api'
+import { resolveBrowserAddress } from '../lib/browser-navigation'
 import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
-import { openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
+import { openTextInputOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
-import { paneTabIconForType } from '../components/tab-icon'
+import { paneTabIconForType, TabIconView } from '../components/tab-icon'
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { NewSessionPopover } from './env/agent/session-tabs'
-import type { UniversalMenuContextItem, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
+import type { UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -81,10 +82,21 @@ import {
   type SidebarTreeNode,
   type SidebarDropProjection,
 } from './workspace/sidebar-dnd-state'
-import { trpcQueryKey } from '../lib/trpc-plain'
+import { appTrpcMutation, trpcQueryKey } from '../lib/trpc-plain'
 import { playAgentNotificationSound, readAgentNotificationSoundPrefs, readLastAgentRunDurationMs, useAgentNotificationSoundPrefs } from '../lib/agent-notification-sounds'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
+
+type GlobalTabsWorkspaceSummary = {
+  id: string
+  name: string
+}
+
+type GlobalTabDestination = {
+  workspace: GlobalTabsWorkspaceSummary | null
+  tabs: WorkspaceTab[]
+  activeTabId: string | null
+}
 
 type WorkspaceSummary = {
   id: string
@@ -402,11 +414,17 @@ function WorkspaceShell({
   const navigate = useNavigate({ from: '/w/$workspaceId' })
   const queryClient = useQueryClient()
   const createWorkspace = trpc.workspace.create.useMutation()
+  const getOrCreateGlobalTabsWorkspace = trpc.workspace.getOrCreateGlobalTabsWorkspace.useMutation()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
   const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
   const [closeAgentTabSignal, setCloseAgentTabSignal] = useState(0)
+  const [globalTabsWorkspace, setGlobalTabsWorkspace] = useState<GlobalTabsWorkspaceSummary | null>(null)
+  const [activeGlobalTabId, setActiveGlobalTabId] = useState<string | null>(null)
   const agentCollapsed = ctx.uiState.agentCollapsed
+  const globalTabsStore = useWorkspaceTabsStore(globalTabsWorkspace?.id ?? '__global-tabs-pending__')
+  const globalTabs = globalTabsStore.tabs.filter((tab) => tab.type === 'browser')
+  const activeGlobalTab = globalTabs.find((tab) => tab.id === activeGlobalTabId) ?? null
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
     [dispatchWorkspaceState],
@@ -425,9 +443,35 @@ function WorkspaceShell({
     [agentSessionCount, openWorkspacePane, setAgentCollapsed],
   )
   const closeActiveTab = useCallback(() => {
+    if (activeGlobalTab) {
+      closeWorkspaceTab(activeGlobalTab, {
+        type: 'closeTab',
+        closeTab: globalTabsStore.closeTab,
+        onActiveTabClosed: () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, activeGlobalTab.id)),
+      })
+      return
+    }
     const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
     if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
-  }, [ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState])
+  }, [activeGlobalTab, ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState, globalTabs, globalTabsStore.closeTab])
+
+  useEffect(() => {
+    let cancelled = false
+    void getOrCreateGlobalTabsWorkspace.mutateAsync().then((workspace) => {
+      if (!cancelled) setGlobalTabsWorkspace(workspace as GlobalTabsWorkspaceSummary)
+    }).catch((error) => console.warn('global tabs workspace unavailable', error))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!activeGlobalTabId) return
+    if (!globalTabs.some((tab) => tab.id === activeGlobalTabId)) {
+      setActiveGlobalTabId(globalTabs[0]?.id ?? null)
+    }
+  }, [activeGlobalTabId, globalTabs])
 
   const bootstrapWorkspace = useCallback(async (request: UniversalMenuWorkspaceBootstrapRequest) => {
     console.info('[workspace-bootstrap] create workspace start', { type: request.bootstrap.type, name: request.workspaceCreate.name, sourceKind: request.workspaceCreate.sourceKind })
@@ -457,10 +501,44 @@ function WorkspaceShell({
     })
   }, [ctx.workspace.id, dispatchWorkspaceState, navigate, queryClient])
 
-  const openCommandPalette = useCallback(async (initialIntent: 'default' | 'new-workspace' = 'default') => {
+  const ensureGlobalTabsWorkspace = useCallback(async (): Promise<GlobalTabsWorkspaceSummary> => {
+    if (globalTabsWorkspace) return globalTabsWorkspace
+    const workspace = await getOrCreateGlobalTabsWorkspace.mutateAsync() as GlobalTabsWorkspaceSummary
+    setGlobalTabsWorkspace(workspace)
+    return workspace
+  }, [getOrCreateGlobalTabsWorkspace, globalTabsWorkspace])
+
+  const openGlobalPane = useCallback(async (content: PaneContent, options?: { title?: string }) => {
+    const tab = globalTabFromPaneContent(content, options)
+    if (!tab) return
+    const workspace = await ensureGlobalTabsWorkspace()
+    if (globalTabsWorkspace?.id === workspace.id) {
+      const opened = globalTabsStore.openTab(tab, true)
+      setActiveGlobalTabId(opened.id)
+      return
+    }
+    await appTrpcMutation('workspace.upsertTab', { workspaceId: workspace.id, tab, position: globalTabs.length })
+    setActiveGlobalTabId(tab.id)
+  }, [ensureGlobalTabsWorkspace, globalTabs.length, globalTabsStore, globalTabsWorkspace?.id])
+
+  const openCommandPalette = useCallback(async (initialIntent: UniversalMenuInitialIntent = 'default') => {
     const target = ctx.localEnvTarget
     console.info('[universal-menu] open from workspace', { initialIntent, workspaceId: ctx.workspace.id, envAvailable: Boolean(target?.available), hasToken: Boolean(target?.token) })
-    if (!target?.available || !target.token) return
+    if (!target?.available || !target.token) {
+      if (initialIntent === 'default' || initialIntent === 'global-tab') {
+        const value = await openTextInputOverlay({
+          title: initialIntent === 'global-tab' ? 'New global tab' : 'New tab',
+          label: 'URL or search',
+          placeholder: 'example.com or search terms',
+          confirmLabel: 'Open',
+        })
+        if (!value) return
+        const content: PaneContent = { type: 'browser', url: resolveBrowserAddress(value).url }
+        if (initialIntent === 'global-tab') void openGlobalPane(content)
+        else openPane(content)
+      }
+      return
+    }
     const result = await openUniversalMenuOverlay({
       env: target.env,
       envToken: target.token,
@@ -483,7 +561,10 @@ function WorkspaceShell({
       initialIntent,
     })
     console.info('[universal-menu] result in workspace', { type: result.type, workspaceId: ctx.workspace.id })
-    if (result.type === 'open-pane') openPane(result.content)
+    if (result.type === 'open-pane') {
+      if (result.target === 'global') void openGlobalPane(result.content)
+      else openPane(result.content)
+    }
     if (result.type === 'created-agent-chat') void selectCreatedChat(result.sessionId, result.workspaceId)
     if (result.type === 'workspace-bootstrap') {
       void bootstrapWorkspace(result.request)
@@ -495,7 +576,7 @@ function WorkspaceShell({
     if (result.type === 'toggle-agent-pane') setAgentCollapsed(!agentCollapsed)
     if (result.type === 'toggle-sidebar') setSidebarHidden((v) => !v)
     if (result.type === 'open-settings') void navigate({ to: '/settings' })
-  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openPane, selectCreatedChat, setAgentCollapsed])
+  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, selectCreatedChat, setAgentCollapsed])
 
   useEffect(() => {
     prewarmOverlayLayer()
@@ -508,7 +589,7 @@ function WorkspaceShell({
         void openCommandPalette()
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
-        void openCommandPalette(e.shiftKey ? 'new-workspace' : 'default')
+        void openCommandPalette(universalMenuIntentForTabShortcut(e.shiftKey))
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
@@ -536,44 +617,68 @@ function WorkspaceShell({
           dispatchWorkspaceState={dispatchWorkspaceState}
           onHide={() => setSidebarHidden(true)}
           onNewWorkspaceIntent={() => void openCommandPalette('new-workspace')}
+          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTabId }}
+          onSelectGlobalTab={(tabId) => setActiveGlobalTabId(tabId)}
+          onLeaveGlobalTabs={() => setActiveGlobalTabId(null)}
+          onCloseGlobalTab={(tabId) => {
+            const tab = globalTabs.find((candidate) => candidate.id === tabId)
+            if (!tab) return
+            closeWorkspaceTab(tab, {
+              type: 'closeTab',
+              closeTab: globalTabsStore.closeTab,
+              onActiveTabClosed: tabId === activeGlobalTabId
+                ? () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, tabId))
+                : undefined,
+            })
+          }}
         />
       )}
-      <ShellChrome
-        className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975"
-        style={{ width: sidebarHidden ? '100vw' : undefined }}
-        showHeader={false}
-        title={ctx.workspace.name}
-        subtitle={ctx.localEnvTarget ? `local · ${ctx.localEnvTarget.env.label}` : 'local env unavailable'}
-        splitStorageKey={`workspace.${ctx.workspace.id}.splitRatio`}
-        splitInitialRatio={ctx.uiState.splitRatio ?? 0.7}
-        preferredLeftWidth={ctx.uiState.workspaceTabs.length === 0 && !agentCollapsed ? 800 : undefined}
-        leftCollapsed={agentCollapsed}
-        onSplitRatioChange={onSplitRatioChange}
-        actions={null}
-        left={
-          <WorkspaceAgentPane
-            collapsed={agentCollapsed}
-            onToggleCollapsed={() => setAgentCollapsed(!agentCollapsed)}
-            onSessionListChange={setAgentSessionCount}
-            dispatchWorkspaceState={dispatchWorkspaceState}
-            focused={focusedTabGroup === 'agent'}
-            closeActiveTabSignal={closeAgentTabSignal}
-            onFocusTabs={() => setFocusedTabGroup('agent')}
-            onOpenUniversalMenu={() => void openCommandPalette()}
-          />
-        }
-        right={
-          ctx.uiState.workspaceTabs.length > 0 ? (
-            <WorkspaceTabPane
+      {activeGlobalTab && globalTabsWorkspace ? (
+        <GlobalBrowserTabPane
+          workspaceId={globalTabsWorkspace.id}
+          tab={activeGlobalTab}
+          tabs={globalTabs}
+          tabsStore={globalTabsStore}
+          onActiveTabFallback={(tabId) => setActiveGlobalTabId(tabId)}
+        />
+      ) : (
+        <ShellChrome
+          className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975"
+          style={{ width: sidebarHidden ? '100vw' : undefined }}
+          showHeader={false}
+          title={ctx.workspace.name}
+          subtitle={ctx.localEnvTarget ? `local · ${ctx.localEnvTarget.env.label}` : 'local env unavailable'}
+          splitStorageKey={`workspace.${ctx.workspace.id}.splitRatio`}
+          splitInitialRatio={ctx.uiState.splitRatio ?? 0.7}
+          preferredLeftWidth={ctx.uiState.workspaceTabs.length === 0 && !agentCollapsed ? 800 : undefined}
+          leftCollapsed={agentCollapsed}
+          onSplitRatioChange={onSplitRatioChange}
+          actions={null}
+          left={
+            <WorkspaceAgentPane
+              collapsed={agentCollapsed}
+              onToggleCollapsed={() => setAgentCollapsed(!agentCollapsed)}
+              onSessionListChange={setAgentSessionCount}
               dispatchWorkspaceState={dispatchWorkspaceState}
-              focused={focusedTabGroup === 'workspace'}
-              onFocusTabs={() => setFocusedTabGroup('workspace')}
+              focused={focusedTabGroup === 'agent'}
+              closeActiveTabSignal={closeAgentTabSignal}
+              onFocusTabs={() => setFocusedTabGroup('agent')}
+              onOpenUniversalMenu={() => void openCommandPalette()}
             />
-          ) : (
-            <WorkspaceEmptyPaneCta onOpenPalette={() => void openCommandPalette()} />
-          )
-        }
-      />
+          }
+          right={
+            ctx.uiState.workspaceTabs.length > 0 ? (
+              <WorkspaceTabPane
+                dispatchWorkspaceState={dispatchWorkspaceState}
+                focused={focusedTabGroup === 'workspace'}
+                onFocusTabs={() => setFocusedTabGroup('workspace')}
+              />
+            ) : (
+              <WorkspaceEmptyPaneCta onOpenPalette={() => void openCommandPalette()} />
+            )
+          }
+        />
+      )}
     </div>
     </>
   )
@@ -693,10 +798,18 @@ export function WorkspaceSidebar({
   dispatchWorkspaceState,
   onHide,
   onNewWorkspaceIntent,
+  globalTabsDestination,
+  onSelectGlobalTab,
+  onLeaveGlobalTabs,
+  onCloseGlobalTab,
 }: {
   dispatchWorkspaceState: WorkspaceUiDispatch
   onHide: () => void
   onNewWorkspaceIntent: () => void
+  globalTabsDestination?: GlobalTabDestination
+  onSelectGlobalTab?: (tabId: string) => void
+  onLeaveGlobalTabs?: () => void
+  onCloseGlobalTab?: (tabId: string) => void
 }) {
   const ctx = useWorkspaceContext()
   const navigate = useNavigate()
@@ -1064,6 +1177,15 @@ export function WorkspaceSidebar({
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        <GlobalTabsSidebarSection
+          destination={globalTabsDestination ?? { workspace: null, tabs: [], activeTabId: null }}
+          onSelect={(tabId) => {
+            setSidebarSelection(new Set())
+            lastSelectedDndIdRef.current = null
+            onSelectGlobalTab?.(tabId)
+          }}
+          onClose={(tabId) => onCloseGlobalTab?.(tabId)}
+        />
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -1178,9 +1300,24 @@ export function WorkspaceSidebar({
     if (!workspace) return null
     const dndId = sidebarDndId('workspace', workspace.id)
     const editing = edit.editingId === workspace.id && edit.editingKind === 'workspace'
-    const active = workspace.id === ctx.workspace.id
+    const activeGlobalTabId = globalTabsDestination?.activeTabId ?? null
+    const active = workspaceSidebarRowActive(workspace.id, ctx.workspace.id, activeGlobalTabId)
     const selected = selectedDndIds.has(dndId)
     const showChatRollup = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
+    const workspaceHref = `/w/${workspace.id}`
+    const workspaceRowClassName = 'min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium'
+    const handleWorkspaceLinkClick = (e: ReactMouseEvent) => {
+      onLeaveGlobalTabs?.()
+      if (updateSelection(e, dndId)) return
+      if (!activeGlobalTabId) return
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.button !== 0) return
+      e.preventDefault()
+      void navigate({
+        to: '/w/$workspaceId',
+        params: { workspaceId: workspace.id },
+        search: { chat: undefined, tab: undefined },
+      })
+    }
     return (
       <SortableSidebarRow
         key={dndId}
@@ -1212,22 +1349,37 @@ export function WorkspaceSidebar({
                   aria-label="Workspace name"
                 />
               ) : (
-                <Link
-                  to="/w/$workspaceId"
-                  params={{ workspaceId: workspace.id }}
-                  search={{ chat: undefined, tab: undefined }}
-                  onClick={(e) => {
-                    updateSelection(e, dndId)
-                  }}
-                  onDoubleClick={(e) => {
-                    e.preventDefault()
-                    dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
-                  }}
-                  className="min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium"
-                  title={workspace.name}
-                >
-                  {workspace.name}
-                </Link>
+                activeGlobalTabId ? (
+                  <a
+                    href={workspaceHref}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={handleWorkspaceLinkClick}
+                    onDoubleClick={(e) => {
+                      e.preventDefault()
+                      dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
+                    }}
+                    className={workspaceRowClassName}
+                    title={workspace.name}
+                  >
+                    {workspace.name}
+                  </a>
+                ) : (
+                  <Link
+                    to="/w/$workspaceId"
+                    params={{ workspaceId: workspace.id }}
+                    search={{ chat: undefined, tab: undefined }}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={handleWorkspaceLinkClick}
+                    onDoubleClick={(e) => {
+                      e.preventDefault()
+                      dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
+                    }}
+                    className={workspaceRowClassName}
+                    title={workspace.name}
+                  >
+                    {workspace.name}
+                  </Link>
+                )
               )}
               {showChatRollup && (
                 <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-10">
@@ -1270,6 +1422,216 @@ export function WorkspaceSidebar({
       </SortableSidebarRow>
     )
   }
+}
+
+export function GlobalTabsSidebarSection({
+  destination,
+  onSelect,
+  onClose,
+}: {
+  destination: GlobalTabDestination
+  onSelect: (tabId: string) => void
+  onClose: (tabId: string) => void
+}) {
+  const browserTabs = destination.tabs.filter((tab): tab is Extract<WorkspaceTab, { type: 'browser' }> => tab.type === 'browser')
+  const faviconOrigins = useMemo(() => Array.from(new Set(
+    browserTabs
+      .map((tab) => faviconOriginForUrl(tab.url))
+      .filter((origin): origin is string => Boolean(origin)),
+  )), [browserTabs])
+  const faviconCache = trpc.favicon.getByOrigins.useQuery(
+    { origins: faviconOrigins },
+    { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
+  )
+
+  if (browserTabs.length === 0) return null
+
+  return (
+    <section className="mb-2 border-b border-neutral-900 pb-2" aria-label="Global tabs">
+      <div className="space-y-0.5">
+        {browserTabs.map((tab) => {
+          const active = tab.id === destination.activeTabId
+          const label = globalTabLabel(tab)
+          return (
+            <div key={tab.id} className="group flex items-center gap-px text-neutral-400">
+              <span className="h-4 w-1 shrink-0" aria-hidden="true" />
+              <div className={
+                'relative flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 transition-colors group-hover:bg-highlight group-hover:text-neutral-200 ' +
+                (active ? 'bg-highlight text-neutral-100 ' : 'text-neutral-400')
+              }>
+                <button
+                  type="button"
+                  onClick={() => onSelect(tab.id)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-0.5 py-0.5 text-left text-xs font-medium"
+                  title={label}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  <span className="shrink-0">
+                    <TabIconView
+                      icon={browserTabIconForUrl({
+                        url: tab.url,
+                        records: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
+                        liveDataUrls: {},
+                      })}
+                    />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onClose(tab.id)
+                  }}
+                  className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                  aria-label={`Close global tab ${label}`}
+                  title="Close global tab"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function globalTabLabel(tab: Extract<WorkspaceTab, { type: 'browser' }>): string {
+  const title = tab.title.trim()
+  if (title && title !== 'Browser') return title
+  try {
+    const url = new URL(tab.url)
+    return url.hostname || tab.url
+  } catch {
+    return tab.url || 'Browser'
+  }
+}
+
+export function nextGlobalTabIdAfterClose(tabs: WorkspaceTab[], closingTabId: string): string | null {
+  const browserTabs = tabs.filter((tab) => tab.type === 'browser')
+  const idx = browserTabs.findIndex((tab) => tab.id === closingTabId)
+  if (idx === -1) return browserTabs[0]?.id ?? null
+  const remaining = browserTabs.filter((tab) => tab.id !== closingTabId)
+  return remaining[idx]?.id ?? remaining[idx - 1]?.id ?? null
+}
+
+export function universalMenuIntentForTabShortcut(shiftKey: boolean): UniversalMenuInitialIntent {
+  return shiftKey ? 'global-tab' : 'default'
+}
+
+export function globalTabFromPaneContent(content: PaneContent, options?: { title?: string }): Extract<WorkspaceTab, { type: 'browser' }> | null {
+  const tab = workspaceTabFromPaneContent(content, undefined, options)
+  return tab?.type === 'browser' ? tab : null
+}
+
+export function globalTabUpsertInput(workspaceId: string, content: PaneContent, position: number, options?: { title?: string }): { workspaceId: string; tab: Extract<WorkspaceTab, { type: 'browser' }>; position: number } | null {
+  const tab = globalTabFromPaneContent(content, options)
+  return tab ? { workspaceId, tab, position } : null
+}
+
+export function workspaceSidebarRowActive(workspaceId: string, currentWorkspaceId: string, activeGlobalTabId: string | null): boolean {
+  return workspaceId === currentWorkspaceId && !activeGlobalTabId
+}
+
+type WorkspaceTabsStoreApi = ReturnType<typeof useWorkspaceTabsStore>
+
+function GlobalBrowserTabPane({
+  workspaceId,
+  tab,
+  tabs,
+  tabsStore,
+  onActiveTabFallback,
+}: {
+  workspaceId: string
+  tab: WorkspaceTab
+  tabs: WorkspaceTab[]
+  tabsStore: WorkspaceTabsStoreApi
+  onActiveTabFallback: (tabId: string | null) => void
+}) {
+  const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
+  const pendingFaviconWritesRef = useRef(new Set<string>())
+  const bookmarksStore = useBookmarksStore()
+  const upsertResource = trpc.workspace.upsertResource.useMutation()
+  const upsertFavicon = trpc.favicon.cacheFromUrl.useMutation()
+  const faviconOrigin = tab.type === 'browser' ? faviconOriginForUrl(tab.url) : null
+  const faviconCache = trpc.favicon.getByOrigins.useQuery(
+    { origins: faviconOrigin ? [faviconOrigin] : [] },
+    { enabled: Boolean(faviconOrigin), staleTime: 60_000 },
+  )
+
+  async function handleBrowserFaviconChange(input: { pageUrl: string; faviconUrl: string }) {
+    const origin = faviconOriginForUrl(input.pageUrl)
+    if (!origin) return
+    const key = `${origin}:${input.faviconUrl}`
+    if (pendingFaviconWritesRef.current.has(key)) return
+    pendingFaviconWritesRef.current.add(key)
+    try {
+      const record = await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl })
+      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: record.dataUrl }))
+      void faviconCache.refetch()
+    } catch (error) {
+      console.info('Favicon cache update failed', error)
+    } finally {
+      pendingFaviconWritesRef.current.delete(key)
+    }
+  }
+
+  const dispatchGlobalWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
+    if (action.type === 'setBrowserTabId') {
+      tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
+      const current = tabs.find((candidate) => candidate.id === action.tabId)
+      if (current?.type === 'browser') {
+        upsertResource.mutate({
+          workspaceId,
+          resource: {
+            type: 'browser_tab',
+            resourceKey: action.browserTabId,
+            shared: false,
+            data: { browserTabId: action.browserTabId, tabId: action.tabId, url: current.url, title: current.title },
+          },
+        })
+      }
+    } else if (action.type === 'setTabUrl') {
+      tabsStore.setTabUrl(action.tabId, action.url)
+    } else if (action.type === 'setTabTitle') {
+      tabsStore.setTabTitle(action.tabId, action.title)
+    } else if (action.type === 'closeTab') {
+      tabsStore.closeTab(action.tabId)
+    } else if (action.type === 'activateTab') {
+      onActiveTabFallback(action.tabId)
+    }
+  }, [onActiveTabFallback, tabs, tabsStore, upsertResource, workspaceId])
+
+  return (
+    <section className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975 text-neutral-500" aria-label="Global browser tab">
+      <WorkspaceTabContent
+        key={`${workspaceId}:${tab.id}`}
+        workspaceId={workspaceId}
+        tab={tab}
+        onClose={() => {
+          closeWorkspaceTab(tab, {
+            type: 'closeTab',
+            closeTab: tabsStore.closeTab,
+            onActiveTabClosed: () => onActiveTabFallback(nextGlobalTabIdAfterClose(tabs, tab.id)),
+          })
+        }}
+        onBrowserTabId={(browserTabId) => dispatchGlobalWorkspaceState({ type: 'setBrowserTabId', tabId: tab.id, browserTabId })}
+        onUrlChange={(url) => dispatchGlobalWorkspaceState({ type: 'setTabUrl', tabId: tab.id, url })}
+        onTitleChange={(title) => dispatchGlobalWorkspaceState({ type: 'setTabTitle', tabId: tab.id, title: truncateTabTitle(title) })}
+        onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
+        bookmarks={bookmarksStore.bookmarks}
+        faviconDataUrl={tab.type === 'browser'
+          ? (liveFaviconDataUrls[faviconOriginForUrl(tab.url) ?? ''] ?? ((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(tab.url) ?? '']?.dataUrl ?? null)
+          : null}
+        faviconUrl={tab.type === 'browser'
+          ? (((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(tab.url) ?? '']?.iconUrl ?? null)
+          : null}
+      />
+    </section>
+  )
 }
 
 function WorkspaceSidebarChatCount({
@@ -2162,6 +2524,7 @@ function workspaceTabLabel(tab: WorkspaceTab): string {
 
 function WorkspaceTabContent({
   tab,
+  workspaceId,
   onClose,
   fileEditorState,
   onFileEditorStateChange,
@@ -2175,6 +2538,7 @@ function WorkspaceTabContent({
   faviconUrl,
 }: {
   tab: WorkspaceTab
+  workspaceId?: string
   onClose: () => void
   fileEditorState?: FileEditorState
   onFileEditorStateChange?: (editorState: FileEditorState) => void
@@ -2188,11 +2552,12 @@ function WorkspaceTabContent({
   faviconUrl?: string | null
 }) {
   const ctx = useWorkspaceContext()
+  const contentWorkspaceId = workspaceId ?? ctx.workspace.id
   if (tab.type === 'shell') {
     return (
       <div className="h-full min-h-0 w-full">
         <WorkspaceEnvTargetProvider>
-          <ShellTabContent shellId={tab.shellId} workspaceId={ctx.workspace.id} />
+          <ShellTabContent shellId={tab.shellId} workspaceId={contentWorkspaceId} />
         </WorkspaceEnvTargetProvider>
       </div>
     )
@@ -2213,9 +2578,9 @@ function WorkspaceTabContent({
   }
   return (
     <div className="h-full min-h-0 w-full">
-      <BrowserTabContent
-        paneId={tab.id}
-        workspaceId={ctx.workspace.id}
+        <BrowserTabContent
+          paneId={tab.id}
+          workspaceId={contentWorkspaceId}
         url={tab.url}
         title={tab.title}
         browserTabId={tab.browserTabId}
@@ -2234,11 +2599,22 @@ function WorkspaceTabContent({
   )
 }
 
-function closeWorkspaceTab(tab: WorkspaceTab, dispatchWorkspaceState: WorkspaceUiDispatch): void {
+type CloseWorkspaceTabTarget = WorkspaceUiDispatch | {
+  type: 'closeTab'
+  closeTab: (tabId: string) => void
+  onActiveTabClosed?: () => void
+}
+
+function closeWorkspaceTab(tab: WorkspaceTab, target: CloseWorkspaceTabTarget): void {
   if (tab.type === 'browser' && tab.browserTabId && browserApi.isAvailable()) {
     void browserApi.closeTab({ browserTabId: tab.browserTabId })
   }
-  dispatchWorkspaceState({ type: 'closeTab', tabId: tab.id })
+  if (typeof target === 'function') {
+    target({ type: 'closeTab', tabId: tab.id })
+  } else {
+    target.closeTab(tab.id)
+    target.onActiveTabClosed?.()
+  }
 }
 
 function truncateTabTitle(title: string): string {

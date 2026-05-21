@@ -572,7 +572,7 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.change(input, { target: { value: '@foo' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/foo' })
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/foo' }, 'workspace')
   })
 
   it('opens direct web URLs from the web scope', () => {
@@ -592,7 +592,32 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.change(input, { target: { value: '@google.com' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' })
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'workspace')
+  })
+
+  it('keeps global-tab intent in the normal menu and targets web submissions globally', () => {
+    const onOpenContent = vi.fn()
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        initialIntent="global-tab"
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: 'google.com' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onOpenContent).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: '@google.com' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'global')
   })
 
   it('shows direct web search action for non-url text', () => {
@@ -612,7 +637,7 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.change(input, { target: { value: '@foo bar' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://www.google.com/search?q=foo%20bar' })
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://www.google.com/search?q=foo%20bar' }, 'workspace')
   })
 
   it('shows exact web bookmarks before prefix matches and opens the selected bookmark', () => {
@@ -640,7 +665,7 @@ describe('UniversalMenu baseline shell', () => {
     expect(screen.getByTestId('universal-menu-results').querySelector('img')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /fooexample\.com/ }))
-    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/foo' })
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/foo' }, 'workspace')
   })
 
   it('marks open browser tabs separately from bookmarks in web search', () => {

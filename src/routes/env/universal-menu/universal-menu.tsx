@@ -63,7 +63,8 @@ export interface UniversalMenuContextItem {
   content: PaneContent
 }
 
-export type UniversalMenuInitialIntent = 'default' | 'new-workspace'
+export type UniversalMenuInitialIntent = 'default' | 'new-workspace' | 'global-tab'
+export type UniversalMenuOpenTarget = 'workspace' | 'global'
 
 export type UniversalMenuWorkspaceBootstrap =
   | { type: 'folder'; workspaceId: string; path: string }
@@ -255,7 +256,7 @@ export function UniversalMenu({
   hasActiveTab: boolean
   contextItems?: UniversalMenuContextItem[]
   onClose: () => void
-  onOpenContent?: (content: PaneContent) => void
+  onOpenContent?: (content: PaneContent, target?: UniversalMenuOpenTarget) => void
   onCreatedChat?: (sessionId: string, workspaceId?: string) => void
   onBootstrapWorkspace?: (request: UniversalMenuWorkspaceBootstrapRequest) => void
   onSwitchWorkspace?: (workspaceId: string) => void
@@ -279,6 +280,7 @@ export function UniversalMenu({
   const [detailsWorkspaceId, setDetailsWorkspaceId] = useState<string | undefined>(workspaceId)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const newWorkspaceIntent = intent === 'new-workspace'
+  const globalTabIntent = intent === 'global-tab'
   const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
   const folderProbe = envTrpc.fs.browseHome.useQuery(
@@ -552,7 +554,7 @@ export function UniversalMenu({
         bookmarks: bookmarksStore.bookmarks,
         query,
         faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
-        openContent: (content) => onOpenContent?.(content),
+        openContent: (content) => onOpenContent?.(content, globalTabIntent ? 'global' : 'workspace'),
       })
     }
     if (scope?.definition.id === 'workspaces') {
@@ -576,7 +578,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, newWorkspaceIntent, newWorkspaceResults, onBootstrapWorkspace, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, globalTabIntent, homePath, newWorkspaceIntent, newWorkspaceResults, onBootstrapWorkspace, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, integer, primaryKey, real, sqliteTable, text, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
+import { check, integer, primaryKey, real, sqliteTable, text, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import type { WorkspaceTab } from '../../shared/workspace-pane'
 
 export type { WorkspaceTab }
@@ -12,6 +12,8 @@ export type ShellOwnerKind = 'human' | 'agent'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 export type WorkspaceNameSource = 'explicit' | 'folder_path' | 'worktree' | 'derived'
 export type WorkspaceSourceKind = 'folder' | 'worktree' | 'repo_config'
+export type WorkspaceKind = 'user' | 'system'
+export type WorkspaceSystemKey = 'global-tabs'
 export type WorkspaceResourceType = 'browser_tab' | 'worktree' | 'shell' | 'other'
 
 export type WorkspaceUiState = {
@@ -139,19 +141,27 @@ export const workspaceFolders = sqliteTable('workspace_folders', {
   archivedAt: timestamp('archived_at'),
 })
 
-export const workspaces = sqliteTable('workspaces', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  folderId: text('folder_id').references(() => workspaceFolders.id, { onDelete: 'set null' }),
-  position: integer('position').notNull().default(0),
-  nameSource: text('name_source').$type<WorkspaceNameSource>().notNull().default('explicit'),
-  sourceKind: text('source_kind').$type<WorkspaceSourceKind>(),
-  sourcePath: text('source_path'),
-  createdAt: timestamp('created_at').notNull().default(nowMs),
-  updatedAt: timestamp('updated_at').notNull().default(nowMs),
-  lastOpenedAt: timestamp('last_opened_at'),
-  archivedAt: timestamp('archived_at'),
-})
+export const workspaces = sqliteTable(
+  'workspaces',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    folderId: text('folder_id').references(() => workspaceFolders.id, { onDelete: 'set null' }),
+    position: integer('position').notNull().default(0),
+    nameSource: text('name_source').$type<WorkspaceNameSource>().notNull().default('explicit'),
+    sourceKind: text('source_kind').$type<WorkspaceSourceKind>(),
+    sourcePath: text('source_path'),
+    kind: text('kind').$type<WorkspaceKind>().notNull().default('user'),
+    systemKey: text('system_key').$type<WorkspaceSystemKey>(),
+    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+    protected: integer('protected', { mode: 'boolean' }).notNull().default(false),
+    createdAt: timestamp('created_at').notNull().default(nowMs),
+    updatedAt: timestamp('updated_at').notNull().default(nowMs),
+    lastOpenedAt: timestamp('last_opened_at'),
+    archivedAt: timestamp('archived_at'),
+  },
+  (t) => ({ systemKeyUnique: uniqueIndex('workspaces_system_key_unique').on(t.systemKey) }),
+)
 
 export const workspaceUiStates = sqliteTable('workspace_ui_states', {
   workspaceId: text('workspace_id')

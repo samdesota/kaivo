@@ -117,6 +117,14 @@ export const workspaceRouter = router({
       }
     }),
 
+  getOrCreateGlobalTabsWorkspace: protectedProcedure.mutation(async () => {
+    try {
+      return await workspaceService.getOrCreateGlobalTabsWorkspace()
+    } catch (err) {
+      throw toTrpcError(err)
+    }
+  }),
+
   create: protectedProcedure
     .input(z.object({
       name: z.string().max(200).optional(),
