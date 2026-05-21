@@ -8,7 +8,43 @@ import { chatDebug } from './chat-debug'
 interface CommandEntry {
   name: string
   description?: string | null
+  source?: string | null
 }
+
+const dcpSubcommands: SlashEntry[] = [
+  {
+    name: 'dcp',
+    description: 'Trigger DCP compression with optional focus text',
+    argsHint: 'compress [focus]',
+    insertText: '/dcp compress ',
+    searchAliases: ['compress'],
+    source: 'opencode-command',
+  },
+  {
+    name: 'dcp',
+    description: 'Show DCP context token breakdown',
+    argsHint: 'context',
+    insertText: '/dcp context ',
+    searchAliases: ['context'],
+    source: 'opencode-command',
+  },
+  {
+    name: 'dcp',
+    description: 'Show DCP pruning stats',
+    argsHint: 'stats',
+    insertText: '/dcp stats ',
+    searchAliases: ['stats'],
+    source: 'opencode-command',
+  },
+  {
+    name: 'dcp',
+    description: 'Prune recent tool outputs',
+    argsHint: 'sweep [count]',
+    insertText: '/dcp sweep ',
+    searchAliases: ['sweep'],
+    source: 'opencode-command',
+  },
+]
 
 export function Composer({
   sessionId,
@@ -58,6 +94,7 @@ export function Composer({
         name: 'rename',
         description: 'Rename this session',
         argsHint: '<title>',
+        insertText: '/rename ',
         source: 'ui',
       },
     ]
@@ -66,10 +103,14 @@ export function Composer({
         name: c.name,
         description: c.description ?? '',
         argsHint: '',
-        source: 'opencode',
+        insertText: `/${c.name} `,
+        source: c.source === 'skill' ? 'opencode-skill' : 'opencode-command',
       })
     }
-    return list
+    if ((commands.data as CommandEntry[] | undefined)?.some((c) => c.name === 'dcp')) {
+      list.push(...dcpSubcommands)
+    }
+    return list.sort((a, b) => sourceRank(a.source) - sourceRank(b.source) || a.name.localeCompare(b.name))
   }, [commands.data])
 
   const { isSlash, cmdName, filtered } = useMemo(() => {
@@ -80,7 +121,7 @@ export function Composer({
       isSlash: true,
       cmdName: m[1] ?? '',
       filtered: entries
-        .filter((e) => e.name.toLowerCase().startsWith(q))
+        .filter((e) => [e.name, ...(e.searchAliases ?? [])].some((name) => name.toLowerCase().startsWith(q)))
         .slice(0, 20),
     }
   }, [text, entries])
@@ -98,7 +139,7 @@ export function Composer({
   }, [text])
 
   function selectEntry(e: SlashEntry) {
-    setText(`/${e.name} `)
+    setText(e.insertText)
     setMenuOpen(false)
     taRef.current?.focus()
   }
@@ -112,6 +153,10 @@ export function Composer({
       if (!args) throw new Error('usage: /rename <new title>')
       await rename.mutateAsync({ sessionId, title: args })
       await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList') })
+      return
+    }
+    if (name === 'compress' && (commands.data as CommandEntry[] | undefined)?.some((c) => c.name === 'dcp')) {
+      await runCommand.mutateAsync({ sessionId, command: 'dcp', arguments: ['compress', args].filter(Boolean).join(' ') })
       return
     }
     const known = (commands.data as CommandEntry[] | undefined)?.find((c) => c.name === name)
@@ -275,7 +320,15 @@ interface SlashEntry {
   name: string
   description: string
   argsHint: string
-  source: 'ui' | 'opencode'
+  insertText: string
+  searchAliases?: string[]
+  source: 'ui' | 'opencode-command' | 'opencode-skill'
+}
+
+function sourceRank(source: SlashEntry['source']): number {
+  if (source === 'ui') return 0
+  if (source === 'opencode-command') return 1
+  return 2
 }
 
 function SlashMenu({
@@ -304,7 +357,7 @@ function SlashMenu({
         const active = i === activeIdx
         return (
           <button
-            key={`${e.source}:${e.name}`}
+            key={`${e.source}:${e.name}:${e.argsHint}`}
             onMouseEnter={() => onHover(i)}
             onMouseDown={(ev) => {
               ev.preventDefault()
@@ -323,11 +376,17 @@ function SlashMenu({
               <span className="min-w-0 flex-1 truncate text-neutral-500">{e.description}</span>
             )}
             <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-600">
-              {e.source === 'ui' ? 'ui' : 'opencode'}
+              {sourceLabel(e.source)}
             </span>
           </button>
         )
       })}
     </div>
   )
+}
+
+function sourceLabel(source: SlashEntry['source']): string {
+  if (source === 'ui') return 'ui'
+  if (source === 'opencode-command') return 'command'
+  return 'skill'
 }
