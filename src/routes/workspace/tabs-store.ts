@@ -41,6 +41,8 @@ type WorkspaceTabsChangeEvent = {
   row: (Omit<WorkspaceTabRecord, 'updatedAt'> & { updatedAt: Date | number | string }) | null
 }
 
+const LARGE_WORKSPACE_TABS_REPLAY = 100
+
 function workspaceTabRecordKey(record: Pick<WorkspaceTabRecord, 'workspaceId' | 'id'>): string {
   return JSON.stringify({ workspace_id: record.workspaceId, id: record.id })
 }
@@ -114,6 +116,12 @@ export function useWorkspaceTabsStore(workspaceId: string) {
       getKey: workspaceTabRecordKey,
       queryFn: async () => {
         const snapshot = await appTrpcQuery<WorkspaceTabsSnapshot>('sync.snapshot', { table: 'workspace_tabs' })
+        console.info('[workspace-tabs-store] snapshot loaded', {
+          workspaceId,
+          rowCount: snapshot.rows.length,
+          seq: snapshot.seq,
+          previousSyncedSeq: syncedSeqRef.current,
+        })
         syncedSeqRef.current = Math.max(syncedSeqRef.current, snapshot.seq)
         return snapshot.rows.map(normalizeWorkspaceTabRecord)
       },
@@ -142,11 +150,24 @@ export function useWorkspaceTabsStore(workspaceId: string) {
     return createCollection(options as never) as unknown as WorkspaceTabsCollection
   }, [queryClient, workspaceId])
 
+  const live = useLiveQuery(() => collection, [collection])
+
   trpc.sync.changes.useSubscription(
     { afterSeq: syncedSeqRef.current, tables: ['workspace_tabs'] },
     {
+      enabled: Boolean(live.data),
       onData(events) {
         const batch = events as WorkspaceTabsChangeEvent[]
+        const afterSeqBeforeBatch = syncedSeqRef.current
+        if (afterSeqBeforeBatch === 0 || batch.length >= LARGE_WORKSPACE_TABS_REPLAY) {
+          console.info('[workspace-tabs-store] changes batch', {
+            workspaceId,
+            afterSeqBeforeBatch,
+            eventCount: batch.length,
+            firstSeq: batch[0]?.seq ?? null,
+            lastSeq: batch[batch.length - 1]?.seq ?? null,
+          })
+        }
         const deduped = new Map<string, WorkspaceTabsChangeEvent>()
         for (const event of batch) {
           if (event.seq <= syncedSeqRef.current) continue
@@ -166,7 +187,6 @@ export function useWorkspaceTabsStore(workspaceId: string) {
     },
   )
 
-  const live = useLiveQuery(() => collection, [collection])
   const records = (live.data ?? []).filter((record) => record.workspaceId === workspaceId).slice().sort(compareWorkspaceTabRecords)
   const tabs = records.map(recordToWorkspaceTab).filter((tab): tab is WorkspaceTab => Boolean(tab))
 

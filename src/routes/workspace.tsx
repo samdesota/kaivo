@@ -219,7 +219,44 @@ function getWorkspaceEnvResources(target: WorkspaceEnvTarget): WorkspaceEnvResou
 export function WorkspacePage() {
   const { workspaceId } = useParams({ from: '/w/$workspaceId' })
   const search = useSearch({ from: '/w/$workspaceId' })
-  const navigate = useNavigate({ from: '/w/$workspaceId' })
+
+  return <WorkspaceRoutePage workspaceId={workspaceId} search={search} syncWorkspaceSearch globalTabsMode={false} globalTabsActiveTabId={null} />
+}
+
+export function GlobalTabsPage() {
+  const search = useSearch({ from: '/tabs' })
+  const workspaces = trpc.workspace.list.useQuery()
+  const workspaceId = (workspaces.data as WorkspaceSummary[] | undefined)?.[0]?.id ?? null
+
+  if (workspaces.isLoading && !workspaces.data) return <div className="p-8 text-neutral-500">Loading tabs…</div>
+  if (workspaces.error) return <WorkspaceError message={extractTrpcMessage(workspaces.error)} />
+  if (!workspaceId) return <WorkspaceError message="No workspace available for global tabs." />
+
+  return (
+    <WorkspaceRoutePage
+      workspaceId={workspaceId}
+      search={{ chat: undefined, tab: undefined }}
+      syncWorkspaceSearch={false}
+      globalTabsMode
+      globalTabsActiveTabId={search.tab ?? null}
+    />
+  )
+}
+
+function WorkspaceRoutePage({
+  workspaceId,
+  search,
+  syncWorkspaceSearch,
+  globalTabsMode,
+  globalTabsActiveTabId,
+}: {
+  workspaceId: string
+  search: { chat?: string; tab?: string }
+  syncWorkspaceSearch: boolean
+  globalTabsMode: boolean
+  globalTabsActiveTabId: string | null
+}) {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workspace = trpc.workspace.get.useQuery({ id: workspaceId })
   const envs = trpc.env.list.useQuery({}, { refetchInterval: 10_000 })
@@ -238,6 +275,7 @@ export function WorkspacePage() {
   }, [workspace.data?.id])
 
   useEffect(() => {
+    if (!syncWorkspaceSearch) return
     if (!workspace.data || workspace.data.id !== workspaceId || !viewStateStore.viewState) return
     if (appliedSearchWorkspaceId.current !== workspaceId) {
       appliedSearchWorkspaceId.current = workspaceId
@@ -265,6 +303,8 @@ export function WorkspacePage() {
       viewStateStore.viewState.activeAgentSessionId !== (search.chat ?? null)
     ) {
       void navigate({
+        to: '/w/$workspaceId',
+        params: { workspaceId },
         search: (prev) => ({
           ...prev,
           chat: viewStateStore.viewState?.activeAgentSessionId ?? undefined,
@@ -274,7 +314,7 @@ export function WorkspacePage() {
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.chat, search.tab, tabsStore.tabs, viewStateStore.viewState, workspace.data?.id, workspaceId])
+  }, [search.chat, search.tab, syncWorkspaceSearch, tabsStore.tabs, viewStateStore.viewState, workspace.data?.id, workspaceId])
 
   const dispatchSyncedWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
     if (action.type === 'setActiveAgentSession') {
@@ -390,7 +430,12 @@ export function WorkspacePage() {
         getEnvClient,
       }}
     >
-      <WorkspaceShell key={workspace.data.id} dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
+      <WorkspaceShell
+        key={workspace.data.id}
+        dispatchWorkspaceState={dispatchSyncedWorkspaceState}
+        globalTabsMode={globalTabsMode}
+        globalTabsActiveTabId={globalTabsActiveTabId}
+      />
     </WorkspaceContextProvider>
   )
   lastReadyWorkspaceRef.current = readyWorkspace
@@ -407,11 +452,15 @@ function logWorkspaceLoading(reason: string, workspaceId: string, state: Record<
 
 function WorkspaceShell({
   dispatchWorkspaceState,
+  globalTabsMode,
+  globalTabsActiveTabId,
 }: {
   dispatchWorkspaceState: WorkspaceUiDispatch
+  globalTabsMode: boolean
+  globalTabsActiveTabId: string | null
 }) {
   const ctx = useWorkspaceContext()
-  const navigate = useNavigate({ from: '/w/$workspaceId' })
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const createWorkspace = trpc.workspace.create.useMutation()
   const getOrCreateGlobalTabsWorkspace = trpc.workspace.getOrCreateGlobalTabsWorkspace.useMutation()
@@ -420,11 +469,15 @@ function WorkspaceShell({
   const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
   const [closeAgentTabSignal, setCloseAgentTabSignal] = useState(0)
   const [globalTabsWorkspace, setGlobalTabsWorkspace] = useState<GlobalTabsWorkspaceSummary | null>(null)
-  const [activeGlobalTabId, setActiveGlobalTabId] = useState<string | null>(null)
   const agentCollapsed = ctx.uiState.agentCollapsed
   const globalTabsStore = useWorkspaceTabsStore(globalTabsWorkspace?.id ?? '__global-tabs-pending__')
   const globalTabs = globalTabsStore.tabs.filter((tab) => tab.type === 'browser')
-  const activeGlobalTab = globalTabs.find((tab) => tab.id === activeGlobalTabId) ?? null
+  const activeGlobalTab = globalTabsMode
+    ? (globalTabs.find((tab) => tab.id === globalTabsActiveTabId) ?? globalTabs[0] ?? null)
+    : null
+  const showGlobalTab = useCallback((tabId: string | null) => {
+    void navigate({ to: '/tabs', search: { tab: tabId ?? undefined } })
+  }, [navigate])
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
     [dispatchWorkspaceState],
@@ -447,13 +500,13 @@ function WorkspaceShell({
       closeWorkspaceTab(activeGlobalTab, {
         type: 'closeTab',
         closeTab: globalTabsStore.closeTab,
-        onActiveTabClosed: () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, activeGlobalTab.id)),
+        onActiveTabClosed: () => showGlobalTab(nextGlobalTabIdAfterClose(globalTabs, activeGlobalTab.id)),
       })
       return
     }
     const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
     if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
-  }, [activeGlobalTab, ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState, globalTabs, globalTabsStore.closeTab])
+  }, [activeGlobalTab, ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState, globalTabs, globalTabsStore.closeTab, showGlobalTab])
 
   useEffect(() => {
     let cancelled = false
@@ -467,11 +520,11 @@ function WorkspaceShell({
   }, [])
 
   useEffect(() => {
-    if (!activeGlobalTabId) return
-    if (!globalTabs.some((tab) => tab.id === activeGlobalTabId)) {
-      setActiveGlobalTabId(globalTabs[0]?.id ?? null)
+    if (!globalTabsMode) return
+    if (activeGlobalTab && activeGlobalTab.id !== globalTabsActiveTabId) {
+      showGlobalTab(activeGlobalTab.id)
     }
-  }, [activeGlobalTabId, globalTabs])
+  }, [activeGlobalTab, globalTabsActiveTabId, globalTabsMode, showGlobalTab])
 
   const bootstrapWorkspace = useCallback(async (request: UniversalMenuWorkspaceBootstrapRequest) => {
     console.info('[workspace-bootstrap] create workspace start', { type: request.bootstrap.type, name: request.workspaceCreate.name, sourceKind: request.workspaceCreate.sourceKind })
@@ -514,12 +567,12 @@ function WorkspaceShell({
     const workspace = await ensureGlobalTabsWorkspace()
     if (globalTabsWorkspace?.id === workspace.id) {
       const opened = globalTabsStore.openTab(tab, true)
-      setActiveGlobalTabId(opened.id)
+      showGlobalTab(opened.id)
       return
     }
     await appTrpcMutation('workspace.upsertTab', { workspaceId: workspace.id, tab, position: globalTabs.length })
-    setActiveGlobalTabId(tab.id)
-  }, [ensureGlobalTabsWorkspace, globalTabs.length, globalTabsStore, globalTabsWorkspace?.id])
+    showGlobalTab(tab.id)
+  }, [ensureGlobalTabsWorkspace, globalTabs.length, globalTabsStore, globalTabsWorkspace?.id, showGlobalTab])
 
   const openCommandPalette = useCallback(async (initialIntent: UniversalMenuInitialIntent = 'default') => {
     const target = ctx.localEnvTarget
@@ -617,17 +670,17 @@ function WorkspaceShell({
           dispatchWorkspaceState={dispatchWorkspaceState}
           onHide={() => setSidebarHidden(true)}
           onNewWorkspaceIntent={() => void openCommandPalette('new-workspace')}
-          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTabId }}
-          onSelectGlobalTab={(tabId) => setActiveGlobalTabId(tabId)}
-          onLeaveGlobalTabs={() => setActiveGlobalTabId(null)}
+          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTab?.id ?? null }}
+          onSelectGlobalTab={(tabId) => showGlobalTab(tabId)}
+          onLeaveGlobalTabs={() => undefined}
           onCloseGlobalTab={(tabId) => {
             const tab = globalTabs.find((candidate) => candidate.id === tabId)
             if (!tab) return
             closeWorkspaceTab(tab, {
               type: 'closeTab',
               closeTab: globalTabsStore.closeTab,
-              onActiveTabClosed: tabId === activeGlobalTabId
-                ? () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, tabId))
+              onActiveTabClosed: tabId === activeGlobalTab?.id
+                ? () => showGlobalTab(nextGlobalTabIdAfterClose(globalTabs, tabId))
                 : undefined,
             })
           }}
@@ -639,7 +692,7 @@ function WorkspaceShell({
           tab={activeGlobalTab}
           tabs={globalTabs}
           tabsStore={globalTabsStore}
-          onActiveTabFallback={(tabId) => setActiveGlobalTabId(tabId)}
+          onActiveTabFallback={(tabId) => showGlobalTab(tabId)}
         />
       ) : (
         <ShellChrome
@@ -686,7 +739,7 @@ function WorkspaceShell({
 
 function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { dispatchWorkspaceState: WorkspaceUiDispatch; appQueryClient: QueryClient }) {
   const ctx = useWorkspaceContext()
-  const navigate = useNavigate({ from: '/w/$workspaceId' })
+  const navigate = useNavigate()
   const envQueryClient = useQueryClient()
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const startChat = envTrpc.agent.sessionStart.useMutation()
@@ -759,7 +812,12 @@ function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { 
         if (cancelled) return
         servicesRef.current.dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: session.id })
         console.info('[workspace-bootstrap] chat navigate start', { workspaceId: job.workspaceId, sessionId: session.id })
-        await servicesRef.current.navigate({ search: (prev) => ({ ...prev, chat: session.id, tab: undefined }), replace: true })
+        await servicesRef.current.navigate({
+          to: '/w/$workspaceId',
+          params: { workspaceId: job.workspaceId },
+          search: (prev) => ({ ...prev, chat: session.id, tab: undefined }),
+          replace: true,
+        })
         console.info('[workspace-bootstrap] chat navigate complete', { workspaceId: job.workspaceId, sessionId: session.id })
         finishWorkspaceBootstrap(job.workspaceId)
       } catch (error) {

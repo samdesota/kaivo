@@ -12,7 +12,7 @@ import { LoginPage } from './routes/login'
 import { SetupPage } from './routes/setup'
 import { DashboardPage } from './routes/dashboard'
 import { WorkspaceLandingPage } from './routes/workspace-landing'
-import { WorkspacePage } from './routes/workspace'
+import { GlobalTabsPage, WorkspacePage } from './routes/workspace'
 import { EnvAuthDevicePage } from './routes/envauth-device'
 import { SettingsPage } from './routes/settings'
 import { OverlayLayerPage } from './routes/internal/overlay-layer'
@@ -99,6 +99,14 @@ const workspaceRoute = createRoute({
     tab: typeof s.tab === 'string' ? s.tab : undefined,
   }),
 })
+const globalTabsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tabs',
+  component: GlobalTabsPage,
+  validateSearch: (s: Record<string, unknown>) => ({
+    tab: typeof s.tab === 'string' ? s.tab : undefined,
+  }),
+})
 const envAuthDeviceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/envauth/device',
@@ -124,6 +132,7 @@ const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
   workspaceRoute,
+  globalTabsRoute,
   envAuthDeviceRoute,
   settingsRoute,
   overlayLayerRoute,
