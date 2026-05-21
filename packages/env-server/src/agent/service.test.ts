@@ -198,6 +198,20 @@ beforeEach(() => {
   vi.resetModules()
 })
 
+describe('agent context usage limits', () => {
+  it('prefers the model input limit used by OpenCode compaction', async () => {
+    const { practicalContextUsageLimit } = await import('./service.js')
+
+    expect(practicalContextUsageLimit({ context: 1_050_000, input: 272_000 })).toBe(272_000)
+  })
+
+  it('falls back to context when no input limit is reported', async () => {
+    const { practicalContextUsageLimit } = await import('./service.js')
+
+    expect(practicalContextUsageLimit({ context: 1_050_000 })).toBe(1_050_000)
+  })
+})
+
 describe('agent service workspace sessions', () => {
   it('session creation persists workspaceId and workingDir', async () => {
     const { agentService } = await import('./service.js')

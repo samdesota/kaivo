@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import type { Readable } from 'node:stream'
@@ -44,6 +45,78 @@ interface OpenCodeStartOptions {
 
 const OPENAI_OAUTH_PLUGIN = 'oc-codex-multi-auth'
 const OPENAI_OAUTH_PLACEHOLDER_KEY = 'cloud-code-openai-oauth-placeholder'
+
+type OpenCodeConfigFragment = { plugin?: unknown }
+
+export function realUserOpenCodeConfigDir(home = os.homedir()): string {
+  return path.join(home, '.config', 'opencode')
+}
+
+function stripJsonComments(input: string): string {
+  let out = ''
+  let inString = false
+  let quote = ''
+  let escaped = false
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!
+    const next = input[i + 1]
+    if (inString) {
+      out += ch
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === quote) {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true
+      quote = ch
+      out += ch
+      continue
+    }
+    if (ch === '/' && next === '/') {
+      while (i < input.length && input[i] !== '\n') i++
+      out += '\n'
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < input.length && !(input[i] === '*' && input[i + 1] === '/')) i++
+      i++
+      continue
+    }
+    out += ch
+  }
+  return out
+}
+
+function pluginList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+}
+
+export function mergePluginLists(required: string[], user: string[]): string[] {
+  return Array.from(new Set([...required, ...user]))
+}
+
+export async function readUserOpenCodePlugins(configDir = realUserOpenCodeConfigDir()): Promise<string[]> {
+  const out: string[] = []
+  for (const name of ['opencode.json', 'opencode.jsonc']) {
+    const file = path.join(configDir, name)
+    try {
+      const raw = await fs.readFile(file, 'utf8')
+      const parsed = JSON.parse(name.endsWith('.jsonc') ? stripJsonComments(raw) : raw) as OpenCodeConfigFragment
+      out.push(...pluginList(parsed.plugin))
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue
+      logger.warn({ err, file }, 'ignoring unreadable user opencode config')
+    }
+  }
+  return out
+}
 
 function openAIOAuthMarkerPath(): string {
   return path.join(config.CC_STATE_DIR, 'openai-oauth-enabled')
@@ -497,8 +570,9 @@ class OpenCodeSupervisor {
         xhigh: { reasoningEffort: 'xhigh' },
       },
     }
+    const userPlugins = await readUserOpenCodePlugins()
     const cfg = {
-      plugin: [config.CC_OPENCODE_PLUGIN_PATH, OPENAI_OAUTH_PLUGIN],
+      plugin: mergePluginLists([config.CC_OPENCODE_PLUGIN_PATH, OPENAI_OAUTH_PLUGIN], userPlugins),
       agent: {
         plan: { mode: 'primary', model: 'openai/gpt-5.5' },
         build: { mode: 'primary', model: 'openai/gpt-5.5' },

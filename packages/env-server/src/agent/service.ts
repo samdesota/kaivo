@@ -18,6 +18,7 @@ import { createAgentNotification, IdentityAuthError, IdentityUnreachableError, r
 
 const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
 const REASONING_EFFORT_VARIANTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+type ModelLimit = { context?: number; input?: number }
 export type ReasoningEffortVariant = typeof REASONING_EFFORT_VARIANTS[number]
 export type SessionModelSelection = {
   providerID: string | null
@@ -55,6 +56,10 @@ function directoryOpts(dir: string | null | undefined) {
 
 function isReasoningEffortVariant(value: string | null | undefined): value is ReasoningEffortVariant {
   return REASONING_EFFORT_VARIANTS.includes(value as ReasoningEffortVariant)
+}
+
+export function practicalContextUsageLimit(limit: ModelLimit | null | undefined): number | null {
+  return limit?.input ?? limit?.context ?? null
 }
 
 function promptBody(input: {
@@ -225,7 +230,7 @@ class AgentService {
   private parentByChild = new Map<string, string>()
   private childrenByParent = new Map<string, string[]>()
   private sessionModels = new Map<string, SessionModelSelection>()
-  private contextLimitCache = new Map<string, number>()
+  private contextLimitCache = new Map<string, ModelLimit>()
   private runningOpencodeSessions = new Set<string>()
   private queuedFollowUps = new Map<string, QueuedFollowUp[]>()
   private blockingNotificationKeys = new Set<string>()
@@ -636,22 +641,23 @@ class AgentService {
   ): Promise<number | null> {
     const key = `${providerID}/${modelID}`
     const cached = this.contextLimitCache.get(key)
-    if (cached !== undefined) return cached
+    if (cached !== undefined) return practicalContextUsageLimit(cached)
     try {
       const res = await client.config.providers({ throwOnError: true })
       const body = res.data as {
         providers: Array<{
           id: string
-          models: Record<string, { id: string; limit?: { context?: number } }>
+          models: Record<string, { id: string; limit?: ModelLimit }>
         }>
       }
       for (const p of body.providers) {
         for (const m of Object.values(p.models ?? {})) {
           const k = `${p.id}/${m.id}`
-          if (m.limit?.context) this.contextLimitCache.set(k, m.limit.context)
+          const limit = practicalContextUsageLimit(m.limit)
+          if (limit && m.limit) this.contextLimitCache.set(k, m.limit)
         }
       }
-      return this.contextLimitCache.get(key) ?? null
+      return practicalContextUsageLimit(this.contextLimitCache.get(key))
     } catch {
       return null
     }
