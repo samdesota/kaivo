@@ -400,22 +400,22 @@ function isTabNotFoundResult(result: unknown): result is { ok: false; code: 'TAB
 }
 
 async function trackBrowserCommand<T>(name: string, ctx: Record<string, unknown>, run: () => Promise<T>): Promise<T> {
-  const startedAt = performance.now()
+  const startedAt = nowMs()
   let settled = false
-  const timeout = window.setTimeout(() => {
+  const timeout = globalThis.setTimeout(() => {
     if (settled) return
     logBrowserCommand('pending', name, startedAt, ctx)
   }, 5_000)
   try {
     const result = await run()
     settled = true
-    window.clearTimeout(timeout)
-    const elapsedMs = performance.now() - startedAt
+    globalThis.clearTimeout(timeout)
+    const elapsedMs = nowMs() - startedAt
     if (elapsedMs > 750) logBrowserCommand('slow', name, startedAt, ctx, elapsedMs)
     return result
   } catch (error) {
     settled = true
-    window.clearTimeout(timeout)
+    globalThis.clearTimeout(timeout)
     logBrowserCommand('failed', name, startedAt, {
       ...ctx,
       message: error instanceof Error ? error.message : String(error),
@@ -424,8 +424,16 @@ async function trackBrowserCommand<T>(name: string, ctx: Record<string, unknown>
   }
 }
 
-function logBrowserCommand(state: 'pending' | 'slow' | 'failed', name: string, startedAt: number, ctx: Record<string, unknown>, elapsedMs = performance.now() - startedAt): void {
-  const payload = { command: name, elapsedMs: Math.round(elapsedMs), ...ctx, url: window.location.href }
+function logBrowserCommand(state: 'pending' | 'slow' | 'failed', name: string, startedAt: number, ctx: Record<string, unknown>, elapsedMs = nowMs() - startedAt): void {
+  const payload = { command: name, elapsedMs: Math.round(elapsedMs), ...ctx, url: getCurrentUrl() }
   console.warn(`[browser-api] command ${state} ${JSON.stringify(payload)}`)
   clientLogger.warn(`[browser-api] command ${state}`, payload)
+}
+
+function nowMs(): number {
+  return globalThis.performance?.now() ?? Date.now()
+}
+
+function getCurrentUrl(): string | undefined {
+  return typeof window === 'undefined' ? undefined : window.location.href
 }
