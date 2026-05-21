@@ -189,7 +189,7 @@ function openFolderScopeResults({ data, error, loading, filter, workspaceId, sta
   rows.push(...files.map((file): UniversalMenuResult => ({ id: `open-folder-file:${file.path}`, kind: 'file', label: file.name, detail: file.path, actionHint: 'open file', icon: paneTabIconForType('file'), parentId: `open-folder-current:${data.path}`, depth: 1, haystack: `${file.name} ${file.path}`, run: () => openFile(file.path) })))
 
   const createName = folderNameToCreate(filter, data.dirs)
-  if (createName) rows.push({ id: `open-folder-create:${data.path}/${createName}`, kind: 'action', label: `New folder: ${createName}`, detail: data.path, actionHint: 'create folder', parentId: `open-folder-current:${data.path}`, depth: 1, haystack: `create folder ${createName} ${data.path}`, keepOpen: true, run: () => createFolder(data.path, createName) })
+  if (createName) rows.push({ id: `open-folder-create:${data.path}/${createName}`, kind: 'action', label: `Create folder: ${createName}`, detail: data.path, actionHint: 'create folder', parentId: `open-folder-current:${data.path}`, depth: 1, haystack: `create folder ${createName} ${data.path}`, keepOpen: true, run: () => createFolder(data.path, createName) })
   if (dirs.length === 0 && files.length === 0 && !createName) rows.push(disabledRow('open-folder-no-matches', q ? 'No matching items.' : 'No items.'))
   return rows
 }

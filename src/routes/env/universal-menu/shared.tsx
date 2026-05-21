@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, EllipsisVertical } from 'lucide-react'
+import { EllipsisVertical } from 'lucide-react'
 import { TabIconView } from '../../../components/tab-icon'
 import type { UniversalMenuRenderState, UniversalMenuResult, UniversalMenuResultAction } from './types'
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
@@ -111,11 +111,6 @@ export function UniversalMenuHierarchyRow({ result, state }: { result: Universal
       className={rowClassName(state)}
       style={{ paddingLeft: result.flatHierarchy ? 16 : `${16 + (result.depth ?? 0) * 18}px` }}
     >
-      {!result.flatHierarchy && (
-        <span className="flex w-3 shrink-0 items-center justify-center text-neutral-600">
-          {result.disabled ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
-        </span>
-      )}
       {result.icon && <TabIconView icon={result.icon} />}
       <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
       {detailNode ? <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
