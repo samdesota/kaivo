@@ -64,6 +64,11 @@ vi.mock('../../src/routes/workspace/context', () => ({
 
 vi.mock('../../src/trpc', () => ({
   trpc: {
+    useUtils: () => ({
+      workspace: {
+        listTabs: { fetch: vi.fn(async () => []) },
+      },
+    }),
     workspace: {
       listTree: { useQuery: () => ({ data: treeData }) },
       list: { useQuery: () => ({ data: [{ id: 'workspace-tools', name: 'kaivo-app' }] }) },
