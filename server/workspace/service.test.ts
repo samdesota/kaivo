@@ -8,6 +8,10 @@ type WorkspaceRow = {
   nameSource: 'explicit' | 'folder_path' | 'worktree' | 'derived'
   sourceKind: 'folder' | 'worktree' | 'repo_config' | null
   sourcePath: string | null
+  kind: 'user' | 'system'
+  systemKey: 'global-tabs' | null
+  hidden: boolean
+  protected: boolean
   createdAt: Date
   updatedAt: Date
   lastOpenedAt: Date | null
@@ -141,6 +145,10 @@ vi.mock('../db/schema.js', () => ({
     nameSource: { _col: 'nameSource' },
     sourceKind: { _col: 'sourceKind' },
     sourcePath: { _col: 'sourcePath' },
+    kind: { _col: 'kind' },
+    systemKey: { _col: 'systemKey' },
+    hidden: { _col: 'hidden' },
+    protected: { _col: 'protected' },
     createdAt: { _col: 'createdAt' },
     updatedAt: { _col: 'updatedAt' },
     lastOpenedAt: { _col: 'lastOpenedAt' },
@@ -393,8 +401,67 @@ describe('workspace service', () => {
       nameSource: 'explicit',
       sourceKind: null,
       sourcePath: null,
+      kind: 'user',
+      systemKey: null,
+      hidden: false,
+      protected: false,
     })
-    expect(workspaceRows[0]).toMatchObject({ folderId: null, position: 0, nameSource: 'explicit' })
+    expect(workspaceRows[0]).toMatchObject({ folderId: null, position: 0, nameSource: 'explicit', kind: 'user' })
+  })
+
+  it('creates the global-tabs system workspace idempotently', async () => {
+    const { workspaceService, GLOBAL_TABS_SYSTEM_WORKSPACE_KEY } = await import('./service.js')
+
+    const first = await workspaceService.getOrCreateGlobalTabsWorkspace()
+    const second = await workspaceService.getOrCreateGlobalTabsWorkspace()
+
+    expect(second.id).toBe(first.id)
+    expect(workspaceRows).toHaveLength(1)
+    expect(first).toMatchObject({
+      name: 'Global tabs',
+      kind: 'system',
+      systemKey: GLOBAL_TABS_SYSTEM_WORKSPACE_KEY,
+      hidden: true,
+      protected: true,
+      folderId: null,
+      lastOpenedAt: null,
+    })
+  })
+
+  it('excludes the hidden system workspace from list and tree while internal lookup can retrieve it', async () => {
+    const { workspaceService } = await import('./service.js')
+
+    const system = await workspaceService.getOrCreateGlobalTabsWorkspace()
+    const user = await workspaceService.create({ name: 'User workspace' })
+
+    await expect(workspaceService.list()).resolves.toMatchObject([{ id: user.id }])
+    await expect(workspaceService.listTree()).resolves.toMatchObject([{ type: 'workspace', workspace: { id: user.id } }])
+    await expect(workspaceService.get(system.id)).resolves.toMatchObject({ id: system.id, kind: 'system' })
+  })
+
+  it('rejects rename, archive, move, and folder archive operations for protected system workspaces', async () => {
+    const { workspaceService } = await import('./service.js')
+
+    const folder = await workspaceService.createFolder({ name: 'System parent' })
+    const system = await workspaceService.getOrCreateGlobalTabsWorkspace()
+
+    await expect(workspaceService.rename(system.id, 'Renamed')).rejects.toThrow(/system workspace/i)
+    await expect(workspaceService.archive(system.id)).rejects.toThrow(/system workspace/i)
+    await expect(workspaceService.moveSidebarNode({ nodeType: 'workspace', nodeId: system.id, parentFolderId: folder.id })).rejects.toThrow(/system workspace/i)
+
+    workspaceRows.find((row) => row.id === system.id)!.folderId = folder.id
+    await expect(workspaceService.archiveFolder(folder.id)).rejects.toThrow(/system workspace/i)
+  })
+
+  it('keeps landing default selection on user workspaces when the system workspace exists', async () => {
+    const { workspaceService } = await import('./service.js')
+    const { chooseWorkspaceLandingAction } = await import('../../src/routes/workspace-landing-state.js')
+
+    await workspaceService.getOrCreateGlobalTabsWorkspace()
+    expect(chooseWorkspaceLandingAction(false, await workspaceService.list())).toEqual({ type: 'create' })
+
+    const user = await workspaceService.create({ name: 'User workspace' })
+    expect(chooseWorkspaceLandingAction(false, await workspaceService.list())).toEqual({ type: 'open', workspaceId: user.id })
   })
 
   it('creates and dismisses agent notifications in app storage', async () => {

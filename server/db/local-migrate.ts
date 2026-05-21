@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS workspaces (
   name_source TEXT NOT NULL DEFAULT 'explicit',
   source_kind TEXT,
   source_path TEXT,
+  kind TEXT NOT NULL DEFAULT 'user',
+  system_key TEXT,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  protected INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT ${nowMs},
   updated_at INTEGER NOT NULL DEFAULT ${nowMs},
   last_opened_at INTEGER,
@@ -648,6 +652,20 @@ function migrateWorkspaceFolders(sqlite: Database.Database) {
   rows.forEach((row, position) => update.run(position, row.id))
 }
 
+function migrateSystemWorkspaces(sqlite: Database.Database) {
+  const workspaceColumns = [
+    ['kind', "TEXT NOT NULL DEFAULT 'user'"],
+    ['system_key', 'TEXT'],
+    ['hidden', 'INTEGER NOT NULL DEFAULT 0'],
+    ['protected', 'INTEGER NOT NULL DEFAULT 0'],
+  ] as const
+
+  for (const [name, definition] of workspaceColumns) {
+    if (!columnExists(sqlite, 'workspaces', name)) sqlite.exec(`ALTER TABLE workspaces ADD COLUMN ${name} ${definition}`)
+  }
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_system_key_unique ON workspaces(system_key);')
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
@@ -787,6 +805,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
         sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(bookmarksMigrationName)
       })()
       applied.push(bookmarksMigrationName)
+    }
+
+    const systemWorkspacesMigrationName = '0012_system_workspaces'
+    const systemWorkspacesMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(systemWorkspacesMigrationName)
+    if (!systemWorkspacesMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateSystemWorkspaces(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(systemWorkspacesMigrationName)
+      })()
+      applied.push(systemWorkspacesMigrationName)
     }
 
     return { sqlitePath, applied }

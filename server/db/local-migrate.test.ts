@@ -13,7 +13,7 @@ describe('runLocalAppMigrations', () => {
 
     expect(result).toEqual({
       sqlitePath,
-        applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks'],
+      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces'],
     })
     const sqlite = new Database(sqlitePath, { readonly: true })
     try {
@@ -77,7 +77,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT * FROM workspace_view_states').get()).toMatchObject({
@@ -137,7 +137,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()
@@ -148,12 +148,16 @@ describe('runLocalAppMigrations', () => {
           expect.objectContaining({ name: 'name_source' }),
           expect.objectContaining({ name: 'source_kind' }),
           expect.objectContaining({ name: 'source_path' }),
+          expect.objectContaining({ name: 'kind' }),
+          expect.objectContaining({ name: 'system_key' }),
+          expect.objectContaining({ name: 'hidden' }),
+          expect.objectContaining({ name: 'protected' }),
         ]),
       )
-      expect(migrated.prepare('SELECT id, folder_id, position, name_source FROM workspaces ORDER BY position ASC').all()).toEqual([
-        { id: 'a', folder_id: null, position: 0, name_source: 'explicit' },
-        { id: 'b', folder_id: null, position: 1, name_source: 'explicit' },
-        { id: 'c', folder_id: null, position: 2, name_source: 'explicit' },
+      expect(migrated.prepare('SELECT id, folder_id, position, name_source, kind, system_key, hidden, protected FROM workspaces ORDER BY position ASC').all()).toEqual([
+        { id: 'a', folder_id: null, position: 0, name_source: 'explicit', kind: 'user', system_key: null, hidden: 0, protected: 0 },
+        { id: 'b', folder_id: null, position: 1, name_source: 'explicit', kind: 'user', system_key: null, hidden: 0, protected: 0 },
+        { id: 'c', folder_id: null, position: 2, name_source: 'explicit', kind: 'user', system_key: null, hidden: 0, protected: 0 },
       ])
     } finally {
       migrated.close()
@@ -199,7 +203,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0011_bookmarks'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0011_bookmarks', '0012_system_workspaces'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT id, title, url, normalized_url, origin, favicon_data_url, favicon_url, created_at, updated_at FROM bookmarks').all()).toEqual([

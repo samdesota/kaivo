@@ -9,7 +9,7 @@ import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../env/ag
 import { FolderPickerModal } from '../env/agent/folder-picker-modal'
 import { CommandPalette } from '../env/shell/command-palette'
 import type { PaneContent } from '../env/shell/tab-state'
-import { UniversalMenu, type UniversalMenuContextItem, type UniversalMenuInitialIntent, type UniversalMenuWorkspaceBootstrapRequest } from '../env/universal-menu/universal-menu'
+import { UniversalMenu, type UniversalMenuContextItem, type UniversalMenuInitialIntent, type UniversalMenuOpenTarget, type UniversalMenuWorkspaceBootstrapRequest } from '../env/universal-menu/universal-menu'
 import { Modal } from '../../components/ui'
 import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
@@ -133,7 +133,7 @@ export type OverlayResponse =
   | { requestId: string; type: 'workspace-bootstrap'; request: UniversalMenuWorkspaceBootstrapRequest }
   | { requestId: string; type: 'switch-workspace'; workspaceId: string }
   | { requestId: string; type: 'selected-folder'; path: string }
-  | { requestId: string; type: 'open-pane'; content: PaneContent }
+  | { requestId: string; type: 'open-pane'; content: PaneContent; target?: UniversalMenuOpenTarget }
   | { requestId: string; type: 'close-tab' }
   | { requestId: string; type: 'new-session' }
   | { requestId: string; type: 'new-workspace' }
@@ -324,7 +324,7 @@ function EnvOverlayRequestRenderer({
                 console.info('[overlay-layer] universal-menu close', { requestId: request.requestId })
                 respond({ requestId: request.requestId, type: 'closed' })
               }}
-              onOpenContent={(content) => respond({ requestId: request.requestId, type: 'open-pane', content })}
+              onOpenContent={(content, target) => respond({ requestId: request.requestId, type: 'open-pane', content, target })}
               onCreatedChat={(sessionId: string, workspaceId?: string) => {
                 console.info('[overlay-layer] universal-menu created chat', { requestId: request.requestId, sessionId, workspaceId })
                 respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })
