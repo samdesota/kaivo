@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@samdesota/webframe": "^0.1.9",
+    "@samdesota/webframe": "^0.1.10",
     "electron": "^42.0.1"
   },
   "devDependencies": {
