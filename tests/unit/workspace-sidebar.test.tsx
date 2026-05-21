@@ -77,6 +77,9 @@ vi.mock('../../src/trpc', () => ({
       setFolderCollapsed: { useMutation: () => ({ mutate: vi.fn() }) },
       moveSidebarNode: { useMutation: () => ({ mutateAsync: moveSidebarNodeMock }) },
     },
+    favicon: {
+      getByOrigins: { useQuery: () => ({ data: {} }) },
+    },
     sync: {
       changes: { useSubscription: () => undefined },
     },
