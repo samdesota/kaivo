@@ -13,6 +13,9 @@ const api = {
   forward: vi.fn(async () => undefined),
   reload: vi.fn(async () => undefined),
   openDevTools: vi.fn(async () => undefined),
+  findInPage: vi.fn(async () => undefined),
+  stopFindInPage: vi.fn(async () => undefined),
+  setZoom: vi.fn(async (input: { level: number }) => ({ zoomLevel: input.level })),
   registerTabFocusOwner: vi.fn(() => undefined),
   getAgentConnections: vi.fn(async () => ({ browserTabIds: [] })),
   disconnectAgent: vi.fn(async () => undefined),
@@ -20,6 +23,7 @@ const api = {
   setSlot: vi.fn(async () => undefined),
   onTabChange: vi.fn(() => () => undefined),
   onTabFocus: vi.fn(() => () => undefined),
+  onFoundInPage: vi.fn(() => () => undefined),
 }
 
 vi.mock('../../src/lib/browser-api', () => ({
@@ -62,6 +66,8 @@ describe('BrowserPane', () => {
     vi.clearAllMocks()
     api.onTabChange.mockReturnValue(() => undefined)
     api.onTabFocus.mockReturnValue(() => undefined)
+    api.onFoundInPage.mockReturnValue(() => undefined)
+    api.setZoom.mockImplementation(async (input: { level: number }) => ({ zoomLevel: input.level }))
     api.isAvailable.mockReturnValue(true)
     api.getAgentConnections.mockResolvedValue({ browserTabIds: [] })
     openCreateBookmarkOverlay.mockClear()
@@ -169,6 +175,52 @@ describe('BrowserPane', () => {
       browserTabId: 'native-tab-1',
       url: 'https://example.org/path',
     }))
+  })
+
+  it('opens find in page from shortcut and drives browser find controls', async () => {
+    let onFoundInPage: ((event: { browserTabId: string; activeMatchOrdinal: number; matches: number }) => void) | undefined
+    api.onFoundInPage.mockImplementation((handler) => {
+      onFoundInPage = handler
+      return () => undefined
+    })
+    const view = render(<BrowserPane paneId="pane-1" browserTabId="native-tab-1" url="https://example.com" active={true} />)
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    fireEvent.keyDown(window, { key: 'f', metaKey: true })
+    const findInput = view.getByLabelText('Find in page') as HTMLInputElement
+    fireEvent.change(findInput, { target: { value: 'needle' } })
+
+    await waitFor(() => expect(api.findInPage).toHaveBeenCalledWith({
+      browserTabId: 'native-tab-1',
+      text: 'needle',
+      forward: true,
+      findNext: false,
+    }))
+
+    act(() => onFoundInPage?.({ browserTabId: 'native-tab-1', activeMatchOrdinal: 2, matches: 5 }))
+    expect(view.getByText('2/5')).toBeTruthy()
+
+    fireEvent.keyDown(findInput, { key: 'Enter' })
+    await waitFor(() => expect(api.findInPage).toHaveBeenCalledWith(expect.objectContaining({
+      browserTabId: 'native-tab-1',
+      text: 'needle',
+      forward: true,
+      findNext: true,
+    })))
+
+    fireEvent.keyDown(findInput, { key: 'Escape' })
+    await waitFor(() => expect(api.stopFindInPage).toHaveBeenCalledWith({ browserTabId: 'native-tab-1', action: 'keepSelection' }))
+  })
+
+  it('zooms the browser pane from keyboard shortcuts', async () => {
+    render(<BrowserPane paneId="pane-1" browserTabId="native-tab-1" url="https://example.com" active={true} />)
+
+    await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
+    fireEvent.keyDown(window, { key: '=', metaKey: true })
+    await waitFor(() => expect(api.setZoom).toHaveBeenCalledWith({ browserTabId: 'native-tab-1', level: 0.5 }))
+
+    fireEvent.keyDown(window, { key: '0', metaKey: true })
+    await waitFor(() => expect(api.setZoom).toHaveBeenCalledWith({ browserTabId: 'native-tab-1', level: 0 }))
   })
 
   it('filters URL bar bookmarks and renders favicon rows without bookmark labels', async () => {

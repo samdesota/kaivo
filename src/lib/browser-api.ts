@@ -24,6 +24,14 @@ export type BrowserTabFocus = {
   browserTabId: string
 }
 
+export type BrowserFoundInPage = {
+  browserTabId: string
+  requestId: number
+  activeMatchOrdinal: number
+  matches: number
+  finalUpdate: boolean
+}
+
 export type BrowserApi = {
   isAvailable(): boolean
   getWindowId(): Promise<string>
@@ -36,6 +44,9 @@ export type BrowserApi = {
   forward(input: { browserTabId: string }): Promise<void>
   reload(input: { browserTabId: string; ignoreCache?: boolean }): Promise<void>
   openDevTools(input: { browserTabId: string }): Promise<void>
+  findInPage(input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }): Promise<void>
+  stopFindInPage(input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }): Promise<void>
+  setZoom(input: { browserTabId: string; level: number }): Promise<{ zoomLevel: number }>
   registerTabFocusOwner(input: { browserTabId: string }): void
   getAgentConnections(): Promise<{ browserTabIds: string[] }>
   disconnectAgent(input: { browserTabId: string }): Promise<void>
@@ -49,6 +60,7 @@ export type BrowserApi = {
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
   onWindowTabCreated(handler: (event: BrowserTabCreated) => void): () => void
   onTabFocus(handler: (event: BrowserTabFocus) => void): () => void
+  onFoundInPage(handler: (event: BrowserFoundInPage) => void): () => void
 }
 
 type WebframeGlobal = {
@@ -101,6 +113,10 @@ type BrowserWindowLike = Window & { webframe?: WebframeGlobal }
 type DesktopWindowLike = Window & {
   cloudCodeDesktop?: {
       openBrowserDevTools?: (input: { browserTabId: string }) => Promise<unknown>
+      findInBrowserPage?: (input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }) => Promise<unknown>
+      stopBrowserFindInPage?: (input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => Promise<unknown>
+      setBrowserZoom?: (input: { browserTabId: string; level: number }) => Promise<{ zoomLevel: number }>
+      onBrowserFoundInPage?: (handler: (input: BrowserFoundInPage) => void) => () => void
       getAgentBrowserConnections?: () => Promise<{ browserTabIds: string[] }>
       disconnectAgentBrowser?: (input: { browserTabId: string }) => Promise<unknown>
       registerBrowserTabFocusOwner?: (input: { browserTabId: string }) => void
@@ -210,6 +226,24 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const desktop = win as DesktopWindowLike | undefined
       if (!desktop?.cloudCodeDesktop?.openBrowserDevTools) throw new Error('browser devtools unavailable')
       await desktop.cloudCodeDesktop.openBrowserDevTools({ browserTabId: input.browserTabId })
+    },
+
+    async findInPage(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.findInBrowserPage) throw new Error('browser find unavailable')
+      await desktop.cloudCodeDesktop.findInBrowserPage(input)
+    },
+
+    async stopFindInPage(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.stopBrowserFindInPage) throw new Error('browser find unavailable')
+      await desktop.cloudCodeDesktop.stopBrowserFindInPage(input)
+    },
+
+    async setZoom(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.setBrowserZoom) throw new Error('browser zoom unavailable')
+      return desktop.cloudCodeDesktop.setBrowserZoom(input)
     },
 
     registerTabFocusOwner(input) {
@@ -330,6 +364,11 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const desktop = win as DesktopWindowLike | undefined
       return desktop?.cloudCodeDesktop?.onBrowserTabFocus?.(handler) ?? (() => undefined)
     },
+
+    onFoundInPage(handler) {
+      const desktop = win as DesktopWindowLike | undefined
+      return desktop?.cloudCodeDesktop?.onBrowserFoundInPage?.(handler) ?? (() => undefined)
+    },
   }
 }
 
@@ -361,22 +400,22 @@ function isTabNotFoundResult(result: unknown): result is { ok: false; code: 'TAB
 }
 
 async function trackBrowserCommand<T>(name: string, ctx: Record<string, unknown>, run: () => Promise<T>): Promise<T> {
-  const startedAt = performance.now()
+  const startedAt = nowMs()
   let settled = false
-  const timeout = window.setTimeout(() => {
+  const timeout = globalThis.setTimeout(() => {
     if (settled) return
     logBrowserCommand('pending', name, startedAt, ctx)
   }, 5_000)
   try {
     const result = await run()
     settled = true
-    window.clearTimeout(timeout)
-    const elapsedMs = performance.now() - startedAt
+    globalThis.clearTimeout(timeout)
+    const elapsedMs = nowMs() - startedAt
     if (elapsedMs > 750) logBrowserCommand('slow', name, startedAt, ctx, elapsedMs)
     return result
   } catch (error) {
     settled = true
-    window.clearTimeout(timeout)
+    globalThis.clearTimeout(timeout)
     logBrowserCommand('failed', name, startedAt, {
       ...ctx,
       message: error instanceof Error ? error.message : String(error),
@@ -385,8 +424,16 @@ async function trackBrowserCommand<T>(name: string, ctx: Record<string, unknown>
   }
 }
 
-function logBrowserCommand(state: 'pending' | 'slow' | 'failed', name: string, startedAt: number, ctx: Record<string, unknown>, elapsedMs = performance.now() - startedAt): void {
-  const payload = { command: name, elapsedMs: Math.round(elapsedMs), ...ctx, url: window.location.href }
+function logBrowserCommand(state: 'pending' | 'slow' | 'failed', name: string, startedAt: number, ctx: Record<string, unknown>, elapsedMs = nowMs() - startedAt): void {
+  const payload = { command: name, elapsedMs: Math.round(elapsedMs), ...ctx, url: getCurrentUrl() }
   console.warn(`[browser-api] command ${state} ${JSON.stringify(payload)}`)
   clientLogger.warn(`[browser-api] command ${state}`, payload)
+}
+
+function nowMs(): number {
+  return globalThis.performance?.now() ?? Date.now()
+}
+
+function getCurrentUrl(): string | undefined {
+  return typeof window === 'undefined' ? undefined : window.location.href
 }

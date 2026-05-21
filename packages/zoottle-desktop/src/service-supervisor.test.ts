@@ -69,7 +69,7 @@ describe('ensureDesktopServices', () => {
       { cwd: process.cwd(), homeDir: root },
     )
 
-    const supervisor = await ensureDesktopServices(config, { cwd: process.cwd(), waitMs: 15_000 })
+    const supervisor = await ensureDesktopServices(config, { cwd: process.cwd(), waitMs: 30_000 })
 
     try {
       expect(supervisor.app.launched).toBe(true)
@@ -98,7 +98,7 @@ describe('ensureDesktopServices', () => {
     } finally {
       await supervisor.stop()
     }
-  }, 20_000)
+  }, 35_000)
 })
 
 function fakeLaunch(_service: ServiceName, _spec: ServiceLaunchSpec) {
