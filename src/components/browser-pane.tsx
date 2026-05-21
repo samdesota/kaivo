@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { browserApi } from '../lib/browser-api'
 import { matchBookmarks, normalizeBrowserUrl, resolveBrowserAddress, type BookmarkMatch } from '../lib/browser-navigation'
 import { openBrowserUrlPopoverOverlay, openCreateBookmarkOverlay, type BrowserUrlPopoverSession } from '../lib/overlay-layer-controller'
@@ -49,6 +49,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   const slotRef = useRef<HTMLDivElement | null>(null)
   const browserTabIdRef = useRef(browserTabId)
   const addressInputRef = useRef<HTMLInputElement | null>(null)
+  const findInputRef = useRef<HTMLInputElement | null>(null)
   const addressResultsRef = useRef<AddressResult[]>([])
   const addressPopoverRef = useRef<BrowserUrlPopoverSession | null>(null)
   const createdTabIdRef = useRef<string | null>(null)
@@ -60,12 +61,18 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
   const slotReadyRef = useRef<Promise<void>>(Promise.resolve())
+  const findQueryRef = useRef('')
+  const zoomLevelRef = useRef(0)
   const [address, setAddress] = useState(url ?? '')
   const [pageTitle, setPageTitle] = useState(title ?? '')
   const [pageFaviconUrl, setPageFaviconUrl] = useState(faviconUrl ?? null)
   const [agentConnected, setAgentConnected] = useState(false)
   const [addressFocused, setAddressFocused] = useState(false)
   const [activeAddressResult, setActiveAddressResult] = useState<number | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findMatch, setFindMatch] = useState<{ active: number; total: number } | null>(null)
+  const [zoomLevel, setZoomLevel] = useState(0)
 
   browserTabIdRef.current = browserTabId
   onBrowserTabIdRef.current = onBrowserTabId
@@ -73,6 +80,8 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   onTitleChangeRef.current = onTitleChange
   onFaviconChangeRef.current = onFaviconChange
   onNativeFocusRef.current = onNativeFocus
+  findQueryRef.current = findQuery
+  zoomLevelRef.current = zoomLevel
 
   useEffect(() => {
     setAddress(url ?? '')
@@ -201,6 +210,51 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
       onNativeFocusRef.current?.()
     })
   }, [paneId])
+
+  useEffect(() => {
+    if (!browserApi.isAvailable()) return
+    return browserApi.onFoundInPage((event) => {
+      if (event.browserTabId !== browserTabIdRef.current) return
+      setFindMatch({ active: event.activeMatchOrdinal, total: event.matches })
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!findOpen) return
+    window.setTimeout(() => {
+      findInputRef.current?.focus()
+      findInputRef.current?.select()
+    }, 0)
+  }, [findOpen])
+
+  useEffect(() => {
+    if (!active || !browserApi.isAvailable()) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'f') {
+        event.preventDefault()
+        setFindOpen(true)
+        return
+      }
+      if (key === '+' || key === '=') {
+        event.preventDefault()
+        void setBrowserZoom(zoomLevelRef.current + 0.5)
+        return
+      }
+      if (key === '-' || key === '_') {
+        event.preventDefault()
+        void setBrowserZoom(zoomLevelRef.current - 0.5)
+        return
+      }
+      if (key === '0') {
+        event.preventDefault()
+        void setBrowserZoom(0)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [active])
 
   useEffect(() => {
     if (!browserApi.isAvailable() || !browserTabId) return
@@ -339,7 +393,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
     })
   }
 
-  function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleAddressKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
       event.preventDefault()
       void openBookmarkOverlay()
@@ -397,6 +451,47 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   async function openDevTools() {
     if (!activeBrowserTabId) return
     await browserApi.openDevTools({ browserTabId: activeBrowserTabId })
+  }
+
+  async function runFind(nextQuery: string, options?: { forward?: boolean; findNext?: boolean }) {
+    if (!activeBrowserTabId) return
+    if (!nextQuery) {
+      setFindMatch(null)
+      await browserApi.stopFindInPage({ browserTabId: activeBrowserTabId, action: 'clearSelection' })
+      return
+    }
+    await browserApi.findInPage({
+      browserTabId: activeBrowserTabId,
+      text: nextQuery,
+      forward: options?.forward ?? true,
+      findNext: options?.findNext ?? false,
+    })
+  }
+
+  async function closeFind() {
+    setFindOpen(false)
+    setFindMatch(null)
+    if (!activeBrowserTabId) return
+    await browserApi.stopFindInPage({ browserTabId: activeBrowserTabId, action: 'keepSelection' })
+  }
+
+  async function setBrowserZoom(nextZoomLevel: number) {
+    const targetTabId = browserTabIdRef.current
+    if (!targetTabId) return
+    const result = await browserApi.setZoom({ browserTabId: targetTabId, level: nextZoomLevel })
+    setZoomLevel(result.zoomLevel)
+  }
+
+  function handleFindKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      void closeFind()
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void runFind(findQueryRef.current, { forward: !event.shiftKey, findNext: true })
+    }
   }
 
   async function disconnectAgent() {
@@ -481,6 +576,51 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
           >
             Disconnect
           </button>
+        </div>
+      ) : null}
+      {findOpen ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-300">
+          <label className="sr-only" htmlFor={`browser-find-${paneId}`}>Find in page</label>
+          <input
+            ref={findInputRef}
+            id={`browser-find-${paneId}`}
+            value={findQuery}
+            onChange={(event) => {
+              const nextQuery = event.currentTarget.value
+              setFindQuery(nextQuery)
+              void runFind(nextQuery)
+            }}
+            onKeyDown={handleFindKeyDown}
+            placeholder="Find in page"
+            className="w-56 rounded-md border border-neutral-800 bg-input px-2 py-1 text-xs text-neutral-100 outline-none placeholder:text-placeholder focus:border-neutral-600"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <span className="min-w-12 text-right text-neutral-500">
+            {findQuery ? `${findMatch?.active ?? 0}/${findMatch?.total ?? 0}` : ''}
+          </span>
+          <BrowserControlButton
+            label="Previous match"
+            disabled={!activeBrowserTabId || !findQuery}
+            onClick={() => void runFind(findQuery, { forward: false, findNext: true })}
+          >
+            ↑
+          </BrowserControlButton>
+          <BrowserControlButton
+            label="Next match"
+            disabled={!activeBrowserTabId || !findQuery}
+            onClick={() => void runFind(findQuery, { forward: true, findNext: true })}
+          >
+            ↓
+          </BrowserControlButton>
+          <BrowserControlButton
+            label="Close find"
+            disabled={false}
+            onClick={() => void closeFind()}
+          >
+            ×
+          </BrowserControlButton>
         </div>
       ) : null}
       <div ref={slotRef} className="min-h-0 flex-1 bg-neutral-975" aria-label="Browser pane slot" />

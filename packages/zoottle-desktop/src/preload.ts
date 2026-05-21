@@ -29,6 +29,14 @@ ipcRenderer.on('cloud-code/app-shortcut', (_event, input: AppShortcutInput) => {
 contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   kind: 'skeleton',
   openBrowserDevTools: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/open-devtools', input),
+  findInBrowserPage: (input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('cloud-code/browser/find-in-page', input),
+  stopBrowserFindInPage: (input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => ipcRenderer.invoke('cloud-code/browser/stop-find-in-page', input),
+  setBrowserZoom: (input: { browserTabId: string; level: number }) => ipcRenderer.invoke('cloud-code/browser/set-zoom', input),
+  onBrowserFoundInPage: (handler: (input: { browserTabId: string; requestId: number; activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, input: { browserTabId: string; requestId: number; activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => handler(input)
+    ipcRenderer.on('cloud-code/browser-found-in-page', listener)
+    return () => ipcRenderer.removeListener('cloud-code/browser-found-in-page', listener)
+  },
   getAgentBrowserConnections: () => ipcRenderer.invoke('cloud-code/browser/agent-connections'),
   disconnectAgentBrowser: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/disconnect-agent', input),
   registerBrowserTabFocusOwner: (input: { browserTabId: string }) => ipcRenderer.send('cloud-code/browser/register-tab-focus-owner', input),

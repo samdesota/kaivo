@@ -24,6 +24,14 @@ export type BrowserTabFocus = {
   browserTabId: string
 }
 
+export type BrowserFoundInPage = {
+  browserTabId: string
+  requestId: number
+  activeMatchOrdinal: number
+  matches: number
+  finalUpdate: boolean
+}
+
 export type BrowserApi = {
   isAvailable(): boolean
   getWindowId(): Promise<string>
@@ -36,6 +44,9 @@ export type BrowserApi = {
   forward(input: { browserTabId: string }): Promise<void>
   reload(input: { browserTabId: string; ignoreCache?: boolean }): Promise<void>
   openDevTools(input: { browserTabId: string }): Promise<void>
+  findInPage(input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }): Promise<void>
+  stopFindInPage(input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }): Promise<void>
+  setZoom(input: { browserTabId: string; level: number }): Promise<{ zoomLevel: number }>
   registerTabFocusOwner(input: { browserTabId: string }): void
   getAgentConnections(): Promise<{ browserTabIds: string[] }>
   disconnectAgent(input: { browserTabId: string }): Promise<void>
@@ -49,6 +60,7 @@ export type BrowserApi = {
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
   onWindowTabCreated(handler: (event: BrowserTabCreated) => void): () => void
   onTabFocus(handler: (event: BrowserTabFocus) => void): () => void
+  onFoundInPage(handler: (event: BrowserFoundInPage) => void): () => void
 }
 
 type WebframeGlobal = {
@@ -101,6 +113,10 @@ type BrowserWindowLike = Window & { webframe?: WebframeGlobal }
 type DesktopWindowLike = Window & {
   cloudCodeDesktop?: {
       openBrowserDevTools?: (input: { browserTabId: string }) => Promise<unknown>
+      findInBrowserPage?: (input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }) => Promise<unknown>
+      stopBrowserFindInPage?: (input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => Promise<unknown>
+      setBrowserZoom?: (input: { browserTabId: string; level: number }) => Promise<{ zoomLevel: number }>
+      onBrowserFoundInPage?: (handler: (input: BrowserFoundInPage) => void) => () => void
       getAgentBrowserConnections?: () => Promise<{ browserTabIds: string[] }>
       disconnectAgentBrowser?: (input: { browserTabId: string }) => Promise<unknown>
       registerBrowserTabFocusOwner?: (input: { browserTabId: string }) => void
@@ -210,6 +226,24 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const desktop = win as DesktopWindowLike | undefined
       if (!desktop?.cloudCodeDesktop?.openBrowserDevTools) throw new Error('browser devtools unavailable')
       await desktop.cloudCodeDesktop.openBrowserDevTools({ browserTabId: input.browserTabId })
+    },
+
+    async findInPage(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.findInBrowserPage) throw new Error('browser find unavailable')
+      await desktop.cloudCodeDesktop.findInBrowserPage(input)
+    },
+
+    async stopFindInPage(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.stopBrowserFindInPage) throw new Error('browser find unavailable')
+      await desktop.cloudCodeDesktop.stopBrowserFindInPage(input)
+    },
+
+    async setZoom(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.setBrowserZoom) throw new Error('browser zoom unavailable')
+      return desktop.cloudCodeDesktop.setBrowserZoom(input)
     },
 
     registerTabFocusOwner(input) {
@@ -329,6 +363,11 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     onTabFocus(handler) {
       const desktop = win as DesktopWindowLike | undefined
       return desktop?.cloudCodeDesktop?.onBrowserTabFocus?.(handler) ?? (() => undefined)
+    },
+
+    onFoundInPage(handler) {
+      const desktop = win as DesktopWindowLike | undefined
+      return desktop?.cloudCodeDesktop?.onBrowserFoundInPage?.(handler) ?? (() => undefined)
     },
   }
 }

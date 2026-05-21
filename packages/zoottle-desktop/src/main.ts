@@ -44,6 +44,15 @@ type AppShortcutInput = {
   shiftKey: boolean
 }
 
+type FindInPageResult = {
+  browserTabId: string
+  requestId: number
+  activeMatchOrdinal: number
+  matches: number
+  selectionArea?: { x: number; y: number; width: number; height: number }
+  finalUpdate: boolean
+}
+
 function writeLog(kind: DesktopLogKind, level: 'info' | 'error', msg: string, ctx?: Record<string, unknown>): void {
   if (!logPath) return
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
@@ -92,6 +101,20 @@ function trackWebContents(contents: WebContents): void {
       altKey: input.alt,
       shiftKey: input.shift,
     })
+  })
+  contents.on('found-in-page', (_event, result) => {
+    const browserTabId = findBrowserTabIdForWebContents(contents)
+    if (!browserTabId) return
+    const chrome = findChromeWebContentsForBrowserTab(browserTabId) ?? findChromeWebContentsForShortcutSender(contents)
+    if (!chrome || chrome.isDestroyed()) return
+    chrome.send('cloud-code/browser-found-in-page', {
+      browserTabId,
+      requestId: result.requestId,
+      activeMatchOrdinal: result.activeMatchOrdinal,
+      matches: result.matches,
+      selectionArea: result.selectionArea,
+      finalUpdate: result.finalUpdate,
+    } satisfies FindInPageResult)
   })
   contents.on('console-message', (_event, level, message, line, sourceId) => {
     const kind = chromeWebContentsIds.has(contents.id) ? 'chrome-renderer' : 'tab-renderer'
@@ -156,23 +179,23 @@ function notifyChromeOfFocusedBrowserTab(contents: WebContents): void {
   } | undefined
   const caller = bridge?.callerForWebContents?.(contents)
   if (caller?.kind !== 'tab' || !caller.tabId) return
-  const registeredChromeId = browserTabFocusOwners.get(caller.tabId)
-  const registeredChrome = registeredChromeId === undefined ? null : electronWebContents.fromId(registeredChromeId)
-  const chrome = registeredChrome && !registeredChrome.isDestroyed() && chromeWebContentsIds.has(registeredChrome.id)
-    ? registeredChrome
-    : findChromeWebContentsForShortcutSender(contents)
+  const chrome = findChromeWebContentsForBrowserTab(caller.tabId) ?? findChromeWebContentsForShortcutSender(contents)
   if (!chrome || chrome.isDestroyed()) return
   chrome.send('cloud-code/browser-tab-focused', { browserTabId: caller.tabId })
 }
 
 function installAppShortcutMenu(): void {
   const appShortcuts: Array<{ label: string; accelerator: string; input: AppShortcutInput }> = [
+    { label: 'Find in Page', accelerator: 'CommandOrControl+F', input: shortcutInput('f', 'KeyF') },
     { label: 'Command Palette', accelerator: 'CommandOrControl+K', input: shortcutInput('k', 'KeyK') },
     { label: 'New Browser Tab', accelerator: 'CommandOrControl+T', input: shortcutInput('t', 'KeyT') },
     { label: 'New Workspace Chat', accelerator: 'CommandOrControl+Shift+T', input: shortcutInput('T', 'KeyT', { shiftKey: true }) },
     { label: 'Close Focused Tab', accelerator: 'CommandOrControl+W', input: shortcutInput('w', 'KeyW') },
     { label: 'Toggle Sidebar', accelerator: 'CommandOrControl+B', input: shortcutInput('b', 'KeyB') },
     { label: 'Toggle Agent Pane', accelerator: 'CommandOrControl+G', input: shortcutInput('g', 'KeyG') },
+    { label: 'Zoom In Browser Pane', accelerator: 'CommandOrControl+Plus', input: shortcutInput('+', 'Equal') },
+    { label: 'Zoom Out Browser Pane', accelerator: 'CommandOrControl+-', input: shortcutInput('-', 'Minus') },
+    { label: 'Reset Browser Pane Zoom', accelerator: 'CommandOrControl+0', input: shortcutInput('0', 'Digit0') },
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -251,7 +274,15 @@ function isAppShortcut(input: Electron.Input): boolean {
   if (!input.meta && !input.control) return false
   if (input.alt) return false
   const key = input.key.toLowerCase()
-  return key === 'k' || key === 't' || key === 'w' || key === 'b' || key === 'g'
+  if (key === 'k' || key === 't' || key === 'w' || key === 'b' || key === 'g' || key === 'f') return true
+  return isZoomShortcut(input)
+}
+
+function isZoomShortcut(input: Electron.Input): boolean {
+  if (!input.meta && !input.control) return false
+  if (input.alt) return false
+  const key = input.key.toLowerCase()
+  return key === '+' || key === '=' || key === '-' || key === '_' || key === '0'
 }
 
 function isReloadShortcut(input: Electron.Input): boolean {
@@ -277,6 +308,15 @@ function findChromeWebContentsForShortcutSender(contents: WebContents): WebConte
   return owner.electronWindow.webContents.isDestroyed() ? null : owner.electronWindow.webContents
 }
 
+function findChromeWebContentsForBrowserTab(browserTabId: string): WebContents | null {
+  const registeredChromeId = browserTabFocusOwners.get(browserTabId)
+  const registeredChrome = registeredChromeId === undefined ? null : electronWebContents.fromId(registeredChromeId)
+  if (registeredChrome && !registeredChrome.isDestroyed() && chromeWebContentsIds.has(registeredChrome.id)) {
+    return registeredChrome
+  }
+  return null
+}
+
 function findTabWebContents(browserTabId: string): WebContents | null {
   const bridge = webframeApp?._debug.bridge as unknown as {
     callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
@@ -289,6 +329,14 @@ function findTabWebContents(browserTabId: string): WebContents | null {
     if (caller.kind === 'tab' && caller.tabId === browserTabId) return contents
   }
   return null
+}
+
+function findBrowserTabIdForWebContents(contents: WebContents): string | null {
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string; tabId?: string }
+  } | undefined
+  const caller = bridge?.callerForWebContents?.(contents)
+  return caller?.kind === 'tab' && caller.tabId ? caller.tabId : null
 }
 
 function findOverlayWebContents(overlayId: string): WebContents | null {
@@ -324,6 +372,41 @@ function installIpcHandlers(): void {
     if (!contents) throw new Error(`Browser tab ${browserTabId} not found`)
     openFloatingDevTools(contents)
     return { ok: true as const }
+  })
+  ipcMain.handle('cloud-code/browser/find-in-page', (_event, input: { browserTabId?: string; text?: string; forward?: boolean; findNext?: boolean }) => {
+    const browserTabId = input.browserTabId
+    if (!browserTabId) throw new Error('browserTabId is required')
+    const contents = findTabWebContents(browserTabId)
+    if (!contents) throw new Error(`Browser tab ${browserTabId} not found`)
+    const text = input.text ?? ''
+    if (!text) {
+      contents.stopFindInPage('clearSelection')
+      return { requestId: null }
+    }
+    return {
+      requestId: contents.findInPage(text, {
+        forward: input.forward ?? true,
+        findNext: input.findNext ?? false,
+      }),
+    }
+  })
+  ipcMain.handle('cloud-code/browser/stop-find-in-page', (_event, input: { browserTabId?: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => {
+    const browserTabId = input.browserTabId
+    if (!browserTabId) throw new Error('browserTabId is required')
+    const contents = findTabWebContents(browserTabId)
+    if (!contents) throw new Error(`Browser tab ${browserTabId} not found`)
+    contents.stopFindInPage(input.action ?? 'clearSelection')
+    return { ok: true as const }
+  })
+  ipcMain.handle('cloud-code/browser/set-zoom', (_event, input: { browserTabId?: string; level?: number }) => {
+    const browserTabId = input.browserTabId
+    if (!browserTabId) throw new Error('browserTabId is required')
+    const contents = findTabWebContents(browserTabId)
+    if (!contents) throw new Error(`Browser tab ${browserTabId} not found`)
+    const current = contents.getZoomLevel()
+    const next = Math.max(-6, Math.min(6, typeof input.level === 'number' ? input.level : current))
+    contents.setZoomLevel(next)
+    return { zoomLevel: next }
   })
   ipcMain.handle('cloud-code/browser/agent-connections', () => ({
     browserTabIds: browserAgentBridge?.connectedTabs() ?? [],
