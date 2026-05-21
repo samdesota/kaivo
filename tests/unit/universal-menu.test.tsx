@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   },
   browseInputs: [] as Array<{ path?: string }>,
   startChat: vi.fn(async () => ({ id: 'session-new' })),
+  createDirectory: vi.fn(async ({ parentPath, name }: { parentPath: string; name: string }) => ({ name, path: `${parentPath}/${name}` })),
   createShell: vi.fn(async () => ({ id: 'shell-new' })),
   disposeShell: vi.fn(async () => ({ ok: true })),
   cloneConfig: vi.fn(async () => ({ repoId: 'repo-new', workingDir: '/Users/sam/d/standalone/new-tree' })),
@@ -51,7 +52,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../src/env-trpc', () => ({
   envTrpc: {
-    useUtils: () => ({ shell: { list: { invalidate: vi.fn(async () => undefined) } } }),
+    useUtils: () => ({
+      shell: { list: { invalidate: vi.fn(async () => undefined) } },
+      fs: { browseHome: { invalidate: vi.fn(async () => undefined) } },
+    }),
     agent: {
       sessionList: {
         useQuery: () => ({ data: mocks.sessions, isLoading: false }),
@@ -69,6 +73,9 @@ vi.mock('../../src/env-trpc', () => ({
       },
       searchGitTrackedFiles: {
         useQuery: () => ({ data: mocks.gitFiles, isLoading: false, error: null }),
+      },
+      createDirectory: {
+        useMutation: () => ({ mutateAsync: mocks.createDirectory, isPending: false }),
       },
     },
     repo: {
@@ -147,6 +154,7 @@ beforeEach(() => {
   }
   mocks.browseInputs = []
   mocks.startChat.mockClear()
+  mocks.createDirectory.mockClear()
   mocks.createShell.mockClear()
   mocks.disposeShell.mockClear()
   mocks.cloneConfig.mockClear()
@@ -446,7 +454,7 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.click(screen.getByLabelText('Create work tree from sam/standalone'))
 
     expect(screen.getByText('sam/standalone')).toBeTruthy()
-    expect(screen.getAllByText('Create chat').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Create workspace').length).toBeGreaterThan(0)
     expect(screen.getByLabelText('Workspace name')).toBeTruthy()
     expect(screen.getByPlaceholderText('bug-shell-resize')).toBeTruthy()
     expect(onClose).not.toHaveBeenCalled()
@@ -462,7 +470,7 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
 
-    expect(screen.getAllByText('Create chat').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Create workspace').length).toBeGreaterThan(0)
     expect(screen.getByDisplayValue('foo')).toBeTruthy()
     expect(mocks.startChat).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
@@ -476,7 +484,7 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: ':foo' } })
     fireEvent.click(screen.getAllByText('foo')[0], { shiftKey: true })
 
-    expect(screen.getAllByText('Create chat').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Create workspace').length).toBeGreaterThan(0)
     expect(screen.getByDisplayValue('foo')).toBeTruthy()
     expect(mocks.startChat).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
@@ -491,6 +499,19 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.click(screen.getAllByText('foo')[0], { shiftKey: true })
 
     expect(screen.getByLabelText('Parent folder').textContent).toContain('Active Projects')
+  })
+
+  it('toggles universal menu creation intent with Tab', () => {
+    mocks.recentFolders = [{ path: '/Users/sam/d/foo', label: 'foo' }]
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    const input = screen.getByLabelText('Universal menu search')
+    expect(screen.queryByText('Global recent folders')).toBeNull()
+    fireEvent.keyDown(input, { key: 'Tab' })
+    expect(screen.getByText('Global recent folders')).toBeTruthy()
+    expect(screen.getAllByText('foo').length).toBeGreaterThan(0)
+    fireEvent.keyDown(input, { key: 'Tab' })
+    expect(screen.queryByText('Global recent folders')).toBeNull()
   })
 
   it('filters shells and focuses the selected shell', () => {
@@ -849,6 +870,67 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.change(input, { target: { value: 'd/clo' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(mocks.startChat).toHaveBeenLastCalledWith({ workspaceId: 'workspace-1', directory: '/Users/sam/d/cloud-code-tools' })
+  })
+
+  it('offers to create a typed path folder when there is no exact directory match', async () => {
+    const onClose = vi.fn()
+    mocks.browse.data = {
+      path: '/Users/sam/d',
+      home: '/Users/sam',
+      defaultPath: '/Users/sam/d/cloud-code-tools',
+      parent: '/Users/sam',
+      dirs: [
+        { name: 'food', path: '/Users/sam/d/food' },
+      ],
+      files: [],
+    }
+
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onClose={onClose}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'd/foo' } })
+
+    expect(screen.getByText('Create folder: foo')).toBeTruthy()
+    expect(screen.getByText('food')).toBeTruthy()
+    fireEvent.click(screen.getByText('Create folder: foo'))
+
+    await waitFor(() => expect(mocks.createDirectory).toHaveBeenCalledWith({ parentPath: '/Users/sam/d', name: 'foo' }))
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('does not offer to create a typed path folder when the exact directory exists', () => {
+    mocks.browse.data = {
+      path: '/Users/sam/d',
+      home: '/Users/sam',
+      defaultPath: '/Users/sam/d/cloud-code-tools',
+      parent: '/Users/sam',
+      dirs: [
+        { name: 'foo', path: '/Users/sam/d/foo' },
+      ],
+      files: [],
+    }
+
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'd/foo' } })
+
+    expect(screen.getByText('foo')).toBeTruthy()
+    expect(screen.queryByText('Create folder: foo')).toBeNull()
   })
 
   it('does not let stationary mouse hover override the active row', () => {

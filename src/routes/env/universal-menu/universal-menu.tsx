@@ -1,8 +1,9 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronRight, EllipsisVertical } from 'lucide-react'
+import { ChevronDown, ChevronRight, EllipsisVertical, Plus } from 'lucide-react'
 import { OverlayShell } from '../../../components/overlay-shell'
 import { Button, Field, Input } from '../../../components/ui'
+import { FilePathLabel } from '../../../components/file-path-label'
 import { paneTabIconForType, TabIconView, type TabIcon } from '../../../components/tab-icon'
 import { envTrpc } from '../../../env-trpc'
 import { trpc } from '../../../trpc'
@@ -10,7 +11,7 @@ import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } fr
 import { matchBookmarks, resolveBrowserAddress } from '../../../lib/browser-navigation'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
-import { defaultWorkspaceName, newAgentChatStartInput, resolveWorkspaceName, type NewAgentChatSelection } from '../agent/new-agent-chat-state'
+import { defaultWorkspaceName, newAgentChatStartInput, resolveWorkspaceName, type NewAgentChatSelection, type NewAgentChatWorkspaceMode } from '../agent/new-agent-chat-state'
 import { WorkspaceModeControl } from '../agent/new-agent-chat-modal'
 import { useBookmarksStore, type BookmarkRecord } from '../../workspace/bookmarks-store'
 
@@ -29,6 +30,7 @@ export interface UniversalMenuResult {
   id: string
   kind: UniversalMenuResultKind
   label: string
+  labelNode?: ReactNode
   detail?: string
   detailNode?: ReactNode
   actionHint?: string
@@ -36,12 +38,14 @@ export interface UniversalMenuResult {
   icon?: TabIcon
   parentId?: string
   depth?: number
+  flatHierarchy?: boolean
   haystack: string
   disabled?: boolean
   run: () => void | Promise<void>
   alternateRun?: () => void | Promise<void>
   actions?: UniversalMenuResultAction[]
   drill?: () => void
+  keepOpen?: boolean
 }
 
 export interface UniversalMenuResultAction {
@@ -265,13 +269,16 @@ export function UniversalMenu({
   const [active, setActive] = useState(0)
   const [mouseMoved, setMouseMoved] = useState(false)
   const [scope, setScope] = useState<{ definition: ScopeDefinition; query: string } | null>(null)
+  const [intent, setIntent] = useState<UniversalMenuInitialIntent>(initialIntent)
   const [folderPath, setFolderPath] = useState<string | undefined>(undefined)
   const [detailsSelection, setDetailsSelection] = useState<NewAgentChatSelection | null>(null)
   const [detailsError, setDetailsError] = useState<string | null>(null)
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState({ value: '', edited: false })
   const [parentFolderId, setParentFolderId] = useState<string | null>(null)
+  const [detailsWorkspaceMode, setDetailsWorkspaceMode] = useState<NewAgentChatWorkspaceMode>('new')
+  const [detailsWorkspaceId, setDetailsWorkspaceId] = useState<string | undefined>(workspaceId)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
-  const newWorkspaceIntent = initialIntent === 'new-workspace'
+  const newWorkspaceIntent = intent === 'new-workspace'
   const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
   const folderProbe = envTrpc.fs.browseHome.useQuery(
@@ -297,6 +304,7 @@ export function UniversalMenu({
   const createShell = envTrpc.shell.create.useMutation()
   const disposeShell = envTrpc.shell.dispose.useMutation()
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
+  const createDirectory = envTrpc.fs.createDirectory.useMutation()
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
   const bookmarksStore = useBookmarksStore()
@@ -341,12 +349,15 @@ export function UniversalMenu({
     setActive(0)
     setMouseMoved(false)
     setScope(null)
+    setIntent(initialIntent)
     setDetailsSelection(null)
     setDetailsError(null)
     setWorkspaceNameDraft({ value: '', edited: false })
     setParentFolderId(null)
+    setDetailsWorkspaceMode('new')
+    setDetailsWorkspaceId(workspaceId)
     setActionMenuOpen(false)
-  }, [open])
+  }, [initialIntent, open, workspaceId])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -474,6 +485,11 @@ export function UniversalMenu({
         },
         openFile: (path) => onOpenContent?.({ type: 'file', path, absolute: true }),
         drillFolder: drillIntoFolder,
+        createFolder: async (parentPath, name) => {
+          const created = await createDirectory.mutateAsync({ parentPath, name }) as FolderBrowseDir
+          await envUtils.fs.browseHome.invalidate()
+          drillIntoFolder(created.path)
+        },
         openNewWorkspaceChat: (path) => openDetails({ type: 'folder', path }),
       })
       if (folderBrowse.isLoading && previousFileSystemResultsRef.current.length > 0) return previousFileSystemResultsRef.current
@@ -560,7 +576,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [bookmarksStore.bookmarks, commandResults, contextItems, disposeShell, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, newWorkspaceIntent, newWorkspaceResults, onBootstrapWorkspace, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, newWorkspaceIntent, newWorkspaceResults, onBootstrapWorkspace, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -693,6 +709,14 @@ export function UniversalMenu({
         setActionMenuOpen(true)
         return
       }
+      if (event.key === 'Tab' && !detailsSelection) {
+        event.preventDefault()
+        setIntent((current) => current === 'new-workspace' ? 'default' : 'new-workspace')
+        setActive(0)
+        setMouseMoved(false)
+        setActionMenuOpen(false)
+        return
+      }
       if (event.key === 'Backspace' && scope && query.length === 0) {
         event.preventDefault()
         exitScope()
@@ -784,6 +808,7 @@ export function UniversalMenu({
       return
     }
     await result.run()
+    if (result.keepOpen) return
     if (newWorkspaceIntent) return
     onClose()
   }
@@ -822,6 +847,8 @@ export function UniversalMenu({
     setDetailsError(null)
     setWorkspaceNameDraft({ value: '', edited: false })
     setParentFolderId(workspaceFolderId ?? null)
+    setDetailsWorkspaceMode('new')
+    setDetailsWorkspaceId(workspaceId)
     setMouseMoved(false)
     setActionMenuOpen(false)
   }
@@ -835,7 +862,7 @@ export function UniversalMenu({
     })
     setDetailsError(null)
     try {
-      if (newWorkspaceIntent) {
+      if (detailsWorkspaceMode === 'new') {
         if (detailsSelection.type === 'repoConfig' && !detailsSelection.worktreeName.trim()) {
           console.info('[universal-menu] create details validation failed', { reason: 'missing-worktree-name' })
           setDetailsError('Name the work tree.')
@@ -862,13 +889,16 @@ export function UniversalMenu({
         onBootstrapWorkspace?.({ workspaceCreate, bootstrap })
         return
       }
+
+      if (!detailsWorkspaceId) {
+        setDetailsError('Choose a workspace.')
+        return
+      }
       let workingDir: string
-      let worktreeRepoId: string | undefined
       if (detailsSelection.type === 'folder') {
         workingDir = detailsSelection.path
       } else if (detailsSelection.type === 'worktree') {
         workingDir = detailsSelection.path
-        worktreeRepoId = detailsSelection.repoId
       } else {
         if (!detailsSelection.worktreeName.trim()) {
           setDetailsError('Name the work tree.')
@@ -876,29 +906,9 @@ export function UniversalMenu({
         }
         const cloned = await cloneConfig.mutateAsync({ configId: detailsSelection.configId, worktreeName: detailsSelection.worktreeName }) as { repoId: string; workingDir: string }
         workingDir = cloned.workingDir
-        worktreeRepoId = cloned.repoId
       }
-      const resolved = resolveWorkspaceName(detailsSelection, workspaceNameDraft)
-      const workspace = await createWorkspace.mutateAsync({
-        name: resolved.name,
-        folderId: parentFolderId,
-        nameSource: resolved.source,
-        sourceKind: detailsSelection.type === 'folder' ? 'folder' : detailsSelection.type === 'worktree' ? 'worktree' : 'repo_config',
-        sourcePath: detailsSelection.type === 'repoConfig' ? workingDir : detailsSelection.path,
-      }) as { id: string }
-      if (detailsSelection.type !== 'folder') {
-        await upsertWorkspaceResource.mutateAsync({
-          workspaceId: workspace.id,
-          resource: {
-            type: 'worktree',
-            resourceKey: worktreeRepoId ? `repo:${worktreeRepoId}` : `path:${workingDir}`,
-            shared: true,
-            data: { repoId: worktreeRepoId, workingDir, name: detailsSelection.type === 'repoConfig' ? detailsSelection.worktreeName : detailsSelection.name },
-          },
-        })
-      }
-      const session = await startChat.mutateAsync(newAgentChatStartInput(workspace.id, workingDir)) as { id: string }
-      onCreatedChat?.(session.id, workspace.id)
+      const session = await startChat.mutateAsync(newAgentChatStartInput(detailsWorkspaceId, workingDir)) as { id: string }
+      onCreatedChat?.(session.id, detailsWorkspaceId)
       onClose()
     } catch (error) {
       console.error('[universal-menu] create details failed', error)
@@ -931,6 +941,7 @@ export function UniversalMenu({
   const generatedWorkspaceName = defaultWorkspaceName(detailsSelection).name
   const workspaceNameValue = resolveWorkspaceName(detailsSelection, workspaceNameDraft).name
   const detailsBusy = cloneConfig.isPending || createWorkspace.isPending || upsertWorkspaceResource.isPending || startChat.isPending
+  const detailsCreatingNewWorkspace = detailsWorkspaceMode === 'new'
 
   if (detailsSelection) {
     return (
@@ -938,13 +949,14 @@ export function UniversalMenu({
         onClose={onClose}
         panelClassName="relative !max-w-[700px] !border-neutral-800 pb-7"
         footerClassName="absolute inset-x-0 bottom-0 border-t border-white/5 bg-neutral-950/55 backdrop-blur-xl shadow-[0_-1px_6px_rgba(0,0,0,0.12)]"
-        footer={<><span>esc close</span><span className="ml-auto">new workspace</span></>}
+        footer={<><span>tab toggle workspace</span><span>esc close</span><span className="ml-auto">{detailsCreatingNewWorkspace ? 'new workspace' : 'existing workspace'}</span></>}
       >
-        <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 px-3 py-2">
-          <button onClick={() => setDetailsSelection(null)} className="rounded px-2 py-1 text-sm leading-none text-neutral-400 hover:bg-highlight hover:text-neutral-100" aria-label="Back">‹</button>
-          <div className="text-sm font-medium text-neutral-200">{newWorkspaceIntent ? 'Create workspace' : 'Create chat'}</div>
-        </div>
-        <div className="max-h-[54vh] overflow-y-auto pb-2">
+        <div>
+          <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 px-3 py-2">
+            <button onClick={() => setDetailsSelection(null)} className="rounded px-2 py-1 text-sm leading-none text-neutral-400 hover:bg-highlight hover:text-neutral-100" aria-label="Back">‹</button>
+            <div className="text-sm font-medium text-neutral-200">{detailsCreatingNewWorkspace ? 'Create workspace' : 'Create chat'}</div>
+          </div>
+          <div className="max-h-[54vh] overflow-y-auto pb-2">
           <div className="px-4 pb-2 pt-3">
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500">Destination</div>
             <div className="rounded border border-neutral-800 bg-neutral-975 px-3 py-2">
@@ -961,16 +973,17 @@ export function UniversalMenu({
             </Field>
           )}
           <WorkspaceModeControl
-            mode="new"
-            onModeChange={() => undefined}
+            mode={detailsWorkspaceMode}
+            onModeChange={setDetailsWorkspaceMode}
             existingWorkspaceName={workspaceName}
-            selectedWorkspaceId={workspaceId}
+            selectedWorkspaceId={detailsWorkspaceId}
             workspaceTree={(workspaceTree.data ?? []) as never[]}
             workspaceNameValue={workspaceNameDraft.edited ? workspaceNameDraft.value : generatedWorkspaceName}
             resolvedWorkspaceName={workspaceNameValue}
             parentFolderId={parentFolderId}
             foldersLoading={workspaceTree.isLoading}
             workspacesLoading={workspaceTree.isLoading}
+            onWorkspaceChange={setDetailsWorkspaceId}
             onParentFolderChange={setParentFolderId}
             onWorkspaceNameChange={(value) => setWorkspaceNameDraft({ value, edited: true })}
           />
@@ -980,9 +993,10 @@ export function UniversalMenu({
             disabled={detailsBusy || (detailsSelection.type === 'repoConfig' && !detailsSelection.worktreeName.trim())}
             className="mx-4 mb-4 mt-5"
           >
-            {detailsBusy ? 'Creating…' : newWorkspaceIntent ? (detailsSelection.type === 'repoConfig' ? 'Clone and create workspace' : 'Create workspace') : detailsSelection.type === 'repoConfig' ? 'Clone and create chat' : 'Create chat'}
+            {detailsBusy ? 'Creating…' : detailsCreatingNewWorkspace ? (detailsSelection.type === 'repoConfig' ? 'Clone and create workspace' : 'Create workspace') : detailsSelection.type === 'repoConfig' ? 'Clone and create chat' : 'Create chat'}
           </Button>
           {detailsError && <div className="mx-4 mb-4 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">{detailsError}</div>}
+          </div>
         </div>
       </OverlayShell>
     )
@@ -1087,6 +1101,7 @@ function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMen
   const detail = result.actionHint ? (state.active ? result.actionHint : undefined) : result.detail
   const detailNode = result.actionHint ? undefined : result.detailNode
   const depth = result.depth ?? 0
+  const isCreateFolder = result.id.startsWith('open-folder-create:')
   return (
     <div className="relative">
       <button
@@ -1094,7 +1109,7 @@ function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMen
         disabled={state.disabled}
         onMouseEnter={state.onMouseEnter}
         onClick={(event) => state.onSelect(event)}
-        className={`${rowClassName(state)} !gap-1.5`}
+        className={`${rowClassName(state)} !gap-1.5 ${isCreateFolder ? '!text-neutral-500' : ''}`}
         style={{ paddingLeft: `${16 + depth * 12}px` }}
       >
         {result.kind === 'folder' ? (
@@ -1111,12 +1126,14 @@ function renderFileSystemResult(result: UniversalMenuResult, state: UniversalMen
           >
             {depth === 0 ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
           </span>
+        ) : isCreateFolder ? (
+          <span className="relative z-10 flex w-3 shrink-0 items-center justify-center text-neutral-600"><Plus className="h-3.5 w-3.5" aria-hidden="true" /></span>
         ) : result.icon ? (
           <span className="relative z-10"><TabIconView icon={result.icon} /></span>
         ) : (
           <span className="relative z-10 w-3" />
         )}
-        <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+        <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
         {detail && (
           <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>
         )}
@@ -1134,7 +1151,7 @@ function renderWorkTreeResult(result: UniversalMenuResult, state: UniversalMenuR
         style={{ paddingLeft: `${16 + depth * 18}px` }}
       >
         <span className="flex w-3 shrink-0 items-center justify-center text-neutral-600"><ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></span>
-        <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+        <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
         <button
           type="button"
           className="rounded px-1.5 py-0.5 text-sm leading-none text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
@@ -1306,7 +1323,7 @@ export function UniversalMenuResultRow({ result, state }: { result: UniversalMen
         className={`${rowClassName(state)} ${showActions ? 'pr-10' : ''}`}
       >
         {result.icon && <TabIconView icon={result.icon} />}
-        <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+        <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
         {detailNode ? <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[48%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
         {result.kind === 'browser-tab' && <UniversalMenuBrowserTabMarker />}
       </button>
@@ -1381,13 +1398,10 @@ export function UniversalMenuHierarchyRow({ result, state }: { result: Universal
       onMouseEnter={state.onMouseEnter}
       onClick={(event) => state.onSelect(event)}
       className={rowClassName(state)}
-      style={{ paddingLeft: `${16 + (result.depth ?? 0) * 18}px` }}
+      style={{ paddingLeft: result.flatHierarchy ? 16 : `${16 + (result.depth ?? 0) * 18}px` }}
     >
-      <span className="flex w-3 shrink-0 items-center justify-center text-neutral-600">
-        {result.disabled ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
-      </span>
       {result.icon && <TabIconView icon={result.icon} />}
-      <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+      <span className={`min-w-0 flex-1 text-left ${result.labelNode ? '' : 'truncate'}`}>{result.labelNode ?? result.label}</span>
       {detailNode ? <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detailNode}</span> : detail && <span className="hidden max-w-[44%] truncate text-[11px] text-neutral-500 sm:block">{detail}</span>}
       {result.kind === 'browser-tab' && <UniversalMenuBrowserTabMarker />}
     </button>
@@ -1459,6 +1473,7 @@ function openFolderScopeResults({
   startChat,
   openFile,
   drillFolder,
+  createFolder,
   openNewWorkspaceChat,
 }: {
   data?: FolderBrowseData
@@ -1469,6 +1484,7 @@ function openFolderScopeResults({
   startChat: (path: string) => Promise<void>
   openFile: (path: string) => void
   drillFolder: (path: string) => void
+  createFolder: (parentPath: string, name: string) => Promise<void>
   openNewWorkspaceChat: (path: string) => void
 }): UniversalMenuResult[] {
   if (loading) return [disabledRow('open-folder-loading', 'Loading folders…')]
@@ -1522,8 +1538,31 @@ function openFolderScopeResults({
     run: () => openFile(file.path),
   })))
 
-  if (dirs.length === 0 && files.length === 0) rows.push(disabledRow('open-folder-no-matches', q ? 'No matching items.' : 'No items.'))
+  const createName = folderNameToCreate(filter, data.dirs)
+  if (createName) {
+    rows.push({
+      id: `open-folder-create:${data.path}/${createName}`,
+      kind: 'action',
+      label: `Create folder: ${createName}`,
+      detail: data.path,
+      actionHint: 'create folder',
+      parentId: `open-folder-current:${data.path}`,
+      depth: 1,
+      haystack: `create folder ${createName} ${data.path}`,
+      keepOpen: true,
+      run: () => createFolder(data.path, createName),
+    })
+  }
+  if (dirs.length === 0 && files.length === 0 && !createName) rows.push(disabledRow('open-folder-no-matches', q ? 'No matching items.' : 'No items.'))
   return rows
+}
+
+function folderNameToCreate(filter: string, dirs: FolderBrowseDir[]): string | null {
+  const name = filter.trim()
+  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) return null
+  const lower = name.toLowerCase()
+  if (dirs.some((dir) => dir.name.toLowerCase() === lower)) return null
+  return name
 }
 
 function recentFolderScopeResults({
@@ -1747,9 +1786,10 @@ function findFilesScopeResults({ roots, files, loading, error, query, homePath, 
       id: `file:${file.path}`,
       kind: 'file',
       label: file.relativePath,
-      detailNode: <CompactPath path={displayPath(file.path, homePath)} />,
+      labelNode: <FilePathLabel path={file.relativePath} />,
       parentId: groupId,
       depth: 1,
+      flatHierarchy: true,
       icon: paneTabIconForType('file'),
       haystack: `${file.relativePath} ${file.path}`,
       run: () => openFile(file.path),
