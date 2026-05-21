@@ -6,6 +6,7 @@ import { db } from '../../db/client.js'
 import { agentSessions } from '../../db/schema.js'
 import { eq } from 'drizzle-orm'
 import { listWorkspaceBrowserTabs } from '../../identity/client.js'
+import { agentService } from '../../agent/service.js'
 import {
   cdpConnectionInputSchema,
   connectTabInputSchema,
@@ -19,10 +20,11 @@ import {
 } from './agent-browser-schema.js'
 
 async function scope(input: { sandboxId?: string; opencodeSessionId: string }) {
+  const rootOpencodeSessionId = agentService.resolveRootOpencodeSessionId(input.opencodeSessionId)
   const row = db
     .select({ workspaceId: agentSessions.workspaceId })
     .from(agentSessions)
-    .where(eq(agentSessions.opencodeSessionId, input.opencodeSessionId))
+    .where(eq(agentSessions.opencodeSessionId, rootOpencodeSessionId))
     .limit(1)
     .all()[0]
   const workspaceId = row?.workspaceId ?? null
@@ -31,7 +33,7 @@ async function scope(input: { sandboxId?: string; opencodeSessionId: string }) {
     : []
   return {
     sandboxId: input.sandboxId ?? null,
-    opencodeSessionId: input.opencodeSessionId,
+    opencodeSessionId: rootOpencodeSessionId,
     workspaceId,
     rootBrowserTabIds,
   }

@@ -10,6 +10,7 @@ import { agentSessions } from '../../db/schema.js'
 import { openPane as persistOpenPane } from '../../identity/client.js'
 import { terminalService } from '../../terminal/service.js'
 import { paneContentSchema, type AgentPaneContent } from './agent-ui-schema.js'
+import { agentService } from '../../agent/service.js'
 
 export interface AgentUiEvent {
   type: 'open_pane'
@@ -35,7 +36,7 @@ export async function openPaneForAgent(input: {
   title?: string
   activate?: boolean
 }): Promise<{ ok: true }> {
-  const session = resolveSession(input.opencodeSessionId)
+  const session = resolveSession(agentService.resolveRootOpencodeSessionId(input.opencodeSessionId))
   if (!session.workspaceId) {
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'agent session is not attached to a workspace' })
   }

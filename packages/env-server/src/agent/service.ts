@@ -815,21 +815,23 @@ class AgentService {
     queuedMessages: QueuedFollowUp[]
   }> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
-    const pendingMap = this.pending.get(row.opencodeSessionId)
-    const pending = pendingMap ? [...pendingMap.values()] : []
-    const questionMap = this.pendingQuestions.get(row.opencodeSessionId)
-    let questions = questionMap ? [...questionMap.values()] : []
+    const relatedOpencodeSessionIds = this.relatedOpencodeSessionIds(row.opencodeSessionId)
+    const pending = relatedOpencodeSessionIds.flatMap((id) => [...(this.pending.get(id)?.values() ?? [])])
+    let questions = relatedOpencodeSessionIds.flatMap((id) => [...(this.pendingQuestions.get(id)?.values() ?? [])])
     if (questions.length === 0) {
       try {
         const fresh = await this.questionList()
-        questions = fresh.filter((q) => q.sessionId === row.opencodeSessionId)
+        const related = new Set(relatedOpencodeSessionIds)
+        questions = fresh.filter((q) => related.has(q.sessionId))
         if (questions.length > 0) {
-          let byReq = this.pendingQuestions.get(row.opencodeSessionId)
-          if (!byReq) {
-            byReq = new Map()
-            this.pendingQuestions.set(row.opencodeSessionId, byReq)
+          for (const q of questions) {
+            let byReq = this.pendingQuestions.get(q.sessionId)
+            if (!byReq) {
+              byReq = new Map()
+              this.pendingQuestions.set(q.sessionId, byReq)
+            }
+            byReq.set(q.id, q)
           }
-          for (const q of questions) byReq.set(q.id, q)
         }
       } catch {
         // opencode unreachable — leave empty
@@ -933,7 +935,7 @@ class AgentService {
       method: 'POST',
       body: JSON.stringify({ answers: input.answers }),
     })
-    this.pendingQuestions.get(ctx.row.opencodeSessionId)?.delete(input.requestId)
+    this.deletePendingQuestion(ctx.row.opencodeSessionId, input.requestId)
     this.upsertAgentRuntime(ctx.row)
   }
 
@@ -945,7 +947,7 @@ class AgentService {
     await ctx.fetch(`/question/${encodeURIComponent(input.requestId)}/reject`, {
       method: 'POST',
     })
-    this.pendingQuestions.get(ctx.row.opencodeSessionId)?.delete(input.requestId)
+    this.deletePendingQuestion(ctx.row.opencodeSessionId, input.requestId)
     this.upsertAgentRuntime(ctx.row)
   }
 
@@ -1008,14 +1010,19 @@ class AgentService {
     response: 'once' | 'always' | 'reject'
   }): Promise<void> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
+    const targetOpencodeSessionId = this.findPermissionSession(row.opencodeSessionId, input.permissionId) ?? row.opencodeSessionId
     await client.postSessionIdPermissionsPermissionId({
-      path: { id: row.opencodeSessionId, permissionID: input.permissionId },
+      path: { id: targetOpencodeSessionId, permissionID: input.permissionId },
       body: { response: input.response },
       ...dirOpts,
       throwOnError: true,
     })
-    this.pending.get(row.opencodeSessionId)?.delete(input.permissionId)
+    this.pending.get(targetOpencodeSessionId)?.delete(input.permissionId)
     this.upsertAgentRuntime(row)
+  }
+
+  resolveRootOpencodeSessionId(opencodeSessionId: string): string {
+    return this.parentByChild.get(opencodeSessionId) ?? opencodeSessionId
   }
 
   async transcriptReplay(sessionId: string, sinceSeq = 0): Promise<TranscriptEvent[]> {
@@ -1334,11 +1341,12 @@ class AgentService {
         metadata: p.metadata ?? {},
         createdAt: p.time?.created ?? Date.now(),
       })
-      void this.createBlockingNotification(ocSessionId, `permission:${p.id}`, 'permission', 'Approval required', title)
+      const rootOpencodeSessionId = this.resolveRootOpencodeSessionId(ocSessionId)
+      void this.createBlockingNotification(rootOpencodeSessionId, `permission:${ocSessionId}:${p.id}`, 'permission', 'Approval required', title)
     } else if (type === 'permission.replied') {
       const p = props as { permissionID?: string }
       if (p.permissionID) this.pending.get(ocSessionId)?.delete(p.permissionID)
-      if (p.permissionID) this.blockingNotificationKeys.delete(`${ocSessionId}:permission:${p.permissionID}`)
+      if (p.permissionID) this.blockingNotificationKeys.delete(`${this.resolveRootOpencodeSessionId(ocSessionId)}:permission:${ocSessionId}:${p.permissionID}`)
     } else if (type === 'question.asked') {
       const q = props as unknown as {
         id?: string
@@ -1360,14 +1368,15 @@ class AgentService {
           createdAt: Date.now(),
         })
         const question = Array.isArray(q.questions) ? q.questions[0]?.question : undefined
-        void this.createBlockingNotification(ocSessionId, `question:${q.id}`, 'question', 'Question asked', question ?? 'The agent needs an answer to continue.')
+        const rootOpencodeSessionId = this.resolveRootOpencodeSessionId(ocSessionId)
+        void this.createBlockingNotification(rootOpencodeSessionId, `question:${ocSessionId}:${q.id}`, 'question', 'Question asked', question ?? 'The agent needs an answer to continue.')
       }
     } else if (type === 'question.replied' || type === 'question.rejected') {
       const q = props as { requestID?: string }
       if (q.requestID) this.pendingQuestions.get(ocSessionId)?.delete(q.requestID)
-      if (q.requestID) this.blockingNotificationKeys.delete(`${ocSessionId}:question:${q.requestID}`)
+      if (q.requestID) this.blockingNotificationKeys.delete(`${this.resolveRootOpencodeSessionId(ocSessionId)}:question:${ocSessionId}:${q.requestID}`)
     }
-    this.upsertAgentRuntimeForOpencode(ocSessionId, { running: runtimeRunning, lastActivityAt: new Date() })
+    this.upsertAgentRuntimeForOpencode(this.resolveRootOpencodeSessionId(ocSessionId), { running: runtimeRunning, lastActivityAt: new Date() })
 
     const evt = await this.recordReplayEvent(ocSessionId, {
       type: type as TranscriptEvent['type'],
@@ -1694,7 +1703,38 @@ class AgentService {
   }
 
   private pendingAttentionCount(opencodeSessionId: string): number {
-    return (this.pending.get(opencodeSessionId)?.size ?? 0) + (this.pendingQuestions.get(opencodeSessionId)?.size ?? 0)
+    return this.relatedOpencodeSessionIds(opencodeSessionId).reduce(
+      (count, id) => count + (this.pending.get(id)?.size ?? 0) + (this.pendingQuestions.get(id)?.size ?? 0),
+      0,
+    )
+  }
+
+  private relatedOpencodeSessionIds(rootOpencodeSessionId: string): string[] {
+    const root = this.resolveRootOpencodeSessionId(rootOpencodeSessionId)
+    const out: string[] = []
+    const seen = new Set<string>()
+    const queue = [root]
+    while (queue.length > 0) {
+      const id = queue.shift()!
+      if (seen.has(id)) continue
+      seen.add(id)
+      out.push(id)
+      for (const child of this.childrenByParent.get(id) ?? []) queue.push(child)
+    }
+    return out
+  }
+
+  private findPermissionSession(rootOpencodeSessionId: string, permissionId: string): string | null {
+    for (const id of this.relatedOpencodeSessionIds(rootOpencodeSessionId)) {
+      if (this.pending.get(id)?.has(permissionId)) return id
+    }
+    return null
+  }
+
+  private deletePendingQuestion(rootOpencodeSessionId: string, requestId: string): void {
+    for (const id of this.relatedOpencodeSessionIds(rootOpencodeSessionId)) {
+      this.pendingQuestions.get(id)?.delete(requestId)
+    }
   }
 
   private async sessionContext(sessionId: string) {

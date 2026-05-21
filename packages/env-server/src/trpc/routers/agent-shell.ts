@@ -6,6 +6,7 @@ import { ShellError, ensureValidCwd, resolveWorkspaceIdForShellOwner, terminalSe
 import { terminalDaemonClient, useTerminalDaemon } from '../../terminal/daemon-client.js'
 import { logger } from '../../logger.js'
 import { upsertWorkspaceResource } from '../../identity/client.js'
+import { agentService } from '../../agent/service.js'
 
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof ShellError) {
@@ -34,9 +35,12 @@ async function getWorkspaceShell(input: {
   opencodeSessionId?: string | null
   ownerAgentSessionId?: string | null
 }) {
+  const ownerSessionId = input.opencodeSessionId
+    ? agentService.resolveRootOpencodeSessionId(input.opencodeSessionId)
+    : null
   const workspaceId = resolveWorkspaceIdForShellOwner({
     ownerAgentSessionId: input.ownerAgentSessionId ?? null,
-    ownerSessionId: input.opencodeSessionId ?? null,
+    ownerSessionId,
   })
   if (!workspaceId) {
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'agent session has no workspace' })
@@ -58,9 +62,12 @@ export const agentShellRouter = router({
       }),
     )
     .query(async ({ input }) => {
+      const ownerSessionId = input.opencodeSessionId
+        ? agentService.resolveRootOpencodeSessionId(input.opencodeSessionId)
+        : null
       const workspaceId = resolveWorkspaceIdForShellOwner({
         ownerAgentSessionId: input.ownerAgentSessionId ?? null,
-        ownerSessionId: input.opencodeSessionId ?? null,
+        ownerSessionId,
       })
       if (!workspaceId) return []
       return useTerminalDaemon()
@@ -87,13 +94,16 @@ export const agentShellRouter = router({
 
         let handle: ReturnType<typeof terminalService.runOnceStream>
         try {
+          const ownerSessionId = input.opencodeSessionId
+            ? agentService.resolveRootOpencodeSessionId(input.opencodeSessionId)
+            : null
           handle = terminalService.runOnceStream({
             cmd: input.cmd,
             workspaceId: input.workspaceId ?? null,
             cwd: input.cwd,
             cols: input.cols,
             rows: input.rows,
-            ownerSessionId: input.opencodeSessionId ?? null,
+            ownerSessionId,
             ownerAgentSessionId: input.ownerAgentSessionId ?? null,
             onStdout: (chunk) =>
               emit.next({ type: 'stdout', b64: chunk.toString('base64') }),
@@ -142,13 +152,16 @@ export const agentShellRouter = router({
     .mutation(async ({ input }) => {
       try {
         if (input.cwd) ensureValidCwd(input.cwd)
+        const ownerSessionId = input.opencodeSessionId
+          ? agentService.resolveRootOpencodeSessionId(input.opencodeSessionId)
+          : null
         const info = await (useTerminalDaemon() ? terminalDaemonClient.create({
           workspaceId: input.workspaceId ?? null,
           cwd: input.cwd,
           cols: input.cols,
           rows: input.rows,
           ownerKind: 'agent',
-          ownerSessionId: input.opencodeSessionId ?? null,
+          ownerSessionId,
           ownerAgentSessionId: input.ownerAgentSessionId ?? null,
         }) : terminalService.create({
           workspaceId: input.workspaceId ?? null,
@@ -156,7 +169,7 @@ export const agentShellRouter = router({
           cols: input.cols,
           rows: input.rows,
           ownerKind: 'agent',
-          ownerSessionId: input.opencodeSessionId ?? null,
+          ownerSessionId,
           ownerAgentSessionId: input.ownerAgentSessionId ?? null,
         }))
         const workspaceId = info.workspaceId ?? input.workspaceId

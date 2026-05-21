@@ -293,8 +293,8 @@ function GenericToolPart({
   onOpenShell?: (content: PaneContent) => void
 }) {
   const running = isPendingStatus(state.status)
-  const [open, setOpen] = useOpenState(`tool:${partId}`, running)
   const isTask = tool === 'task'
+  const [open, setOpen] = useOpenState(`tool:${partId}`, isTask ? false : running)
   const taskDescription = isTask
     ? String((state.input as { description?: string } | undefined)?.description ?? '')
     : ''
