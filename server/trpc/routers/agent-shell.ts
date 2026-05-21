@@ -62,6 +62,13 @@ type RunOnceEvent =
   | { type: 'stderr'; b64: string }
   | { type: 'exit'; code: number; truncated: boolean }
 
+const PTY_READ_POLL_MS = 100
+const MAX_PTY_READ_TIMEOUT_MS = 120_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export const agentShellRouter = router({
   /**
    * Stream a one-off command in the sandbox. First event is `started` with
@@ -204,24 +211,51 @@ export const agentShellRouter = router({
         sandboxId: z.string().min(1).optional(),
         shellId: z.string().min(1),
         maxBytes: z.number().int().positive().max(1024 * 1024).optional(),
+        minBytes: z.number().int().positive().max(1024 * 1024).optional(),
+        timeoutMs: z.number().int().positive().max(MAX_PTY_READ_TIMEOUT_MS).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       const sandboxId = resolveAgentSandboxId(ctx, input.sandboxId)
       await assertShellInSandbox(input.shellId, sandboxId)
+      if (input.minBytes !== undefined && input.timeoutMs === undefined) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'timeoutMs is required when minBytes is set' })
+      }
       const max = input.maxBytes ?? 64 * 1024
-      const snap = terminalService.snapshot(input.shellId)
+      let snap = terminalService.snapshot(input.shellId)
       if (snap === null) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'shell no longer retained' })
       }
+      const startBytes = Buffer.from(snap, 'utf8').length
+      let info = terminalService.get(input.shellId)
+      let timedOut = false
+      if (input.minBytes !== undefined && input.timeoutMs !== undefined && info?.alive) {
+        const deadline = Date.now() + input.timeoutMs
+        while (info?.alive) {
+          const currentBytes = Buffer.from(snap, 'utf8').length
+          if (currentBytes - startBytes >= input.minBytes) break
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) {
+            timedOut = true
+            break
+          }
+          await sleep(Math.min(PTY_READ_POLL_MS, remaining))
+          snap = terminalService.snapshot(input.shellId)
+          if (snap === null) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'shell no longer retained' })
+          }
+          info = terminalService.get(input.shellId)
+        }
+      }
       const bytes = Buffer.from(snap, 'utf8')
       const tail = bytes.length > max ? bytes.subarray(bytes.length - max) : bytes
-      const info = terminalService.get(input.shellId)
       return {
         b64: tail.toString('base64'),
         truncated: bytes.length > max,
         exitCode: info?.exitCode ?? null,
         alive: info?.alive ?? false,
+        timedOut,
+        newBytes: Math.max(0, bytes.length - startBytes),
       }
     }),
 })

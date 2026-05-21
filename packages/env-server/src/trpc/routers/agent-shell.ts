@@ -30,6 +30,13 @@ type RunOnceEvent =
   | { type: 'stderr'; b64: string }
   | { type: 'exit'; code: number; truncated: boolean }
 
+const PTY_READ_POLL_MS = 100
+const MAX_PTY_READ_TIMEOUT_MS = 120_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function getWorkspaceShell(input: {
   shellId: string
   opencodeSessionId?: string | null
@@ -224,16 +231,37 @@ export const agentShellRouter = router({
       z.object({
         shellId: z.string().min(1),
         maxBytes: z.number().int().positive().max(1024 * 1024).optional(),
+        minBytes: z.number().int().positive().max(1024 * 1024).optional(),
+        timeoutMs: z.number().int().positive().max(MAX_PTY_READ_TIMEOUT_MS).optional(),
         opencodeSessionId: z.string().optional(),
         ownerAgentSessionId: z.string().optional(),
       }),
     )
     .query(async ({ input }) => {
       const max = input.maxBytes ?? 64 * 1024
+      if (input.minBytes !== undefined && input.timeoutMs === undefined) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'timeoutMs is required when minBytes is set' })
+      }
       const info = await getWorkspaceShell(input)
       if (useTerminalDaemon()) {
         try {
-          const snap = await terminalDaemonClient.snapshot(input.shellId)
+          let snap = await terminalDaemonClient.snapshot(input.shellId)
+          const startBytes = Buffer.from(snap.b64, 'base64').length
+          let timedOut = false
+          if (input.minBytes !== undefined && input.timeoutMs !== undefined && snap.alive) {
+            const deadline = Date.now() + input.timeoutMs
+            while (snap.alive) {
+              const currentBytes = Buffer.from(snap.b64, 'base64').length
+              if (currentBytes - startBytes >= input.minBytes) break
+              const remaining = deadline - Date.now()
+              if (remaining <= 0) {
+                timedOut = true
+                break
+              }
+              await sleep(Math.min(PTY_READ_POLL_MS, remaining))
+              snap = await terminalDaemonClient.snapshot(input.shellId)
+            }
+          }
           const bytes = Buffer.from(snap.b64, 'base64')
           const tail = bytes.length > max ? bytes.subarray(bytes.length - max) : bytes
           return {
@@ -241,22 +269,47 @@ export const agentShellRouter = router({
             truncated: bytes.length > max,
             exitCode: snap.exitCode,
             alive: snap.alive,
+            timedOut,
+            newBytes: Math.max(0, bytes.length - startBytes),
           }
         } catch (err) {
           throw toTrpcError(err)
         }
       }
-      const snap = terminalService.snapshot(input.shellId)
+      let snap = terminalService.snapshot(input.shellId)
       if (snap === null) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'shell no longer retained' })
+      }
+      const startBytes = Buffer.from(snap, 'utf8').length
+      let finalInfo = info
+      let timedOut = false
+      if (input.minBytes !== undefined && input.timeoutMs !== undefined && info.alive) {
+        const deadline = Date.now() + input.timeoutMs
+        while (finalInfo.alive) {
+          const currentBytes = Buffer.from(snap, 'utf8').length
+          if (currentBytes - startBytes >= input.minBytes) break
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) {
+            timedOut = true
+            break
+          }
+          await sleep(Math.min(PTY_READ_POLL_MS, remaining))
+          snap = terminalService.snapshot(input.shellId)
+          if (snap === null) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'shell no longer retained' })
+          }
+          finalInfo = await getWorkspaceShell(input)
+        }
       }
       const bytes = Buffer.from(snap, 'utf8')
       const tail = bytes.length > max ? bytes.subarray(bytes.length - max) : bytes
       return {
         b64: tail.toString('base64'),
         truncated: bytes.length > max,
-        exitCode: info.exitCode,
-        alive: info.alive,
+        exitCode: finalInfo.exitCode,
+        alive: finalInfo.alive,
+        timedOut,
+        newBytes: Math.max(0, bytes.length - startBytes),
       }
     }),
 })

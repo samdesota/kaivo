@@ -437,4 +437,33 @@ describe('agentShell router', () => {
     const decoded = Buffer.from(t.b64, 'base64').toString('utf8')
     expect(decoded).toContain('tail-me')
   })
+
+  it('tail can wait for minBytes before returning', async () => {
+    const token = await mintToken('sb-a')
+    const caller = createCaller(makeCtx({ bearer: token }))
+    const { shellId } = await caller.agentShell.open({})
+
+    const pending = caller.agentShell.tail({ shellId, minBytes: 5, timeoutMs: 1_000 })
+    setTimeout(() => {
+      void caller.agentShell.write({ shellId, b64: Buffer.from('ready\n').toString('base64') })
+    }, 10)
+
+    const t = await pending
+    expect(t.timedOut).toBe(false)
+    expect(t.newBytes).toBeGreaterThanOrEqual(5)
+    const decoded = Buffer.from(t.b64, 'base64').toString('utf8')
+    expect(decoded).toContain('echo:ready')
+  })
+
+  it('tail reports current output when minBytes timeout elapses', async () => {
+    const token = await mintToken('sb-a')
+    const caller = createCaller(makeCtx({ bearer: token }))
+    const { shellId } = await caller.agentShell.open({})
+
+    const t = await caller.agentShell.tail({ shellId, minBytes: 5, timeoutMs: 20 })
+
+    expect(t.timedOut).toBe(true)
+    expect(t.newBytes).toBe(0)
+    expect(t.alive).toBe(true)
+  })
 })

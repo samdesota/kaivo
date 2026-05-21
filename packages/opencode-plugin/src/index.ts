@@ -167,7 +167,7 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
       }),
       kaivo_pty_read: tool({
         description:
-          'Read the most recent output from a PTY shell. Returns the last `maxBytes` of scrollback, whether the shell is still alive, and the exit code if it exited. Use after `kaivo_pty_write` or to poll progress of a long-running process.',
+          'Read the most recent output from a PTY shell. Returns the last `maxBytes` of scrollback, whether the shell is still alive, and the exit code if it exited. Optionally set `minBytes` with `timeoutMs` to wait until at least that many new bytes are available, the timeout expires, or the shell exits.',
         args: {
           shellId: z.string().describe('Shell id returned by kaivo_pty.'),
           maxBytes: z
@@ -175,6 +175,16 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
             .int()
             .optional()
             .describe('Max bytes of tail output to return. Defaults to 8192.'),
+          minBytes: z
+            .number()
+            .int()
+            .optional()
+            .describe('Minimum new bytes to wait for before returning. If set, timeoutMs is required.'),
+          timeoutMs: z
+            .number()
+            .int()
+            .optional()
+            .describe('Max milliseconds to wait for minBytes before returning current output.'),
         },
         async execute(args, context) {
           return runCloudPtyRead(client, args, context as unknown as ToolCtxLike)
@@ -490,7 +500,7 @@ async function runCloudPtyWrite(
 
 async function runCloudPtyRead(
   client: AgentShellClient,
-  args: { shellId: string; maxBytes?: number },
+  args: { shellId: string; maxBytes?: number; minBytes?: number; timeoutMs?: number },
   ctx: ToolCtxLike,
 ): Promise<{ output: string; metadata: Record<string, unknown> }> {
   try {
@@ -499,9 +509,13 @@ async function runCloudPtyRead(
       truncated: boolean
       exitCode: number | null
       alive: boolean
+      timedOut?: boolean
+      newBytes?: number
     }>('agentShell.tail', {
       shellId: args.shellId,
       maxBytes: args.maxBytes ?? 8192,
+      minBytes: args.minBytes,
+      timeoutMs: args.timeoutMs,
       opencodeSessionId: ctx.sessionID,
     })
     const text = Buffer.from(res.b64, 'base64').toString('utf8')
@@ -512,6 +526,8 @@ async function runCloudPtyRead(
         alive: res.alive,
         exit_code: res.exitCode,
         truncated: res.truncated,
+        timed_out: res.timedOut ?? false,
+        new_bytes: res.newBytes ?? 0,
       },
     }
   } catch (err) {
