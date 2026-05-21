@@ -54,6 +54,7 @@ import {
 } from './workspace/env-targets'
 import { WorkspaceContextProvider, useWorkspaceContext } from './workspace/context'
 import { useWorkspaceViewStateStore } from './workspace/view-state-store'
+import { closeNativeBrowserTabsForWorkspace } from './workspace/browser-tab-cleanup'
 import {
   type WorkspaceTab,
   type WorkspaceUiAction,
@@ -700,6 +701,7 @@ export function WorkspaceSidebar({
   const ctx = useWorkspaceContext()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const trpcUtils = trpc.useUtils()
   const tree = trpc.workspace.listTree.useQuery(undefined, { refetchInterval: 15_000 })
   const list = trpc.workspace.list.useQuery(undefined, { refetchInterval: 15_000 })
   const resourcesStore = useWorkspaceResourcesStore()
@@ -772,6 +774,8 @@ export function WorkspaceSidebar({
   }
 
   async function closeWorkspace(workspaceId: string, workspaces: WorkspaceSummary[]) {
+    const tabs = await trpcUtils.workspace.listTabs.fetch({ workspaceId }).catch(() => [])
+    await closeNativeBrowserTabsForWorkspace(tabs)
     const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId)
     const next = remaining[0]
     if (workspaceId === ctx.workspace.id) {

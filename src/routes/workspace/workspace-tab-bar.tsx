@@ -2,6 +2,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../trpc'
+import { closeNativeBrowserTabsForWorkspace } from './browser-tab-cleanup'
 import { trpcQueryKey } from '../../lib/trpc-plain'
 import {
   idleRenameEditState,
@@ -44,6 +45,7 @@ export function WorkspaceTabBar({
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const trpcUtils = trpc.useUtils()
   const list = trpc.workspace.list.useQuery(undefined, { refetchInterval: 15_000 })
   const create = trpc.workspace.create.useMutation()
   const rename = trpc.workspace.rename.useMutation({
@@ -95,6 +97,8 @@ export function WorkspaceTabBar({
   }
 
   async function closeWorkspace(workspaceId: string) {
+    const tabs = await trpcUtils.workspace.listTabs.fetch({ workspaceId }).catch(() => [])
+    await closeNativeBrowserTabsForWorkspace(tabs)
     await archive.mutateAsync({ id: workspaceId })
     const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId)
     const next = remaining[0]
