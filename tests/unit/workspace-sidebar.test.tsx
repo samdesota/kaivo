@@ -63,6 +63,7 @@ vi.mock('../../src/routes/workspace/context', () => ({
 }))
 
 vi.mock('../../src/trpc', () => ({
+  makeTrpcClient: () => ({}),
   trpc: {
     useUtils: () => ({
       workspace: {
@@ -236,7 +237,7 @@ describe('WorkspaceSidebar', () => {
     expect(screen.queryByRole('button', { name: 'Expand chats for kaivo-app' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Collapse chats for kaivo-app' })).toBeNull()
 
-    expect(window.localStorage.getItem('cloud-code.workspaceChatExpanded')).toBeNull()
+    expect(window.localStorage.getItem('kaivo.workspaceChatExpanded')).toBeNull()
     expect(screen.queryByText('No chats')).toBeNull()
   })
 
@@ -264,7 +265,7 @@ describe('WorkspaceSidebar', () => {
 
   it('renders finished-chat dot for inactive workspace with unread runtime activity', async () => {
     ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
-    window.localStorage.setItem('cloud-code.workspaceChatReadAt', JSON.stringify({ 'workspace-tools': new Date('2026-05-10T12:00:00.000Z').getTime() }))
+    window.localStorage.setItem('kaivo.workspaceChatReadAt', JSON.stringify({ 'workspace-tools': new Date('2026-05-10T12:00:00.000Z').getTime() }))
     agentSessionListData.push({
       id: 'session-1',
       workspaceId: 'workspace-tools',

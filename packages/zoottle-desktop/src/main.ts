@@ -107,7 +107,7 @@ function trackWebContents(contents: WebContents): void {
     if (!browserTabId) return
     const chrome = findChromeWebContentsForBrowserTab(browserTabId) ?? findChromeWebContentsForShortcutSender(contents)
     if (!chrome || chrome.isDestroyed()) return
-    chrome.send('cloud-code/browser-found-in-page', {
+    chrome.send('kaivo/browser-found-in-page', {
       browserTabId,
       requestId: result.requestId,
       activeMatchOrdinal: result.activeMatchOrdinal,
@@ -181,7 +181,7 @@ function notifyChromeOfFocusedBrowserTab(contents: WebContents): void {
   if (caller?.kind !== 'tab' || !caller.tabId) return
   const chrome = findChromeWebContentsForBrowserTab(caller.tabId) ?? findChromeWebContentsForShortcutSender(contents)
   if (!chrome || chrome.isDestroyed()) return
-  chrome.send('cloud-code/browser-tab-focused', { browserTabId: caller.tabId })
+  chrome.send('kaivo/browser-tab-focused', { browserTabId: caller.tabId })
 }
 
 function installAppShortcutMenu(): void {
@@ -251,7 +251,7 @@ function sendAppShortcut(chrome: WebContents | null, input: AppShortcutInput): v
     focusedWebContentsId: electronWebContents.getFocusedWebContents()?.id,
     focusedWindowWebContentsId: BrowserWindow.getFocusedWindow()?.webContents.id,
   })
-  chrome.send('cloud-code/app-shortcut', input)
+  chrome.send('kaivo/app-shortcut', input)
 }
 
 function findChromeWebContentsForFocusedShortcut(): WebContents | null {
@@ -354,7 +354,7 @@ function findOverlayWebContents(overlayId: string): WebContents | null {
 }
 
 function installIpcHandlers(): void {
-  ipcMain.handle('cloud-code/diagnostics/ping', (event, input: { seq?: number; rendererNow?: number }) => ({
+  ipcMain.handle('kaivo/diagnostics/ping', (event, input: { seq?: number; rendererNow?: number }) => ({
     ok: true as const,
     seq: input.seq,
     rendererNow: input.rendererNow,
@@ -365,7 +365,7 @@ function installIpcHandlers(): void {
     trackedWebContentsCount: trackedWebContentsIds.size,
     chromeWebContentsIds: Array.from(chromeWebContentsIds),
   }))
-  ipcMain.handle('cloud-code/browser/open-devtools', (_event, input: { browserTabId?: string }) => {
+  ipcMain.handle('kaivo/browser/open-devtools', (_event, input: { browserTabId?: string }) => {
     const browserTabId = input.browserTabId
     if (!browserTabId) throw new Error('browserTabId is required')
     const contents = findTabWebContents(browserTabId)
@@ -373,7 +373,7 @@ function installIpcHandlers(): void {
     openFloatingDevTools(contents)
     return { ok: true as const }
   })
-  ipcMain.handle('cloud-code/browser/find-in-page', (_event, input: { browserTabId?: string; text?: string; forward?: boolean; findNext?: boolean }) => {
+  ipcMain.handle('kaivo/browser/find-in-page', (_event, input: { browserTabId?: string; text?: string; forward?: boolean; findNext?: boolean }) => {
     const browserTabId = input.browserTabId
     if (!browserTabId) throw new Error('browserTabId is required')
     const contents = findTabWebContents(browserTabId)
@@ -390,7 +390,7 @@ function installIpcHandlers(): void {
       }),
     }
   })
-  ipcMain.handle('cloud-code/browser/stop-find-in-page', (_event, input: { browserTabId?: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => {
+  ipcMain.handle('kaivo/browser/stop-find-in-page', (_event, input: { browserTabId?: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => {
     const browserTabId = input.browserTabId
     if (!browserTabId) throw new Error('browserTabId is required')
     const contents = findTabWebContents(browserTabId)
@@ -398,7 +398,7 @@ function installIpcHandlers(): void {
     contents.stopFindInPage(input.action ?? 'clearSelection')
     return { ok: true as const }
   })
-  ipcMain.handle('cloud-code/browser/set-zoom', (_event, input: { browserTabId?: string; level?: number }) => {
+  ipcMain.handle('kaivo/browser/set-zoom', (_event, input: { browserTabId?: string; level?: number }) => {
     const browserTabId = input.browserTabId
     if (!browserTabId) throw new Error('browserTabId is required')
     const contents = findTabWebContents(browserTabId)
@@ -408,15 +408,15 @@ function installIpcHandlers(): void {
     contents.setZoomLevel(next)
     return { zoomLevel: next }
   })
-  ipcMain.handle('cloud-code/browser/agent-connections', () => ({
+  ipcMain.handle('kaivo/browser/agent-connections', () => ({
     browserTabIds: browserAgentBridge?.connectedTabs() ?? [],
   }))
-  ipcMain.handle('cloud-code/browser/disconnect-agent', (_event, input: { browserTabId?: string }) => {
+  ipcMain.handle('kaivo/browser/disconnect-agent', (_event, input: { browserTabId?: string }) => {
     if (!input.browserTabId) throw new Error('browserTabId is required')
     browserAgentBridge?.disconnectTab(input.browserTabId)
     return { ok: true as const }
   })
-  ipcMain.handle('cloud-code/browser/focus-overlay', (_event, input: { overlayId?: string }) => {
+  ipcMain.handle('kaivo/browser/focus-overlay', (_event, input: { overlayId?: string }) => {
     const overlayId = input.overlayId
     if (!overlayId) throw new Error('overlayId is required')
     const contents = findOverlayWebContents(overlayId)
@@ -426,23 +426,23 @@ function installIpcHandlers(): void {
     contents.focus()
     return { ok: true as const }
   })
-  ipcMain.handle('cloud-code/browser/register-overlay-owner', (event, input: { overlayId?: string }) => {
+  ipcMain.handle('kaivo/browser/register-overlay-owner', (event, input: { overlayId?: string }) => {
     if (!input.overlayId) throw new Error('overlayId is required')
     if (!chromeWebContentsIds.has(event.sender.id)) throw new Error('overlay owner must be a chrome webContents')
     registerOverlayOwner(event.sender.id, input.overlayId)
     return { ok: true as const }
   })
-  ipcMain.handle('cloud-code/browser/unregister-overlay-owner', (event, input: { overlayId?: string }) => {
+  ipcMain.handle('kaivo/browser/unregister-overlay-owner', (event, input: { overlayId?: string }) => {
     if (!input.overlayId) throw new Error('overlayId is required')
     unregisterOverlayOwner(event.sender.id, input.overlayId)
     return { ok: true as const }
   })
-  ipcMain.on('cloud-code/browser/register-tab-focus-owner', (event, input: { browserTabId?: string }) => {
+  ipcMain.on('kaivo/browser/register-tab-focus-owner', (event, input: { browserTabId?: string }) => {
     if (!input.browserTabId) return
     if (!chromeWebContentsIds.has(event.sender.id)) return
     browserTabFocusOwners.set(input.browserTabId, event.sender.id)
   })
-  ipcMain.handle('cloud-code/services/restart-terminal', async () => {
+  ipcMain.handle('kaivo/services/restart-terminal', async () => {
     if (!serviceSupervisor) throw new Error('desktop service supervisor unavailable')
     await serviceSupervisor.restartTerminal()
     return { ok: true as const }

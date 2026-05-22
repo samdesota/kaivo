@@ -319,7 +319,7 @@ async function runCloudBash(
         shellId = evt.shellId
         ctx.metadata({
           title: `$ ${truncateTitle(args.command)}`,
-          metadata: { cloudcode_shell_id: shellId, status: 'running' },
+          metadata: { kaivo_shell_id: shellId, status: 'running' },
         })
       } else if (evt.type === 'stdout' || evt.type === 'stderr') {
         if (evt.b64) {
@@ -336,7 +336,7 @@ async function runCloudBash(
     const result = {
       output,
       metadata: {
-        cloudcode_shell_id: shellId,
+        kaivo_shell_id: shellId,
         exit_code: exitCode ?? 0,
         truncated,
       },
@@ -351,7 +351,7 @@ async function runCloudBash(
       return {
         output: '',
         metadata: {
-          cloudcode_shell_id: null,
+          kaivo_shell_id: null,
           exit_code: 1,
           status: 'error',
           stderr: 'Kaivo app unreachable',
@@ -362,7 +362,7 @@ async function runCloudBash(
     return {
       output: '',
       metadata: {
-        cloudcode_shell_id: null,
+        kaivo_shell_id: null,
         exit_code: 1,
         status: 'error',
         stderr: (err as Error).message,
@@ -385,18 +385,18 @@ async function runCloudPty(
     })
     ctx.metadata({
       title: `shell ${shellId.slice(-8)}`,
-      metadata: { cloudcode_shell_id: shellId, status: 'running' },
+      metadata: { kaivo_shell_id: shellId, status: 'running' },
     })
     return {
-      output: `Shell ${shellId} opened in the cloud-code sandbox.`,
-      metadata: { cloudcode_shell_id: shellId, status: 'running' },
+      output: `Shell ${shellId} opened in the Kaivo sandbox.`,
+      metadata: { kaivo_shell_id: shellId, status: 'running' },
     }
   } catch (err) {
     if (err instanceof AppUnreachableError) {
       return {
         output: '',
         metadata: {
-          cloudcode_shell_id: null,
+          kaivo_shell_id: null,
           status: 'error',
           stderr: 'Kaivo app unreachable',
           error: err.message,
@@ -406,7 +406,7 @@ async function runCloudPty(
     return {
       output: '',
       metadata: {
-        cloudcode_shell_id: null,
+        kaivo_shell_id: null,
         status: 'error',
         stderr: (err as Error).message,
       },
@@ -491,7 +491,7 @@ async function runCloudPtyWrite(
     })
     return {
       output: `Wrote ${line.length} bytes to shell ${args.shellId}.`,
-      metadata: { cloudcode_shell_id: args.shellId, status: 'ok' },
+      metadata: { kaivo_shell_id: args.shellId, status: 'ok' },
     }
   } catch (err) {
     return ptyError(args.shellId, err)
@@ -522,7 +522,7 @@ async function runCloudPtyRead(
     return {
       output: text,
       metadata: {
-        cloudcode_shell_id: args.shellId,
+        kaivo_shell_id: args.shellId,
         alive: res.alive,
         exit_code: res.exitCode,
         truncated: res.truncated,
@@ -544,7 +544,7 @@ async function runCloudPtyClose(
     await client.mutate<{ ok: true }>('agentShell.close', { shellId: args.shellId, opencodeSessionId: ctx.sessionID })
     return {
       output: `Shell ${args.shellId} closed.`,
-      metadata: { cloudcode_shell_id: args.shellId, status: 'closed' },
+      metadata: { kaivo_shell_id: args.shellId, status: 'closed' },
     }
   } catch (err) {
     return ptyError(args.shellId, err)
@@ -556,7 +556,7 @@ function ptyError(shellId: string, err: unknown): { output: string; metadata: Re
     return {
       output: '',
       metadata: {
-        cloudcode_shell_id: shellId,
+        kaivo_shell_id: shellId,
         status: 'error',
         stderr: 'Kaivo app unreachable',
         error: err.message,
@@ -566,7 +566,7 @@ function ptyError(shellId: string, err: unknown): { output: string; metadata: Re
   return {
     output: '',
     metadata: {
-      cloudcode_shell_id: shellId,
+      kaivo_shell_id: shellId,
       status: 'error',
       stderr: (err as Error).message,
     },
@@ -724,5 +724,5 @@ const plugin: Plugin = async () => buildHooks()
  * 1.4.14's loader logs `must export id  failed to load plugin` and skips
  * hook registration entirely — the tools silently don't show up.
  */
-export default { id: 'cloud-code', server: plugin }
+export default { id: 'kaivo', server: plugin }
 export { plugin }

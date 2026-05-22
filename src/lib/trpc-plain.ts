@@ -28,11 +28,11 @@ export async function appTrpcMutation<T>(path: string, input?: unknown): Promise
 function maybeMockTrpcMutation<T>(path: string, input?: unknown): Promise<T> | null {
   const dev = (import.meta as { env?: { DEV?: boolean } }).env?.DEV
   if (!dev || typeof window === 'undefined') return null
-  if (window.localStorage.getItem('__zoottle_mock_bookmark_mutations') !== 'true') return null
+  if (window.localStorage.getItem('__kaivo_mock_bookmark_mutations') !== 'true') return null
   if (path !== 'bookmarks.upsert') return null
-  const calls = JSON.parse(window.localStorage.getItem('__zoottle_mock_bookmark_mutation_calls') || '[]') as unknown[]
+  const calls = JSON.parse(window.localStorage.getItem('__kaivo_mock_bookmark_mutation_calls') || '[]') as unknown[]
   calls.push(input)
-  window.localStorage.setItem('__zoottle_mock_bookmark_mutation_calls', JSON.stringify(calls))
+  window.localStorage.setItem('__kaivo_mock_bookmark_mutation_calls', JSON.stringify(calls))
   const bookmark = input as { title?: string; url?: string; faviconDataUrl?: string | null; faviconUrl?: string | null }
   return Promise.resolve({
     id: 'bookmark-e2e',

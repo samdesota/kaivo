@@ -13,7 +13,7 @@ type AppShortcutInput = {
 // Preserve webframe's chrome API when this app supplies an additional preload.
 require(path.join(path.dirname(require.resolve('@samdesota/webframe')), 'preload', 'chrome.js'))
 
-ipcRenderer.on('cloud-code/app-shortcut', (_event, input: AppShortcutInput) => {
+ipcRenderer.on('kaivo/app-shortcut', (_event, input: AppShortcutInput) => {
   window.dispatchEvent(new KeyboardEvent('keydown', {
     key: input.key,
     code: input.code,
@@ -28,26 +28,26 @@ ipcRenderer.on('cloud-code/app-shortcut', (_event, input: AppShortcutInput) => {
 
 contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   kind: 'skeleton',
-  openBrowserDevTools: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/open-devtools', input),
-  findInBrowserPage: (input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('cloud-code/browser/find-in-page', input),
-  stopBrowserFindInPage: (input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => ipcRenderer.invoke('cloud-code/browser/stop-find-in-page', input),
-  setBrowserZoom: (input: { browserTabId: string; level: number }) => ipcRenderer.invoke('cloud-code/browser/set-zoom', input),
+  openBrowserDevTools: (input: { browserTabId: string }) => ipcRenderer.invoke('kaivo/browser/open-devtools', input),
+  findInBrowserPage: (input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('kaivo/browser/find-in-page', input),
+  stopBrowserFindInPage: (input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => ipcRenderer.invoke('kaivo/browser/stop-find-in-page', input),
+  setBrowserZoom: (input: { browserTabId: string; level: number }) => ipcRenderer.invoke('kaivo/browser/set-zoom', input),
   onBrowserFoundInPage: (handler: (input: { browserTabId: string; requestId: number; activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, input: { browserTabId: string; requestId: number; activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => handler(input)
-    ipcRenderer.on('cloud-code/browser-found-in-page', listener)
-    return () => ipcRenderer.removeListener('cloud-code/browser-found-in-page', listener)
+    ipcRenderer.on('kaivo/browser-found-in-page', listener)
+    return () => ipcRenderer.removeListener('kaivo/browser-found-in-page', listener)
   },
-  getAgentBrowserConnections: () => ipcRenderer.invoke('cloud-code/browser/agent-connections'),
-  disconnectAgentBrowser: (input: { browserTabId: string }) => ipcRenderer.invoke('cloud-code/browser/disconnect-agent', input),
-  registerBrowserTabFocusOwner: (input: { browserTabId: string }) => ipcRenderer.send('cloud-code/browser/register-tab-focus-owner', input),
+  getAgentBrowserConnections: () => ipcRenderer.invoke('kaivo/browser/agent-connections'),
+  disconnectAgentBrowser: (input: { browserTabId: string }) => ipcRenderer.invoke('kaivo/browser/disconnect-agent', input),
+  registerBrowserTabFocusOwner: (input: { browserTabId: string }) => ipcRenderer.send('kaivo/browser/register-tab-focus-owner', input),
   onBrowserTabFocus: (handler: (input: { browserTabId: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, input: { browserTabId: string }) => handler(input)
-    ipcRenderer.on('cloud-code/browser-tab-focused', listener)
-    return () => ipcRenderer.removeListener('cloud-code/browser-tab-focused', listener)
+    ipcRenderer.on('kaivo/browser-tab-focused', listener)
+    return () => ipcRenderer.removeListener('kaivo/browser-tab-focused', listener)
   },
-  focusOverlay: (input: { overlayId: string }) => ipcRenderer.invoke('cloud-code/browser/focus-overlay', input),
-  registerOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('cloud-code/browser/register-overlay-owner', input),
-  unregisterOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('cloud-code/browser/unregister-overlay-owner', input),
-  diagnosticsPing: (input: { seq: number; rendererNow: number }) => ipcRenderer.invoke('cloud-code/diagnostics/ping', input),
-  restartTerminalService: () => ipcRenderer.invoke('cloud-code/services/restart-terminal'),
+  focusOverlay: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/focus-overlay', input),
+  registerOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/register-overlay-owner', input),
+  unregisterOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/unregister-overlay-owner', input),
+  diagnosticsPing: (input: { seq: number; rendererNow: number }) => ipcRenderer.invoke('kaivo/diagnostics/ping', input),
+  restartTerminalService: () => ipcRenderer.invoke('kaivo/services/restart-terminal'),
 })

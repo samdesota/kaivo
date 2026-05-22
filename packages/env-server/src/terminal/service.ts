@@ -120,7 +120,7 @@ const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
 const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
 const DEFAULT_LOGIN_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 const ENV_CAPTURE_DELIMITER = '_CLOUD_CODE_SHELL_ENV_DELIMITER_'
-const ZSH_COMMAND_OSC_PREFIX = '\x1b]777;cloud-code-command;'
+const ZSH_COMMAND_OSC_PREFIX = '\x1b]777;kaivo-command;'
 
 function ensureNodePtyHelperExecutable(): void {
   if (process.platform !== 'darwin' && process.platform !== 'linux') return
@@ -707,7 +707,7 @@ function prepareInteractiveShellLaunch(shell: string, env: NodeJS.ProcessEnv): {
 } {
   if (path.basename(shell) !== 'zsh') return { shell, args: ['-l'], env, integrationDir: null }
 
-  const integrationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-code-zsh-'))
+  const integrationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaivo-zsh-'))
   const originalZdotdir = env.ZDOTDIR || env.HOME || os.userInfo().homedir
   const nextEnv = {
     ...env,

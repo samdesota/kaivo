@@ -4,11 +4,11 @@ import './index.css'
 import { BrowserPane } from './components/browser-pane'
 import type { BookmarkRecord } from './routes/workspace/bookmarks-store'
 
-window.localStorage.setItem('__zoottle_mock_bookmark_mutations', 'true')
-window.localStorage.removeItem('__zoottle_mock_bookmark_mutation_calls')
+window.localStorage.setItem('__kaivo_mock_bookmark_mutations', 'true')
+window.localStorage.removeItem('__kaivo_mock_bookmark_mutation_calls')
 
 window.addEventListener('unhandledrejection', (event) => {
-  window.localStorage.setItem('__zoottle_last_unhandled_rejection', String(event.reason?.message ?? event.reason))
+  window.localStorage.setItem('__kaivo_last_unhandled_rejection', String(event.reason?.message ?? event.reason))
 })
 
 const faviconDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='

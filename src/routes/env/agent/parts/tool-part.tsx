@@ -17,6 +17,8 @@ interface ToolState {
   output?: string
   error?: string
   metadata?: Record<string, unknown> & {
+    kaivo_shell_id?: string
+    kaivo_exit_code?: number
     cloudcode_shell_id?: string
     cloudcode_exit_code?: number
   }
@@ -157,9 +159,11 @@ function BashToolPart({
   const running = isPendingStatus(state.status)
   const [open, setOpen] = useOpenState(`tool:${partId}`, running)
   const cmd = String((state.input as { command?: string } | undefined)?.command ?? '')
-  const shellId = state.metadata?.cloudcode_shell_id
+  const shellId = state.metadata?.kaivo_shell_id ?? state.metadata?.cloudcode_shell_id
   const exitCode =
-    typeof state.metadata?.cloudcode_exit_code === 'number'
+    typeof state.metadata?.kaivo_exit_code === 'number'
+      ? state.metadata.kaivo_exit_code
+      : typeof state.metadata?.cloudcode_exit_code === 'number'
       ? state.metadata.cloudcode_exit_code
       : null
   const d = durationMs(state)
@@ -245,7 +249,7 @@ function PtyToolPart({
   state: ToolState
   onOpenShell?: (content: PaneContent) => void
 }) {
-  const shellId = state.metadata?.cloudcode_shell_id
+  const shellId = state.metadata?.kaivo_shell_id ?? state.metadata?.cloudcode_shell_id
   const label =
     (state.input as { label?: string; cwd?: string } | undefined)?.label ??
     (state.input as { label?: string; cwd?: string } | undefined)?.cwd ??

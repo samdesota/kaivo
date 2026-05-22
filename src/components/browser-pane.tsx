@@ -384,7 +384,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
 
   async function openBookmarkOverlay() {
     if (!bookmarkableUrl) return
-    window.localStorage?.setItem('__zoottle_bookmark_overlay_requested', bookmarkableUrl)
+    window.localStorage?.setItem('__kaivo_bookmark_overlay_requested', bookmarkableUrl)
     await openCreateBookmarkOverlay({
       initialTitle: pageTitle || defaultBrowserBookmarkTitle(bookmarkableUrl),
       initialUrl: bookmarkableUrl,

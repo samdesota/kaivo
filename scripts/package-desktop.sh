@@ -184,7 +184,7 @@ echo "==> packaging electron app"
   --no-asar \
   --ignore='^/src($|/)' \
   --ignore='^/dist/.*\.map$' \
-  --ignore='^/\.cloud-code($|/)' \
+  --ignore='^/\.kaivo($|/)' \
   --ignore='^/release($|/)')
 
 if [ "$install_app" = true ]; then

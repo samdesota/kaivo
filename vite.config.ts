@@ -15,7 +15,11 @@ export function resolveViteServerConfig(env: NodeJS.ProcessEnv = process.env) {
     // Allow the Tailscale Funnel / tailnet hostname to reach the dev server.
     allowedHosts: ['samuels-macbook-pro.tailf71199.ts.net', 'localhost', '127.0.0.1'],
     watch: {
-      ignored: ['**/.cloud-code/**'],
+      ignored: [
+        '**/.kaivo/**',
+        '**/packages/zoottle-desktop/bundle/**',
+        '**/packages/zoottle-desktop/release/**',
+      ],
     },
     proxy: {
       '/trpc': { target: appUrl, ws: true },
