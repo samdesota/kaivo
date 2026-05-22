@@ -6,10 +6,10 @@ export type WorkspaceRecord = {
   id: string
   name: string
   folderId?: string | null
-  createdAt: Date
-  updatedAt: Date
-  lastOpenedAt: Date | null
-  archivedAt: Date | null
+  createdAt: Date | number
+  updatedAt: Date | number
+  lastOpenedAt: Date | number | null
+  archivedAt: Date | number | null
 }
 
 export type WorkspaceContextValue = {

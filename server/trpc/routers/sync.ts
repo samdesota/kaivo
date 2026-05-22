@@ -18,18 +18,7 @@ export const syncRouter = router({
     .subscription(({ input }) => {
       return observable((emit) => {
         const realtime = getAppRealtime()
-        const missed = realtime.changes(input.afterSeq, input.tables)
-        if (input.afterSeq === 0 || missed.length > 0) {
-          console.info('[sync.changes] subscription replay check', {
-            afterSeq: input.afterSeq,
-            tables: input.tables ?? null,
-            missedCount: missed.length,
-            firstSeq: missed[0]?.seq ?? null,
-            lastSeq: missed[missed.length - 1]?.seq ?? null,
-          })
-        }
-        if (missed.length > 0) emit.next(missed)
-        return realtime.subscribe((events) => {
+        const unsubscribe = realtime.subscribe((events) => {
           const filtered = input.tables?.length
             ? events.filter((event) => input.tables!.includes(event.table))
             : events
@@ -44,6 +33,19 @@ export const syncRouter = router({
           }
           if (filtered.length > 0) emit.next(filtered)
         })
+        const missed = realtime.changes(input.afterSeq, input.tables)
+        if (input.afterSeq === 0 || missed.length > 0) {
+          console.info('[sync.changes] subscription replay check', {
+            afterSeq: input.afterSeq,
+            tables: input.tables ?? null,
+            missedCount: missed.length,
+            firstSeq: missed[0]?.seq ?? null,
+            lastSeq: missed[missed.length - 1]?.seq ?? null,
+          })
+        }
+        if (missed.length > 0) emit.next(missed)
+        emit.next([])
+        return unsubscribe
       })
     }),
 })
