@@ -60,6 +60,7 @@ export function getAppRealtime(): SqliteRealtimeEngine {
         { name: 'id' },
         { name: 'type' },
         { name: 'title' },
+        { name: 'title_source', jsonName: 'titleSource' },
         { name: 'position' },
         { name: 'env_id', jsonName: 'envId' },
         { name: 'shell_id', jsonName: 'shellId' },

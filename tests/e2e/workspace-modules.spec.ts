@@ -66,6 +66,69 @@ test('derives folder tree locally after folder create, move, collapse, expand, a
   await expect(sidebar.getByRole('link', { name: workspace.name })).toBeVisible()
 })
 
+test('restores workspace pane tabs and active tab across workspace switches without route-level tab fetches', async ({ page }) => {
+  await login(page)
+  const first = await createWorkspaceViaFetch(page, `Pane Tabs A ${Date.now()}`)
+  const second = await createWorkspaceViaFetch(page, `Pane Tabs B ${Date.now()}`)
+  await createPaneTabs(page, first.id)
+  await trpcMutation(page, 'workspace.saveViewState', { workspaceId: first.id, state: { activeWorkspaceTabId: 'browser-tab' } })
+
+  await page.goto(`/w/${first.id}`)
+  await waitForAppDataReady(page)
+  await expect(page.getByRole('tab', { name: /Shell Tab/ })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /Browser Tab/ })).toHaveAttribute('aria-selected', 'true')
+
+  const calls = recordWorkspacePaneMetadataCalls(page)
+  await page.getByRole('link', { name: second.name }).first().click()
+  await expect(page).toHaveURL(new RegExp(`/w/${second.id}`))
+  await page.getByRole('link', { name: first.name }).first().click()
+  await expect(page).toHaveURL(new RegExp(`/w/${first.id}`))
+
+  await expect(page.getByRole('tab', { name: /File Tab/ })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /Browser Tab/ })).toHaveAttribute('aria-selected', 'true')
+  expect(calls.filter((call) => call === 'workspace.listTabs')).toEqual([])
+})
+
+test('closes workspace pane tabs with active fallback and persists server-side reorder after reload', async ({ page }) => {
+  await login(page)
+  const workspace = await createWorkspaceViaFetch(page, `Pane Close ${Date.now()}`)
+  await createPaneTabs(page, workspace.id)
+  await trpcMutation(page, 'workspace.upsertTab', { workspaceId: workspace.id, tab: browserTab('browser-tab', 'Browser Tab', 'https://browser.example'), position: 2 })
+  await trpcMutation(page, 'workspace.upsertTab', { workspaceId: workspace.id, tab: browserTab('second-browser-tab', 'Second Browser Tab', 'https://second.example'), position: 0 })
+  await trpcMutation(page, 'workspace.saveViewState', { workspaceId: workspace.id, state: { activeWorkspaceTabId: 'browser-tab' } })
+
+  await page.goto(`/w/${workspace.id}`)
+  await waitForAppDataReady(page)
+  await expect(page.getByRole('tab').nth(0)).toContainText('Second Browser Tab')
+
+  await page.getByRole('tab').nth(3).getByRole('button', { name: 'Close tab' }).click()
+  await expect(page.getByRole('tab', { name: /File Tab/ })).toHaveAttribute('aria-selected', 'true')
+  await page.goto(`/w/${workspace.id}`)
+  await waitForAppDataReady(page)
+
+  await expect(page.getByRole('tab').filter({ hasText: /^Browser Tab/ })).toHaveCount(0)
+  await expect(page.getByRole('tab').nth(0)).toContainText('Second Browser Tab')
+  await expect(page.getByRole('tab', { name: /File Tab/ })).toHaveAttribute('aria-selected', 'true')
+})
+
+test('keeps collapsed agent pane state per workspace across switches', async ({ page }) => {
+  await login(page)
+  const first = await createWorkspaceViaFetch(page, `View State A ${Date.now()}`)
+  const second = await createWorkspaceViaFetch(page, `View State B ${Date.now()}`)
+
+  await page.goto(`/w/${first.id}`)
+  await waitForAppDataReady(page)
+  await page.getByTitle('Collapse agent chat (⌘I)').click()
+  await expect(page.getByTitle('Expand agent chat (⌘I)')).toBeVisible()
+
+  await page.getByRole('link', { name: second.name, exact: true }).first().click()
+  await expect(page).toHaveURL(new RegExp(`/w/${second.id}`))
+  await expect(page.getByTitle('Collapse agent chat (⌘I)')).toBeVisible()
+  await page.getByRole('link', { name: first.name, exact: true }).first().click()
+  await expect(page).toHaveURL(new RegExp(`/w/${first.id}`))
+  await expect(page.getByTitle('Expand agent chat (⌘I)')).toBeVisible()
+})
+
 async function login(page: Page) {
   await page.goto('/login')
   await page.getByLabel('Password').fill('e2e-password-123')
@@ -94,6 +157,18 @@ function recordWorkspaceMetadataCalls(page: Page): string[] {
   return calls
 }
 
+function recordWorkspacePaneMetadataCalls(page: Page): string[] {
+  const denied = ['workspace.getViewState', 'workspace.listTabs']
+  const calls: string[] = []
+  page.on('request', (request) => {
+    const url = request.url()
+    for (const procedure of denied) {
+      if (new RegExp(`/trpc/${procedure.replace('.', '\.')}(?:[?,/]|$)`).test(url)) calls.push(procedure)
+    }
+  })
+  return calls
+}
+
 async function createWorkspaceViaFetch(page: Page, name: string): Promise<{ id: string; name: string }> {
   return await trpcMutation(page, 'workspace.create', { name })
 }
@@ -110,4 +185,14 @@ async function trpcMutation<T>(page: Page, path: string, input?: unknown): Promi
     const json = await res.json() as { result?: { data?: { json?: unknown } } }
     return json.result?.data?.json
   }, { path, input }) as T
+}
+
+async function createPaneTabs(page: Page, workspaceId: string) {
+  await trpcMutation(page, 'workspace.upsertTab', { workspaceId, tab: { id: 'shell-tab', type: 'shell', envId: 'local', shellId: 'shell-1', title: 'Shell Tab', titleSource: 'explicit' }, position: 0 })
+  await trpcMutation(page, 'workspace.upsertTab', { workspaceId, tab: { id: 'file-tab', type: 'file', envId: 'local', path: '/tmp/example.txt', title: 'File Tab' }, position: 1 })
+  await trpcMutation(page, 'workspace.upsertTab', { workspaceId, tab: browserTab('browser-tab', 'Browser Tab', 'https://browser.example'), position: 2 })
+}
+
+function browserTab(id: string, title: string, url: string) {
+  return { id, type: 'browser' as const, url, title }
 }

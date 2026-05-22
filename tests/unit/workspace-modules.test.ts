@@ -1,4 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { workspaceSearchSyncAction } from '../../src/data/modules/workspace-view-state'
+import { applyWorkspaceViewStateRowsForTests, setWorkspaceSplitRatio } from '../../src/data/modules/workspace-view-state/commands'
+import { workspaceViewStateCollection } from '../../src/data/modules/workspace-view-state/collection'
+import { applyWorkspaceTabRowsForTests, closeWorkspaceTab, openWorkspaceTab, reorderWorkspaceTabs } from '../../src/data/modules/workspace-tabs/commands'
+import { getWorkspaceTabs } from '../../src/data/modules/workspace-tabs/selectors'
+import { workspaceTabsCollection } from '../../src/data/modules/workspace-tabs/collection'
+import type { WorkspaceTabRecord } from '../../src/data/modules/workspace-tabs'
 import { buildWorkspaceSidebarTree, type WorkspaceFolderRecord } from '../../src/data/modules/workspace-folders'
 import { applyWorkspaceFolderRowsForTests, renameWorkspaceFolder } from '../../src/data/modules/workspace-folders/commands'
 import { workspaceFoldersCollection } from '../../src/data/modules/workspace-folders/collection'
@@ -16,6 +23,8 @@ const { appTrpcMutation } = await import('../../src/lib/trpc-plain')
 afterEach(() => {
   applyWorkspaceRowsForTests([])
   applyWorkspaceFolderRowsForTests([])
+  applyWorkspaceTabRowsForTests([])
+  applyWorkspaceViewStateRowsForTests([])
   clearMemoryLocalStoreForTests()
   vi.mocked(appTrpcMutation).mockReset()
 })
@@ -86,6 +95,84 @@ describe('workspace and folder commands', () => {
   })
 })
 
+describe('workspace tab commands', () => {
+  it('calculates positions and avoids duplicate tabs by workspaceTabKey', async () => {
+    applyWorkspaceTabRowsForTests([tabRecord({ id: 'shell-1', shellId: 'shell-1', position: 0 })])
+    vi.mocked(appTrpcMutation).mockResolvedValue({ ok: true })
+
+    await openWorkspaceTab({ workspaceId: 'workspace-1', tab: { id: 'shell-duplicate', type: 'shell', envId: 'env-1', shellId: 'shell-1', title: 'Duplicate' } })
+    expect(workspaceTabsCollection.getRows()).toHaveLength(1)
+    expect(workspaceViewStateCollection.getRows()[0]?.activeWorkspaceTabId).toBe('shell-1')
+
+    await openWorkspaceTab({ workspaceId: 'workspace-1', tab: { id: 'browser-1', type: 'browser', url: 'https://example.com', title: 'Example' } })
+
+    const rows = workspaceTabsCollection.getRows().sort((a, b) => a.position - b.position)
+    expect(rows.map((row) => [row.id, row.position])).toEqual([['shell-1', 0], ['browser-1', 1]])
+  })
+
+  it('chooses active fallback on close and persists reorder positions', async () => {
+    applyWorkspaceTabRowsForTests([
+      tabRecord({ id: 'tab-1', position: 0, type: 'browser', url: 'https://one.example' }),
+      tabRecord({ id: 'tab-2', position: 1, type: 'browser', url: 'https://two.example' }),
+      tabRecord({ id: 'tab-3', position: 2, type: 'browser', url: 'https://three.example' }),
+    ])
+    applyWorkspaceViewStateRowsForTests([viewState({ activeWorkspaceTabId: 'tab-2' })])
+    vi.mocked(appTrpcMutation).mockResolvedValue({ ok: true })
+
+    await closeWorkspaceTab({ workspaceId: 'workspace-1', tabId: 'tab-2' })
+    expect(workspaceViewStateCollection.getRows()[0]?.activeWorkspaceTabId).toBe('tab-3')
+    expect(getWorkspaceTabs('workspace-1').map((tab) => tab.id)).toEqual(['tab-1', 'tab-3'])
+
+    await reorderWorkspaceTabs({ workspaceId: 'workspace-1', tabIds: ['tab-3', 'tab-1'] })
+    expect(workspaceTabsCollection.getRows().sort((a, b) => a.position - b.position).map((row) => row.id)).toEqual(['tab-3', 'tab-1'])
+  })
+})
+
+describe('workspace search sync adapter', () => {
+  it('applies chat/tab search params once per workspace and avoids URL loops after state matches', () => {
+    expect(workspaceSearchSyncAction({
+      firstApply: true,
+      search: { chat: 'chat-1', tab: 'tab-1' },
+      viewState: { activeAgentSessionId: null, activeWorkspaceTabId: null },
+      tabIds: ['tab-1'],
+    })).toEqual({ type: 'apply-search', sessionId: 'chat-1', tabId: 'tab-1' })
+
+    expect(workspaceSearchSyncAction({
+      firstApply: true,
+      search: { tab: 'tab-1' },
+      viewState: { activeAgentSessionId: null, activeWorkspaceTabId: null },
+      tabIds: ['tab-1'],
+    })).toEqual({ type: 'apply-search', tabId: 'tab-1' })
+
+    expect(workspaceSearchSyncAction({
+      firstApply: false,
+      search: { chat: 'chat-1', tab: 'tab-1' },
+      viewState: { activeAgentSessionId: 'chat-1', activeWorkspaceTabId: 'tab-1' },
+      tabIds: ['tab-1'],
+    })).toEqual({ type: 'none' })
+
+    expect(workspaceSearchSyncAction({
+      firstApply: false,
+      search: { chat: 'old-chat', tab: 'old-tab' },
+      viewState: { activeAgentSessionId: 'chat-2', activeWorkspaceTabId: 'tab-2' },
+      tabIds: ['tab-2'],
+    })).toEqual({ type: 'replace-url', chat: 'chat-2', tab: 'tab-2' })
+  })
+})
+
+describe('workspace view state commands', () => {
+  it('optimistically updates split ratio and reverts on backend failure', async () => {
+    applyWorkspaceViewStateRowsForTests([viewState({ splitRatio: 0.7 })])
+    vi.mocked(appTrpcMutation).mockRejectedValueOnce(new Error('view failed'))
+
+    const promise = setWorkspaceSplitRatio({ workspaceId: 'workspace-1', splitRatio: 0.4 })
+    expect(workspaceViewStateCollection.getRows()[0]?.splitRatio).toBe(0.4)
+    await expect(promise).rejects.toThrow('view failed')
+
+    expect(workspaceViewStateCollection.getRows()[0]?.splitRatio).toBe(0.7)
+  })
+})
+
 function labels(nodes: ReturnType<typeof buildWorkspaceSidebarTree>): string[] {
   const out: string[] = []
   function visit(nodeList: ReturnType<typeof buildWorkspaceSidebarTree>) {
@@ -129,6 +216,38 @@ function folder(input: Partial<WorkspaceFolderRecord> & Pick<WorkspaceFolderReco
     createdAt: 1,
     updatedAt: 1,
     archivedAt: null,
+    ...input,
+  }
+}
+
+function tabRecord(input: Partial<WorkspaceTabRecord> & Pick<WorkspaceTabRecord, 'id'>): WorkspaceTabRecord {
+  const type = input.type ?? 'shell'
+  return {
+    workspaceId: 'workspace-1',
+    type,
+    title: input.title ?? input.id,
+    titleSource: type === 'shell' ? 'auto' : null,
+    position: 0,
+    envId: type === 'browser' ? null : 'env-1',
+    shellId: type === 'shell' ? input.id : null,
+    path: type === 'file' ? '/tmp/file.txt' : null,
+    sessionId: null,
+    port: null,
+    url: type === 'browser' ? 'https://example.com' : null,
+    browserTabId: null,
+    updatedAt: 1,
+    ...input,
+  }
+}
+
+function viewState(input: Partial<ReturnType<typeof workspaceViewStateCollection.getRows>[number]>): ReturnType<typeof workspaceViewStateCollection.getRows>[number] {
+  return {
+    workspaceId: 'workspace-1',
+    activeAgentSessionId: null,
+    activeWorkspaceTabId: null,
+    splitRatio: null,
+    agentCollapsed: false,
+    updatedAt: 1,
     ...input,
   }
 }

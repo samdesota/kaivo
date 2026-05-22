@@ -31,6 +31,8 @@ import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
 import { useAppData } from '../data/app-data-provider'
 import { archiveWorkspace, markWorkspaceOpened, renameWorkspace, useVisibleWorkspaces, useWorkspace } from '../data/modules/workspaces'
 import { createWorkspaceFolder, moveWorkspaceSidebarNode, renameWorkspaceFolder, setWorkspaceFolderCollapsed, useWorkspaceSidebarTree } from '../data/modules/workspace-folders'
+import { setActiveAgentSession, setActiveWorkspaceTab, setAgentCollapsed as setAgentCollapsedCommand, setWorkspaceSplitRatio, useWorkspaceSearchSync, useWorkspaceViewState } from '../data/modules/workspace-view-state'
+import { closeWorkspaceTab as closeWorkspaceTabCommand, openWorkspaceTab, reorderWorkspaceTabs, setWorkspaceTabBrowserId, setWorkspaceTabTitle, setWorkspaceTabUrl, useWorkspaceTabs } from '../data/modules/workspace-tabs'
 import type { WorkspaceFolderRecord, WorkspaceSidebarNode } from '../data/modules/workspace-folders'
 import type { WorkspaceRecord } from '../data/modules/workspaces'
 import { browserApi } from '../lib/browser-api'
@@ -60,7 +62,6 @@ import {
 } from './workspace/env-targets'
 import { WorkspaceContextProvider, useWorkspaceContext } from './workspace/context'
 import { WorkspaceTabBar } from './workspace/workspace-tab-bar'
-import { useWorkspaceViewStateStore } from './workspace/view-state-store'
 import { closeNativeBrowserTabsForWorkspace } from './workspace/browser-tab-cleanup'
 import {
   type WorkspaceTab,
@@ -68,7 +69,6 @@ import {
   type WorkspaceUiState,
   updateFileEditorStateForTab,
 } from './workspace/tab-state'
-import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { useWorkspaceResourcesStore, type WorkspaceResourceRecord } from './workspace/resources-store'
 import { useBookmarksStore } from './workspace/bookmarks-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
@@ -88,7 +88,7 @@ import {
   type SidebarTreeNode,
   type SidebarDropProjection,
 } from './workspace/sidebar-dnd-state'
-import { appTrpcMutation, trpcQueryKey } from '../lib/trpc-plain'
+import { trpcQueryKey } from '../lib/trpc-plain'
 import { playAgentNotificationSound, readAgentNotificationSoundPrefs, readLastAgentRunDurationMs, useAgentNotificationSoundPrefs } from '../lib/agent-notification-sounds'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
@@ -213,76 +213,48 @@ export function WorkspacePage() {
   const workspace = useWorkspace(workspaceId)
   const envs = trpc.env.list.useQuery({}, { refetchInterval: 10_000 })
   const upsertResource = trpc.workspace.upsertResource.useMutation()
-  const viewStateStore = useWorkspaceViewStateStore(workspaceId)
-  const tabsStore = useWorkspaceTabsStore(workspaceId)
-  const appliedSearchWorkspaceId = useRef<string | null>(null)
+  const viewState = useWorkspaceViewState(workspaceId)
+  const workspaceTabs = useWorkspaceTabs(workspaceId)
   const lastReadyWorkspaceRef = useRef<ReactNode | null>(null)
 
   useEffect(() => {
     if (workspace?.id) void markWorkspaceOpened(workspace.id).catch((error) => console.warn('mark workspace opened failed', error))
   }, [workspace?.id])
 
-  useEffect(() => {
-    if (!workspace || workspace.id !== workspaceId || !viewStateStore.viewState) return
-    if (appliedSearchWorkspaceId.current !== workspaceId) {
-      appliedSearchWorkspaceId.current = workspaceId
-      if (search.chat && search.chat !== viewStateStore.viewState.activeAgentSessionId) {
-        viewStateStore.setActiveAgentSession(search.chat)
-      }
-      if (
-        search.tab &&
-        search.tab !== viewStateStore.viewState.activeWorkspaceTabId &&
-        tabsStore.tabs.some((tab) => tab.id === search.tab)
-      ) {
-        viewStateStore.setActiveWorkspaceTab(search.tab)
-      }
-      return
-    }
-    if (
-      viewStateStore.viewState.activeWorkspaceTabId &&
-      !tabsStore.tabs.some((tab) => tab.id === viewStateStore.viewState?.activeWorkspaceTabId)
-    ) {
-      viewStateStore.setActiveWorkspaceTab(tabsStore.tabs[0]?.id ?? null)
-      return
-    }
-    if (
-      viewStateStore.viewState.activeWorkspaceTabId !== (search.tab ?? null) ||
-      viewStateStore.viewState.activeAgentSessionId !== (search.chat ?? null)
-    ) {
+  useWorkspaceSearchSync({
+    workspaceId,
+    search,
+    viewState,
+    tabs: workspaceTabs,
+    enabled: workspace?.id === workspaceId,
+    replaceSearch: useCallback((nextSearch) => {
       void navigate({
         search: (prev) => ({
           ...prev,
-          chat: viewStateStore.viewState?.activeAgentSessionId ?? undefined,
-          tab: viewStateStore.viewState?.activeWorkspaceTabId ?? undefined,
+          chat: nextSearch.chat,
+          tab: nextSearch.tab,
         }),
         replace: true,
       })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.chat, search.tab, tabsStore.tabs, viewStateStore.viewState, workspace?.id, workspaceId])
+    }, [navigate]),
+  })
 
   const dispatchSyncedWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
     if (action.type === 'setActiveAgentSession') {
-      viewStateStore.setActiveAgentSession(action.sessionId)
+      void setActiveAgentSession({ workspaceId, sessionId: action.sessionId })
     } else if (action.type === 'activateTab') {
-      viewStateStore.setActiveWorkspaceTab(action.tabId)
+      void setActiveWorkspaceTab({ workspaceId, tabId: action.tabId })
     } else if (action.type === 'openTab' && action.activate !== false) {
-      const tab = tabsStore.openTab(action.tab, true)
-      viewStateStore.setActiveWorkspaceTab(tab.id)
+      void openWorkspaceTab({ workspaceId, tab: action.tab, activate: true })
     } else if (action.type === 'openTab') {
-      tabsStore.openTab(action.tab, false)
+      void openWorkspaceTab({ workspaceId, tab: action.tab, activate: false })
     } else if (action.type === 'closeTab') {
-      const idx = tabsStore.tabs.findIndex((tab) => tab.id === action.tabId)
-      if (idx !== -1 && viewStateStore.viewState?.activeWorkspaceTabId === action.tabId) {
-        const tabs = tabsStore.tabs.filter((tab) => tab.id !== action.tabId)
-        viewStateStore.setActiveWorkspaceTab(tabs[idx]?.id ?? tabs[idx - 1]?.id ?? null)
-      }
-      tabsStore.closeTab(action.tabId)
+      void closeWorkspaceTabCommand({ workspaceId, tabId: action.tabId })
     } else if (action.type === 'reorderTabs') {
-      tabsStore.reorderTabs(action.tabIds)
+      void reorderWorkspaceTabs({ workspaceId, tabIds: action.tabIds })
     } else if (action.type === 'setBrowserTabId') {
-      tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
-      const tab = tabsStore.tabs.find((candidate) => candidate.id === action.tabId)
+      void setWorkspaceTabBrowserId({ workspaceId, tabId: action.tabId, browserTabId: action.browserTabId })
+      const tab = workspaceTabs.find((candidate) => candidate.id === action.tabId)
       if (tab?.type === 'browser') {
         upsertResource.mutate({
           workspaceId,
@@ -295,17 +267,17 @@ export function WorkspacePage() {
         })
       }
     } else if (action.type === 'setTabUrl') {
-      tabsStore.setTabUrl(action.tabId, action.url)
+      void setWorkspaceTabUrl({ workspaceId, tabId: action.tabId, url: action.url })
     } else if (action.type === 'setTabTitle') {
-      tabsStore.setTabTitle(action.tabId, action.title)
+      void setWorkspaceTabTitle({ workspaceId, tabId: action.tabId, title: action.title, source: 'explicit' })
     } else if (action.type === 'setTabAutoTitle') {
-      tabsStore.setTabAutoTitle(action.tabId, action.title)
+      void setWorkspaceTabTitle({ workspaceId, tabId: action.tabId, title: action.title, source: 'auto' })
     } else if (action.type === 'setSplitRatio') {
-      viewStateStore.setSplitRatio(action.splitRatio)
+      void setWorkspaceSplitRatio({ workspaceId, splitRatio: action.splitRatio })
     } else if (action.type === 'setAgentCollapsed') {
-      viewStateStore.setAgentCollapsed(action.collapsed)
+      void setAgentCollapsedCommand({ workspaceId, collapsed: action.collapsed })
     }
-  }, [tabsStore, upsertResource, viewStateStore, workspaceId])
+  }, [upsertResource, workspaceId, workspaceTabs])
 
   const envTargets = useMemo(() => {
     return ((envs.data ?? []) as WorkspaceEnvRow[]).map(resolveWorkspaceEnvTarget)
@@ -318,9 +290,7 @@ export function WorkspacePage() {
 
   const initiallyLoading =
     (!appData.ready && !workspace) ||
-    (envs.isLoading && !envs.data) ||
-    (viewStateStore.isLoading && !viewStateStore.viewState) ||
-    (tabsStore.isLoading && !tabsStore.data)
+    (envs.isLoading && !envs.data)
 
   if (initiallyLoading) {
     logWorkspaceLoading('initiallyLoading', workspaceId, {
@@ -328,41 +298,24 @@ export function WorkspacePage() {
       workspaceHasData: Boolean(workspace),
       envsLoading: envs.isLoading,
       envsHasData: Boolean(envs.data),
-      viewStateLoading: viewStateStore.isLoading,
-      viewStateHasData: Boolean(viewStateStore.viewState),
-      tabsLoading: tabsStore.isLoading,
-      tabsHasData: Boolean(tabsStore.data),
+      workspaceTabs: workspaceTabs.length,
     })
     if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
   if (appData.error && !workspace) return <WorkspaceError message={extractTrpcMessage(appData.error)} />
   if (envs.error) return <WorkspaceError message={extractTrpcMessage(envs.error)} />
-  if (viewStateStore.isError) return <WorkspaceError message="Workspace view state did not load." />
-  if (tabsStore.isError) return <WorkspaceError message="Workspace tabs did not load." />
   if (!workspace) {
     return <WorkspaceError message="Workspace did not load." />
   }
-  if (!viewStateStore.viewState || !tabsStore.data) {
-    logWorkspaceLoading('missingStoreDataAfterInitialLoad', workspaceId, {
-      viewStateLoading: viewStateStore.isLoading,
-      viewStateHasData: Boolean(viewStateStore.viewState),
-      tabsLoading: tabsStore.isLoading,
-      tabsHasData: Boolean(tabsStore.data),
-      workspaceHasData: Boolean(workspace),
-      envsHasData: Boolean(envs.data),
-    })
-    if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
-    return <div className="p-8 text-neutral-500">Loading workspace…</div>
-  }
 
   const syncedWorkspaceState: WorkspaceUiState = {
-    workspaceTabs: tabsStore.tabs,
-    activeAgentSessionId: viewStateStore.viewState.activeAgentSessionId,
-    activeWorkspaceTabId: viewStateStore.viewState.activeWorkspaceTabId,
-    splitRatio: viewStateStore.viewState.splitRatio,
-    agentCollapsed: viewStateStore.viewState.agentCollapsed,
-    tabOrder: tabsStore.tabs.map((tab) => tab.id),
+    workspaceTabs,
+    activeAgentSessionId: viewState.activeAgentSessionId,
+    activeWorkspaceTabId: viewState.activeWorkspaceTabId,
+    splitRatio: viewState.splitRatio,
+    agentCollapsed: viewState.agentCollapsed,
+    tabOrder: workspaceTabs.map((tab) => tab.id),
   }
 
   const readyWorkspace = (
@@ -407,8 +360,7 @@ function WorkspaceShell({
   const [globalTabsWorkspace, setGlobalTabsWorkspace] = useState<GlobalTabsWorkspaceSummary | null>(null)
   const [activeGlobalTabId, setActiveGlobalTabId] = useState<string | null>(null)
   const agentCollapsed = ctx.uiState.agentCollapsed
-  const globalTabsStore = useWorkspaceTabsStore(globalTabsWorkspace?.id ?? '__global-tabs-pending__')
-  const globalTabs = globalTabsStore.tabs.filter((tab) => tab.type === 'browser')
+  const globalTabs = useWorkspaceTabs(globalTabsWorkspace?.id ?? '__global-tabs-pending__').filter((tab) => tab.type === 'browser')
   const activeGlobalTab = globalTabs.find((tab) => tab.id === activeGlobalTabId) ?? null
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
@@ -428,17 +380,17 @@ function WorkspaceShell({
     [agentSessionCount, openWorkspacePane, setAgentCollapsed],
   )
   const closeActiveTab = useCallback(() => {
-    if (activeGlobalTab) {
+    if (activeGlobalTab && globalTabsWorkspace) {
       closeWorkspaceTab(activeGlobalTab, {
         type: 'closeTab',
-        closeTab: globalTabsStore.closeTab,
+        closeTab: (tabId) => void closeWorkspaceTabCommand({ workspaceId: globalTabsWorkspace.id, tabId, activateFallback: false }),
         onActiveTabClosed: () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, activeGlobalTab.id)),
       })
       return
     }
     const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
     if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
-  }, [activeGlobalTab, ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState, globalTabs, globalTabsStore.closeTab])
+  }, [activeGlobalTab, ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState, globalTabs, globalTabsWorkspace])
 
   useEffect(() => {
     let cancelled = false
@@ -497,14 +449,9 @@ function WorkspaceShell({
     const tab = globalTabFromPaneContent(content, options)
     if (!tab) return
     const workspace = await ensureGlobalTabsWorkspace()
-    if (globalTabsWorkspace?.id === workspace.id) {
-      const opened = globalTabsStore.openTab(tab, true)
-      setActiveGlobalTabId(opened.id)
-      return
-    }
-    await appTrpcMutation('workspace.upsertTab', { workspaceId: workspace.id, tab, position: globalTabs.length })
+    await openWorkspaceTab({ workspaceId: workspace.id, tab, activate: false })
     setActiveGlobalTabId(tab.id)
-  }, [ensureGlobalTabsWorkspace, globalTabs.length, globalTabsStore, globalTabsWorkspace?.id])
+  }, [ensureGlobalTabsWorkspace])
 
   const openCommandPalette = useCallback(async (initialIntent: UniversalMenuInitialIntent = 'default') => {
     const target = ctx.localEnvTarget
@@ -607,10 +554,10 @@ function WorkspaceShell({
           onLeaveGlobalTabs={() => setActiveGlobalTabId(null)}
           onCloseGlobalTab={(tabId) => {
             const tab = globalTabs.find((candidate) => candidate.id === tabId)
-            if (!tab) return
+            if (!tab || !globalTabsWorkspace) return
             closeWorkspaceTab(tab, {
               type: 'closeTab',
-              closeTab: globalTabsStore.closeTab,
+              closeTab: (closingTabId) => void closeWorkspaceTabCommand({ workspaceId: globalTabsWorkspace.id, tabId: closingTabId, activateFallback: false }),
               onActiveTabClosed: tabId === activeGlobalTabId
                 ? () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, tabId))
                 : undefined,
@@ -623,7 +570,6 @@ function WorkspaceShell({
           workspaceId={globalTabsWorkspace.id}
           tab={activeGlobalTab}
           tabs={globalTabs}
-          tabsStore={globalTabsStore}
           onActiveTabFallback={(tabId) => setActiveGlobalTabId(tabId)}
         />
       ) : (
@@ -1495,19 +1441,15 @@ export function workspaceSidebarRowActive(workspaceId: string, currentWorkspaceI
   return workspaceId === currentWorkspaceId && !activeGlobalTabId
 }
 
-type WorkspaceTabsStoreApi = ReturnType<typeof useWorkspaceTabsStore>
-
 function GlobalBrowserTabPane({
   workspaceId,
   tab,
   tabs,
-  tabsStore,
   onActiveTabFallback,
 }: {
   workspaceId: string
   tab: WorkspaceTab
   tabs: WorkspaceTab[]
-  tabsStore: WorkspaceTabsStoreApi
   onActiveTabFallback: (tabId: string | null) => void
 }) {
   const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
@@ -1540,7 +1482,7 @@ function GlobalBrowserTabPane({
 
   const dispatchGlobalWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
     if (action.type === 'setBrowserTabId') {
-      tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
+      void setWorkspaceTabBrowserId({ workspaceId, tabId: action.tabId, browserTabId: action.browserTabId })
       const current = tabs.find((candidate) => candidate.id === action.tabId)
       if (current?.type === 'browser') {
         upsertResource.mutate({
@@ -1554,15 +1496,15 @@ function GlobalBrowserTabPane({
         })
       }
     } else if (action.type === 'setTabUrl') {
-      tabsStore.setTabUrl(action.tabId, action.url)
+      void setWorkspaceTabUrl({ workspaceId, tabId: action.tabId, url: action.url })
     } else if (action.type === 'setTabTitle') {
-      tabsStore.setTabTitle(action.tabId, action.title)
+      void setWorkspaceTabTitle({ workspaceId, tabId: action.tabId, title: action.title, source: 'explicit' })
     } else if (action.type === 'closeTab') {
-      tabsStore.closeTab(action.tabId)
+      void closeWorkspaceTabCommand({ workspaceId, tabId: action.tabId, activateFallback: false })
     } else if (action.type === 'activateTab') {
       onActiveTabFallback(action.tabId)
     }
-  }, [onActiveTabFallback, tabs, tabsStore, upsertResource, workspaceId])
+  }, [onActiveTabFallback, tabs, upsertResource, workspaceId])
 
   return (
     <section className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975 text-neutral-500" aria-label="Global browser tab">
@@ -1573,7 +1515,7 @@ function GlobalBrowserTabPane({
         onClose={() => {
           closeWorkspaceTab(tab, {
             type: 'closeTab',
-            closeTab: tabsStore.closeTab,
+            closeTab: (tabId) => void closeWorkspaceTabCommand({ workspaceId, tabId, activateFallback: false }),
             onActiveTabClosed: () => onActiveTabFallback(nextGlobalTabIdAfterClose(tabs, tab.id)),
           })
         }}
@@ -2042,12 +1984,7 @@ function WorkspaceAgentPane({
 }) {
   const ctx = useWorkspaceContext()
   const bootstrapStatus = useWorkspaceBootstrapStatus(ctx.workspace.id)
-  const queryClient = useQueryClient()
   const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
-  const refreshWorkspacePanes = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['sync', 'workspace_tabs'] })
-    void queryClient.invalidateQueries({ queryKey: ['workspace-view-state', ctx.workspace.id] })
-  }, [ctx.workspace.id, queryClient])
   if (collapsed) {
     return <AgentCollapsedRail onExpand={onToggleCollapsed} />
   }
@@ -2098,7 +2035,7 @@ function WorkspaceAgentPane({
           onActiveSessionChange={(sessionId) => dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })}
           onSessionListChange={onSessionListChange}
           onOpenPane={openPane}
-          onOpenPaneRefreshHint={refreshWorkspacePanes}
+          onOpenPaneRefreshHint={() => undefined}
           headerTrailing={agentHeaderTrailing}
           tabsFocused={focused}
           closeActiveTabSignal={closeActiveTabSignal}

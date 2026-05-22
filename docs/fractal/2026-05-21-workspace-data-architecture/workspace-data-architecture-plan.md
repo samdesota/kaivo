@@ -83,6 +83,8 @@ Move workspace view state and workspace pane tabs into modules so workspace rout
 
 **Depends on:** Task 2
 
+**Status:** done
+
 ## Task 4: Agent Tab Ordering Module
 
 Move persisted agent tab ordering into the new module pattern while leaving agent session summaries and transcript content outside startup sync.
