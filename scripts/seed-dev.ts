@@ -111,7 +111,7 @@ function defaultInstanceRoot(target: string, homeDir: string, cwd: string, insta
   if (target === 'desktop-prod') {
     return path.join(homeDir, 'Library', 'Application Support', DESKTOP_APP_ID, 'instances', instanceId)
   }
-  return path.join(cwd, '.cloud-code', 'instances', instanceId)
+  return path.join(cwd, '.kaivo', 'instances', instanceId)
 }
 
 function readOnePasswordSecret(seedEnv: NodeJS.ProcessEnv): string | null {

@@ -95,7 +95,7 @@ describe('local launcher retry', () => {
     expect(startedPorts[0]).not.toEqual(startedPorts[1])
     expect(new Set(startedPorts[1]).size).toBe(3)
     expect(stopped).toBe(3)
-    expect(result.config.rootDir).toBe('/tmp/cloud-code-a/.cloud-code/instances/retry-test')
+    expect(result.config.rootDir).toBe('/tmp/cloud-code-a/.kaivo/instances/retry-test')
     expect(result.manifest.servers.every((server) => server.status === 'healthy')).toBe(true)
     expect(writes.map((write) => write.status)).toEqual(['starting', 'failed', 'starting', 'healthy'])
   })

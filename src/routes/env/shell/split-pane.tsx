@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+const RATIO_CHANGE_DEBOUNCE_MS = 200
+
 /**
  * Horizontal split with a draggable handle. Stores the left-pane ratio in
  * localStorage under `storageKey` so the user's layout choice persists
@@ -40,6 +42,12 @@ export function SplitPane({
   const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dragging = useRef(false)
+  const onRatioChangeRef = useRef(onRatioChange)
+  const ratioChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    onRatioChangeRef.current = onRatioChange
+  }, [onRatioChange])
 
   useEffect(() => {
     try {
@@ -47,8 +55,15 @@ export function SplitPane({
     } catch {
       // quota / disabled storage — ignore
     }
-    onRatioChange?.(ratio)
-  }, [storageKey, ratio, onRatioChange])
+    if (ratioChangeTimerRef.current) clearTimeout(ratioChangeTimerRef.current)
+    ratioChangeTimerRef.current = setTimeout(() => {
+      ratioChangeTimerRef.current = null
+      onRatioChangeRef.current?.(ratio)
+    }, RATIO_CHANGE_DEBOUNCE_MS)
+    return () => {
+      if (ratioChangeTimerRef.current) clearTimeout(ratioChangeTimerRef.current)
+    }
+  }, [storageKey, ratio])
 
   useEffect(() => {
     const el = containerRef.current

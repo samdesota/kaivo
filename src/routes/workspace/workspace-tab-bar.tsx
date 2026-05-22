@@ -14,7 +14,8 @@ type WorkspaceSummary = {
   name: string
 }
 
-const PENDING_WORKSPACE_RENAME_KEY = 'cloud-code.pendingWorkspaceRenameId'
+const PENDING_WORKSPACE_RENAME_KEY = 'kaivo.pendingWorkspaceRenameId'
+const LEGACY_PENDING_WORKSPACE_RENAME_KEY = 'cloud-code.pendingWorkspaceRenameId'
 export function orderWorkspaceTabs(
   workspaces: WorkspaceSummary[],
   activeWorkspace?: WorkspaceSummary,
@@ -57,9 +58,10 @@ export function WorkspaceTabBar({
   }, [edit.editingId])
 
   useEffect(() => {
-    const pending = window.sessionStorage.getItem(PENDING_WORKSPACE_RENAME_KEY)
+    const pending = window.sessionStorage.getItem(PENDING_WORKSPACE_RENAME_KEY) ?? window.sessionStorage.getItem(LEGACY_PENDING_WORKSPACE_RENAME_KEY)
     if (pending !== activeWorkspaceId) return
     window.sessionStorage.removeItem(PENDING_WORKSPACE_RENAME_KEY)
+    window.sessionStorage.removeItem(LEGACY_PENDING_WORKSPACE_RENAME_KEY)
     dispatchEdit({ type: 'begin', workspaceId: activeWorkspaceId, name: activeWorkspaceName })
   }, [activeWorkspaceId, activeWorkspaceName])
 

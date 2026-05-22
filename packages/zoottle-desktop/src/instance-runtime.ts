@@ -62,7 +62,7 @@ export type InstanceRuntimeConfig = {
 }
 
 export function desktopBrowserSocketPath(config: Pick<InstanceRuntimeConfig, 'instanceId' | 'rootDir'>): string {
-  return path.join('/tmp', `cloud-code-browser-${sanitizeId(config.instanceId)}-${shortHash(config.rootDir)}.sock`)
+  return path.join('/tmp', `kaivo-browser-${sanitizeId(config.instanceId)}-${shortHash(config.rootDir)}.sock`)
 }
 
 export function desktopAuthTokenPath(config: Pick<InstanceRuntimeConfig, 'rootDir'>): string {
@@ -194,7 +194,7 @@ function defaultRootDir(
   if (mode === 'production') {
     return path.join(homeDir, 'Library', 'Application Support', appIdentity, 'instances', instanceId)
   }
-  return path.join(cwd, '.cloud-code', 'instances', instanceId)
+  return path.join(cwd, '.kaivo', 'instances', instanceId)
 }
 
 function defaultWorkingDir(mode: DesktopRuntimeMode, homeDir: string, rootDir: string): string {

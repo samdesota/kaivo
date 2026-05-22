@@ -44,7 +44,7 @@ interface OpenCodeStartOptions {
 }
 
 const OPENAI_OAUTH_PLUGIN = 'oc-codex-multi-auth'
-const OPENAI_OAUTH_PLACEHOLDER_KEY = 'cloud-code-openai-oauth-placeholder'
+const OPENAI_OAUTH_PLACEHOLDER_KEY = 'kaivo-openai-oauth-placeholder'
 
 type OpenCodeConfigFragment = { plugin?: unknown }
 

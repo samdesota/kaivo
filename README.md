@@ -22,8 +22,8 @@ npm run dev
 
 - local identity/app server on an instance-scoped loopback port
 - local `cc-env` on an instance-scoped loopback port
-- per-instance SQLite app DB under `.cloud-code/instances/<instance-id>/app/app.db`
-- per-instance `cc-env` SQLite DB under `.cloud-code/instances/<instance-id>/env-state/env.db`
+- per-instance SQLite app DB under `.kaivo/instances/<instance-id>/app/app.db`
+- per-instance `cc-env` SQLite DB under `.kaivo/instances/<instance-id>/env-state/env.db`
 
 The desktop app auto-pairs with its matching `cc-env`; no pairing code is needed for the normal desktop flow.
 

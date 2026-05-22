@@ -20,15 +20,17 @@ export const DEFAULT_AGENT_NOTIFICATION_SOUND_PREFS: AgentNotificationSoundPrefs
   longRunThresholdSeconds: 30,
 }
 
-export const AGENT_RUN_DURATION_KEY_PREFIX = 'zoottle.agentRunDurationMs:'
+export const AGENT_RUN_DURATION_KEY_PREFIX = 'kaivo.agentRunDurationMs:'
+const LEGACY_AGENT_RUN_DURATION_KEY_PREFIX = 'zoottle.agentRunDurationMs:'
 
-const PREFS_KEY = 'zoottle.agentNotificationSoundPrefs'
-const PREFS_EVENT = 'zoottle:agent-notification-sound-prefs'
+const PREFS_KEY = 'kaivo.agentNotificationSoundPrefs'
+const LEGACY_PREFS_KEY = 'zoottle.agentNotificationSoundPrefs'
+const PREFS_EVENT = 'kaivo:agent-notification-sound-prefs'
 
 export function readAgentNotificationSoundPrefs(): AgentNotificationSoundPrefs {
   if (typeof window === 'undefined') return DEFAULT_AGENT_NOTIFICATION_SOUND_PREFS
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<AgentNotificationSoundPrefs>
+    const parsed = JSON.parse(readMigratedLocalStorage(PREFS_KEY, LEGACY_PREFS_KEY) ?? '{}') as Partial<AgentNotificationSoundPrefs>
     const soundId = AGENT_NOTIFICATION_SOUND_PRESETS.some((preset) => preset.id === parsed.soundId)
       ? parsed.soundId as AgentNotificationSoundId
       : DEFAULT_AGENT_NOTIFICATION_SOUND_PREFS.soundId
@@ -74,7 +76,7 @@ export function recordAgentRunStarted(sessionId: string, startedAt = Date.now())
 export function recordAgentRunFinished(sessionId: string, finishedAt = Date.now()): number | null {
   if (typeof window === 'undefined') return null
   const key = `${AGENT_RUN_DURATION_KEY_PREFIX}${sessionId}:startedAt`
-  const startedAt = Number(window.localStorage.getItem(key) ?? '')
+  const startedAt = Number(readMigratedLocalStorage(key, `${LEGACY_AGENT_RUN_DURATION_KEY_PREFIX}${sessionId}:startedAt`) ?? '')
   window.localStorage.removeItem(key)
   if (!Number.isFinite(startedAt) || startedAt <= 0) return null
   const durationMs = Math.max(0, finishedAt - startedAt)
@@ -84,8 +86,17 @@ export function recordAgentRunFinished(sessionId: string, finishedAt = Date.now(
 
 export function readLastAgentRunDurationMs(sessionId: string): number | null {
   if (typeof window === 'undefined') return null
-  const value = Number(window.localStorage.getItem(`${AGENT_RUN_DURATION_KEY_PREFIX}${sessionId}:last`) ?? '')
+  const value = Number(readMigratedLocalStorage(`${AGENT_RUN_DURATION_KEY_PREFIX}${sessionId}:last`, `${LEGACY_AGENT_RUN_DURATION_KEY_PREFIX}${sessionId}:last`) ?? '')
   return Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function readMigratedLocalStorage(key: string, legacyKey: string): string | null {
+  const value = window.localStorage.getItem(key)
+  if (value !== null) return value
+  const legacyValue = window.localStorage.getItem(legacyKey)
+  if (legacyValue === null) return null
+  window.localStorage.setItem(key, legacyValue)
+  return legacyValue
 }
 
 export async function playAgentNotificationSound(soundId = readAgentNotificationSoundPrefs().soundId): Promise<void> {

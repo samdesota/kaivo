@@ -106,11 +106,13 @@ type GlobalTabDestination = {
 
 type WorkspaceSummary = WorkspaceRecord
 
-const WORKSPACE_SIDEBAR_WIDTH_KEY = 'cloud-code.workspaceSidebarWidth'
+const WORKSPACE_SIDEBAR_WIDTH_KEY = 'kaivo.workspaceSidebarWidth'
+const LEGACY_WORKSPACE_SIDEBAR_WIDTH_KEY = 'cloud-code.workspaceSidebarWidth'
 const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
-const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
-const WORKSPACE_BOOTSTRAP_EVENT = 'cloud-code.workspaceBootstrapChanged'
+const WORKSPACE_CHAT_READ_KEY = 'kaivo.workspaceChatReadAt'
+const LEGACY_WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
+const WORKSPACE_BOOTSTRAP_EVENT = 'kaivo.workspaceBootstrapChanged'
 const workspaceLog = clientLogger.diagnostic('workspace')
 
 type WorkspaceBootstrapStatus = {
@@ -1981,7 +1983,7 @@ function clampSidebarWidth(width: number): number {
 
 function readWorkspaceSidebarWidth(): number {
   try {
-    const raw = window.localStorage.getItem(WORKSPACE_SIDEBAR_WIDTH_KEY)
+    const raw = readMigratedLocalStorage(WORKSPACE_SIDEBAR_WIDTH_KEY, LEGACY_WORKSPACE_SIDEBAR_WIDTH_KEY)
     const parsed = raw ? Number(raw) : 256
     return Number.isFinite(parsed) ? clampSidebarWidth(parsed) : 256
   } catch {
@@ -1999,7 +2001,7 @@ function writeWorkspaceSidebarWidth(width: number) {
 
 function readWorkspaceChatsAt(workspaceId: string): number {
   try {
-    const raw = window.localStorage.getItem(WORKSPACE_CHAT_READ_KEY)
+    const raw = readMigratedLocalStorage(WORKSPACE_CHAT_READ_KEY, LEGACY_WORKSPACE_CHAT_READ_KEY)
     const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {}
     return typeof parsed[workspaceId] === 'number' ? parsed[workspaceId] : 0
   } catch {
@@ -2009,13 +2011,22 @@ function readWorkspaceChatsAt(workspaceId: string): number {
 
 function markWorkspaceChatsRead(workspaceId: string) {
   try {
-    const raw = window.localStorage.getItem(WORKSPACE_CHAT_READ_KEY)
+    const raw = readMigratedLocalStorage(WORKSPACE_CHAT_READ_KEY, LEGACY_WORKSPACE_CHAT_READ_KEY)
     const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {}
     parsed[workspaceId] = Date.now()
     window.localStorage.setItem(WORKSPACE_CHAT_READ_KEY, JSON.stringify(parsed))
   } catch {
     // ignore disabled/quota storage
   }
+}
+
+function readMigratedLocalStorage(key: string, legacyKey: string): string | null {
+  const value = window.localStorage.getItem(key)
+  if (value !== null) return value
+  const legacyValue = window.localStorage.getItem(legacyKey)
+  if (legacyValue === null) return null
+  window.localStorage.setItem(key, legacyValue)
+  return legacyValue
 }
 
 function WorkspaceAgentPane({

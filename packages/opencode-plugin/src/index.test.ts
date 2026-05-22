@@ -79,14 +79,14 @@ describe('Kaivo opencode plugin', () => {
     )) as { output: string; metadata: Record<string, unknown> }
 
     expect(result.output).toBe('hello\nwarn\n')
-    expect(result.metadata.cloudcode_shell_id).toBe('sh-abc')
+    expect(result.metadata.kaivo_shell_id).toBe('sh-abc')
     expect(result.metadata.exit_code).toBe(0)
     // metadata() should have been called at least twice: once on 'started'
     // (running), once at completion (success).
     expect(ctx.metadataCalls.length).toBeGreaterThanOrEqual(2)
     const running = ctx.metadataCalls.find((m) => m.metadata?.status === 'running')
     const success = ctx.metadataCalls.find((m) => m.metadata?.status === 'success')
-    expect(running?.metadata?.cloudcode_shell_id).toBe('sh-abc')
+    expect(running?.metadata?.kaivo_shell_id).toBe('sh-abc')
     expect(success?.metadata?.exit_code).toBe(0)
   })
 
@@ -272,8 +272,8 @@ describe('Kaivo opencode plugin', () => {
       { cwd: '/tmp' },
       ctx as never,
     )) as { output: string; metadata: Record<string, unknown> }
-    expect(result.metadata.cloudcode_shell_id).toBe('pty-42')
-    expect(ctx.metadataCalls.at(0)?.metadata?.cloudcode_shell_id).toBe('pty-42')
+    expect(result.metadata.kaivo_shell_id).toBe('pty-42')
+    expect(ctx.metadataCalls.at(0)?.metadata?.kaivo_shell_id).toBe('pty-42')
   })
 
   it('kaivo_pty_list: queries shells for the current opencode session', async () => {

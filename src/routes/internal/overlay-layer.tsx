@@ -26,7 +26,7 @@ import { resolveBrowserAddress } from '../../lib/browser-navigation'
  * credentials in the request and get an envTrpc provider below.
  */
 
-export const OVERLAY_CHANNEL = 'cloud-code-overlay-layer'
+export const OVERLAY_CHANNEL = 'kaivo-overlay-layer'
 
 export type OverlayRequest = {
   requestId: string

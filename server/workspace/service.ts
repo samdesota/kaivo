@@ -69,6 +69,10 @@ export type WorkspaceViewStateInput = {
   agentCollapsed?: boolean
 }
 
+function isNoopViewStatePatch(current: WorkspaceViewState, patch: WorkspaceViewStateInput): boolean {
+  return Object.entries(patch).every(([key, value]) => Object.is(current[key as keyof WorkspaceViewState], value))
+}
+
 export type WorkspaceTabInput = {
   tab: WorkspaceTab
   position: number
@@ -471,6 +475,7 @@ export function createWorkspaceService(database: Db = db) {
 
   async function saveViewState(workspaceId: string, state: WorkspaceViewStateInput): Promise<WorkspaceViewState> {
     const current = await getViewState(workspaceId)
+    if (isNoopViewStatePatch(current, state)) return current
     const now = new Date()
     const next: WorkspaceViewState = {
       ...current,

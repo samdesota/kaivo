@@ -124,7 +124,6 @@ type DesktopWindowLike = Window & {
       focusOverlay?: (input: { overlayId: string }) => Promise<unknown>
       registerOverlayOwner?: (input: { overlayId: string }) => Promise<unknown>
       unregisterOverlayOwner?: (input: { overlayId: string }) => Promise<unknown>
-      diagnosticsPing?: (input: { seq: number; rendererNow: number }) => Promise<unknown>
     }
 }
 

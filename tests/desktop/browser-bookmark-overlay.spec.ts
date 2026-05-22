@@ -74,8 +74,8 @@ test('browser pane bookmark action opens overlay and saves a bookmark', async ({
 
       await page.getByLabel('URL').press(process.platform === 'darwin' ? 'Meta+D' : 'Control+D')
 
-      await expect.poll(async () => page.evaluate(() => window.localStorage.getItem('__zoottle_bookmark_overlay_requested'))).toBe('https://example.com/docs')
-      const rejection = await page.evaluate(() => window.localStorage.getItem('__zoottle_last_unhandled_rejection'))
+      await expect.poll(async () => page.evaluate(() => window.localStorage.getItem('__kaivo_bookmark_overlay_requested'))).toBe('https://example.com/docs')
+      const rejection = await page.evaluate(() => window.localStorage.getItem('__kaivo_last_unhandled_rejection'))
       expect(rejection).toBeNull()
 
       await expect.poll(async () => {
@@ -100,7 +100,7 @@ test('browser pane bookmark action opens overlay and saves a bookmark', async ({
       })
 
       await expect.poll(async () => {
-        return await page.evaluate(() => JSON.parse(window.localStorage.getItem('__zoottle_mock_bookmark_mutation_calls') || '[]'))
+        return await page.evaluate(() => JSON.parse(window.localStorage.getItem('__kaivo_mock_bookmark_mutation_calls') || '[]'))
       }).toEqual([
         expect.objectContaining({
           url: 'https://example.com/docs',

@@ -3,8 +3,8 @@ import { resolveInstanceRuntimeConfig, selectRuntimePorts } from './instance-run
 
 describe('instance runtime ports', () => {
   it('resolves a client dev server port with the same per-worktree runtime model', () => {
-    const first = resolveInstanceRuntimeConfig({ NODE_ENV: 'development' }, { cwd: '/tmp/cloud-code-a', homeDir: '/tmp/home' })
-    const second = resolveInstanceRuntimeConfig({ NODE_ENV: 'development' }, { cwd: '/tmp/cloud-code-b', homeDir: '/tmp/home' })
+    const first = resolveInstanceRuntimeConfig({ NODE_ENV: 'development' }, { cwd: '/tmp/kaivo-a', homeDir: '/tmp/home' })
+    const second = resolveInstanceRuntimeConfig({ NODE_ENV: 'development' }, { cwd: '/tmp/kaivo-b', homeDir: '/tmp/home' })
 
     expect(first.client.url).toBe(`http://127.0.0.1:${first.client.port}`)
     expect(first.client.logPath).toBe(`${first.logsDir}/client.log`)
@@ -21,7 +21,7 @@ describe('instance runtime ports', () => {
         CC_ENV_PORT: '47822',
         CC_CLIENT_PORT: '5181',
       },
-      { cwd: '/tmp/cloud-code-a', homeDir: '/tmp/home' },
+      { cwd: '/tmp/kaivo-a', homeDir: '/tmp/home' },
     )
 
     expect(config.app.port).toBe(3001)

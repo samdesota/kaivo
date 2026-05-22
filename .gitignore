@@ -14,6 +14,7 @@ playwright-report
 *.tsbuildinfo
 .DS_Store
 .claude/
+.kaivo/
 .cloud-code/
 test-data
 packages/cloud-code-desktop/release/
