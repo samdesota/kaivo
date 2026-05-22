@@ -54,6 +54,8 @@ Move workspaces and workspace folders into startup-synced data modules, then der
 
 **Depends on:** Task 1
 
+**Status:** done
+
 ## Task 3: Workspace View State And Pane Tabs
 
 Move workspace view state and workspace pane tabs into modules so workspace route switching is a local read and workspace pane mutations are command calls.

@@ -24,6 +24,6 @@ test('workspace route renders with app data provider mounted', async ({ page }) 
   expect(workspaceId).toBeTruthy()
 
   await page.goto(`/w/${workspaceId}`)
-  await expect(page.getByRole('link', { name: workspaceName })).toBeVisible()
+  await expect(page.getByRole('link', { name: workspaceName, exact: true }).first()).toBeVisible()
   await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __kaivoAppDataProviderMounted?: boolean }).__kaivoAppDataProviderMounted))).toBe(true)
 })

@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../trpc'
 import { closeNativeBrowserTabsForWorkspace } from './browser-tab-cleanup'
-import { trpcQueryKey } from '../../lib/trpc-plain'
+import { archiveWorkspace, createWorkspace as createWorkspaceCommand, renameWorkspace, useVisibleWorkspaces } from '../../data/modules/workspaces'
 import {
   idleRenameEditState,
   nextRenameValue,
@@ -44,16 +43,8 @@ export function WorkspaceTabBar({
   activeWorkspaceName: string
 }) {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const trpcUtils = trpc.useUtils()
-  const list = trpc.workspace.list.useQuery(undefined, { refetchInterval: 15_000 })
-  const create = trpc.workspace.create.useMutation()
-  const rename = trpc.workspace.rename.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
-  })
-  const archive = trpc.workspace.archive.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
-  })
+  const syncedWorkspaces = useVisibleWorkspaces()
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
   const [optimisticWorkspace, setOptimisticWorkspace] = useState<WorkspaceSummary | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -73,7 +64,7 @@ export function WorkspaceTabBar({
   }, [activeWorkspaceId, activeWorkspaceName])
 
   async function createWorkspace() {
-    const workspace = await create.mutateAsync({})
+    const workspace = await createWorkspaceCommand({})
     setOptimisticWorkspace({ id: workspace.id, name: workspace.name })
     window.sessionStorage.setItem(PENDING_WORKSPACE_RENAME_KEY, workspace.id)
     dispatchEdit({ type: 'begin', workspaceId: workspace.id, name: workspace.name })
@@ -88,7 +79,7 @@ export function WorkspaceTabBar({
     if (!edit.editingId) return
     const nextName = nextRenameValue(edit)
     if (nextName) {
-      await rename.mutateAsync({ id: edit.editingId, name: nextName })
+      await renameWorkspace({ id: edit.editingId, name: nextName })
       setOptimisticWorkspace((workspace) =>
         workspace?.id === edit.editingId ? { ...workspace, name: nextName } : workspace,
       )
@@ -99,7 +90,7 @@ export function WorkspaceTabBar({
   async function closeWorkspace(workspaceId: string) {
     const tabs = await trpcUtils.workspace.listTabs.fetch({ workspaceId }).catch(() => [])
     await closeNativeBrowserTabsForWorkspace(tabs)
-    await archive.mutateAsync({ id: workspaceId })
+    await archiveWorkspace(workspaceId)
     const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId)
     const next = remaining[0]
     if (workspaceId === activeWorkspaceId) {
@@ -116,7 +107,7 @@ export function WorkspaceTabBar({
   }
 
   const workspaces = useMemo(() => {
-    const rows = [...((list.data ?? []) as WorkspaceSummary[])]
+    const rows: WorkspaceSummary[] = [...syncedWorkspaces]
     if (optimisticWorkspace && !rows.some((workspace) => workspace.id === optimisticWorkspace.id)) {
       rows.push(optimisticWorkspace)
     }
@@ -125,10 +116,19 @@ export function WorkspaceTabBar({
       { id: activeWorkspaceId, name: activeWorkspaceName },
     )
     return ordered
-  }, [activeWorkspaceId, activeWorkspaceName, list.data, optimisticWorkspace])
+  }, [activeWorkspaceId, activeWorkspaceName, syncedWorkspaces, optimisticWorkspace])
 
   return (
     <div className="no-scrollbar flex items-center gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap border-t border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-400">
+      <button
+        type="button"
+        onClick={() => void createWorkspace()}
+        className="rounded px-2 py-1 text-xs text-neutral-600 transition-colors hover:bg-highlight hover:text-neutral-100"
+        aria-label="Create new workspace from tab bar"
+        title="New workspace"
+      >
+        +
+      </button>
       {workspaces.map((workspace) => {
         const active = workspace.id === activeWorkspaceId
         const editing = edit.editingId === workspace.id

@@ -19,11 +19,13 @@ export function startAppDataSync(options: StartupSyncOptions = {}): Promise<void
   return startupSyncPromise
 }
 
-export function resetAppDataSyncForTests(): void {
+export function resetAppDataSync(): void {
   unsubscribeRealtime?.()
   unsubscribeRealtime = null
   startupSyncPromise = null
 }
+
+export const resetAppDataSyncForTests = resetAppDataSync
 
 async function runStartupSync(options: StartupSyncOptions): Promise<void> {
   const collections = options.collections ?? getAppSyncTables()
