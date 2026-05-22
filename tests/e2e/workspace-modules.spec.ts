@@ -148,7 +148,7 @@ async function waitForAppDataReady(page: Page) {
 }
 
 function recordWorkspaceMetadataCalls(page: Page): string[] {
-  const denied = ['workspace.listTree', 'workspace.list', 'workspace.get']
+  const denied = ['workspace.listTree', 'workspace.list', 'workspace.get', 'workspace.listAgentTabs']
   const calls: string[] = []
   page.on('request', (request) => {
     const url = request.url()
