@@ -17,24 +17,26 @@ test('switching existing workspaces does not refetch migrated workspace metadata
   expect(calls).toEqual([])
 })
 
-test('creates and renames a workspace from the tab bar without a workspace list refetch', async ({ page }) => {
+test('renames a workspace from the sidebar without a workspace list refetch', async ({ page }) => {
   await login(page)
   const initial = await createWorkspaceViaFetch(page, `Tab Bar Seed ${Date.now()}`)
+  const other = await createWorkspaceViaFetch(page, `Sidebar Other ${Date.now()}`)
   await page.goto(`/w/${initial.id}`)
   await waitForAppDataReady(page)
 
   const calls = recordWorkspaceMetadataCalls(page)
-  await page.getByRole('button', { name: 'Create new workspace from tab bar' }).click()
-  const renamed = `Tab Bar Renamed ${Date.now()}`
+  const sidebar = page.getByRole('complementary', { name: 'Workspaces' })
+  await sidebar.getByRole('link', { name: initial.name, exact: true }).dblclick()
+  const renamed = `Sidebar Renamed ${Date.now()}`
   const input = page.getByLabel('Workspace name').last()
   await expect(input).toBeVisible()
   await input.fill(renamed)
   await input.press('Enter')
 
-  await expect(page.getByRole('link', { name: renamed }).first()).toBeVisible()
-  await page.getByRole('link', { name: initial.name }).first().click()
-  await page.getByRole('link', { name: renamed }).first().click()
-  await expect(page.getByRole('link', { name: renamed }).first()).toBeVisible()
+  await expect(sidebar.getByRole('link', { name: renamed, exact: true })).toBeVisible()
+  await sidebar.getByRole('link', { name: other.name, exact: true }).click()
+  await sidebar.getByRole('link', { name: renamed, exact: true }).click()
+  await expect(sidebar.getByRole('link', { name: renamed, exact: true })).toBeVisible()
 
   expect(calls.filter((call) => call.endsWith('workspace.list'))).toEqual([])
 })

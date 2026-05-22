@@ -43,7 +43,7 @@ describe('startup sync', () => {
     const synced = collection('startup-sync-local')
     await writeLocalRows('startup-sync-local', [{ id: 'workspace-1', title: 'Local' }])
     await writeLocalSyncCursor('app-test', { seq: 4 })
-    const subscribe = vi.fn(() => () => undefined)
+    const subscribe = vi.fn(() => ({ unsubscribe: vi.fn(), ready: Promise.resolve() }))
     const client: SyncClient = {
       resume: vi.fn(async () => ({
         type: 'changes' as const,
@@ -71,7 +71,7 @@ describe('startup sync', () => {
       snapshotMany: vi.fn(async () => [
         { table: 'workspaces', seq: 12, rows: [{ id: 'workspace-server', title: 'Server' }] },
       ]),
-      subscribe: vi.fn(() => () => undefined),
+      subscribe: vi.fn(() => ({ unsubscribe: vi.fn(), ready: Promise.resolve() })),
     }
 
     await startAppDataSync({ collections: [synced], client, scope: 'app-stale', subscribe: false })
@@ -79,5 +79,67 @@ describe('startup sync', () => {
     expect(client.snapshotMany).toHaveBeenCalledWith(['workspaces'])
     expect(synced.getRows()).toEqual([{ id: 'workspace-server', title: 'Server' }])
     expect(synced.getSeq()).toBe(12)
+  })
+
+  it('uses snapshots instead of replaying all changes when there is no durable cursor', async () => {
+    const synced = collection('startup-sync-cold-start')
+    const client: SyncClient = {
+      resume: vi.fn(),
+      snapshot: vi.fn(),
+      snapshotMany: vi.fn(async () => [
+        { table: 'workspaces', seq: 50, rows: [{ id: 'workspace-snapshot', title: 'Snapshot' }] },
+      ]),
+      subscribe: vi.fn(() => ({ unsubscribe: vi.fn(), ready: Promise.resolve() })),
+    }
+
+    await startAppDataSync({ collections: [synced], client, scope: 'app-cold-start' })
+
+    expect(client.resume).not.toHaveBeenCalled()
+    expect(client.snapshotMany).toHaveBeenCalledWith(['workspaces'])
+    expect(synced.getRows()).toEqual([{ id: 'workspace-snapshot', title: 'Snapshot' }])
+    expect(client.subscribe).toHaveBeenCalledWith(expect.objectContaining({ afterSeq: 50 }))
+  })
+
+  it('does not resolve startup sync until the realtime subscription is ready', async () => {
+    const synced = collection('startup-sync-subscribe-ready')
+    await writeLocalSyncCursor('app-ready', { seq: 1 })
+    let resolveReady!: () => void
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve
+    })
+    const client: SyncClient = {
+      resume: vi.fn(async () => ({ type: 'changes' as const, events: [] })),
+      snapshot: vi.fn(),
+      snapshotMany: vi.fn(),
+      subscribe: vi.fn(() => ({ unsubscribe: vi.fn(), ready })),
+    }
+
+    let resolved = false
+    const started = startAppDataSync({ collections: [synced], client, scope: 'app-ready' }).then(() => {
+      resolved = true
+    })
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+
+    resolveReady()
+    await started
+
+    expect(resolved).toBe(true)
+  })
+
+  it('marks collections caught up to the durable cursor when resume has no events', async () => {
+    const synced = collection('startup-sync-empty-resume')
+    await writeLocalSyncCursor('app-empty-resume', { seq: 42 })
+    const client: SyncClient = {
+      resume: vi.fn(async () => ({ type: 'changes' as const, events: [] })),
+      snapshot: vi.fn(),
+      snapshotMany: vi.fn(),
+      subscribe: vi.fn(() => ({ unsubscribe: vi.fn(), ready: Promise.resolve() })),
+    }
+
+    await startAppDataSync({ collections: [synced], client, scope: 'app-empty-resume' })
+
+    expect(synced.getSeq()).toBe(42)
+    expect(client.subscribe).toHaveBeenCalledWith(expect.objectContaining({ afterSeq: 42 }))
   })
 })

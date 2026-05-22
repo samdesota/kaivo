@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import './modules'
 import { resetAppDataSync, startAppDataSync } from './startup-sync'
+import { clientLogger } from '../lib/client-logger'
+
+const log = clientLogger.diagnostic('app-data')
 
 type AppDataContextValue = {
   ready: boolean
@@ -18,20 +21,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     ;(window as unknown as { __kaivoAppDataProviderMounted?: boolean }).__kaivoAppDataProviderMounted = true
     function run() {
+      log.info('startup sync start')
       void startAppDataSync()
         .then(() => {
           ;(window as unknown as { __kaivoAppDataReady?: boolean }).__kaivoAppDataReady = true
+          log.info('startup sync ready')
           if (!cancelled) {
             setError(null)
             setReady(true)
           }
         })
         .catch((err) => {
-          console.warn('[app-data] startup sync failed', err)
+          log.warn('startup sync failed', { message: err instanceof Error ? err.message : String(err) })
           ;(window as unknown as { __kaivoAppDataError?: string }).__kaivoAppDataError = err instanceof Error ? err.message : String(err)
           resetAppDataSync()
           if (!cancelled) {
             setError(err)
+            log.info('startup sync retry scheduled', { delayMs: 500 })
             retryTimer = setTimeout(run, 500)
           }
         })

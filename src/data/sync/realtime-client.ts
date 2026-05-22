@@ -29,12 +29,6 @@ export function createRealtimeSyncClient(client: AppSyncClient = makeTrpcClient(
             },
           },
         )
-        queueMicrotask(() => {
-          if (settled) return
-          settled = true
-          sub.unsubscribe()
-          resolve([])
-        })
       })
       return { type: 'changes', events }
     },
@@ -45,12 +39,32 @@ export function createRealtimeSyncClient(client: AppSyncClient = makeTrpcClient(
       return await Promise.all(tables.map((table) => this.snapshot(table)))
     },
     subscribe(input) {
+      let resolveReady!: () => void
+      const ready = new Promise<void>((resolve) => {
+        resolveReady = resolve
+      })
+      let readyResolved = false
       const sub = client.subscription(
         'sync.changes',
         { afterSeq: input.afterSeq, tables: input.tables as SyncTableName[] },
-        { onData: input.onEvents, onError: input.onError },
+        {
+          onData(events) {
+            if (!readyResolved) {
+              readyResolved = true
+              resolveReady()
+            }
+            if (events.length > 0) input.onEvents(events)
+          },
+          onError(error) {
+            if (!readyResolved) {
+              readyResolved = true
+              resolveReady()
+            }
+            input.onError?.(error)
+          },
+        },
       )
-      return () => sub.unsubscribe()
+      return { unsubscribe: () => sub.unsubscribe(), ready }
     },
   }
 }

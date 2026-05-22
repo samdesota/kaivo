@@ -42,5 +42,10 @@ export type SyncClient = {
     tables: SyncTableName[]
     onEvents: (events: SyncChangeEvent[]) => void
     onError?: (error: unknown) => void
-  }): () => void
+  }): SyncSubscription
+}
+
+export type SyncSubscription = {
+  unsubscribe(): void
+  ready?: Promise<void>
 }

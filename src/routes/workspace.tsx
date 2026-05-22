@@ -61,7 +61,6 @@ import {
   type WorkspaceEnvRow,
 } from './workspace/env-targets'
 import { WorkspaceContextProvider, useWorkspaceContext } from './workspace/context'
-import { WorkspaceTabBar } from './workspace/workspace-tab-bar'
 import { closeNativeBrowserTabsForWorkspace } from './workspace/browser-tab-cleanup'
 import {
   type WorkspaceTab,
@@ -90,6 +89,7 @@ import {
 } from './workspace/sidebar-dnd-state'
 import { trpcQueryKey } from '../lib/trpc-plain'
 import { playAgentNotificationSound, readAgentNotificationSoundPrefs, readLastAgentRunDurationMs, useAgentNotificationSoundPrefs } from '../lib/agent-notification-sounds'
+import { clientLogger } from '../lib/client-logger'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 
@@ -111,6 +111,7 @@ const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
 const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
 const WORKSPACE_BOOTSTRAP_EVENT = 'cloud-code.workspaceBootstrapChanged'
+const workspaceLog = clientLogger.diagnostic('workspace')
 
 type WorkspaceBootstrapStatus = {
   message: string
@@ -288,9 +289,7 @@ export function WorkspacePage() {
     [envTargets],
   )
 
-  const initiallyLoading =
-    (!appData.ready && !workspace) ||
-    (envs.isLoading && !envs.data)
+  const initiallyLoading = !appData.ready && !workspace
 
   if (initiallyLoading) {
     logWorkspaceLoading('initiallyLoading', workspaceId, {
@@ -328,7 +327,7 @@ export function WorkspacePage() {
         getEnvClient,
       }}
     >
-      <WorkspaceShell key={workspace.id} dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
+      <WorkspaceShell dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
     </WorkspaceContextProvider>
   )
   lastReadyWorkspaceRef.current = readyWorkspace
@@ -336,7 +335,7 @@ export function WorkspacePage() {
 }
 
 function logWorkspaceLoading(reason: string, workspaceId: string, state: Record<string, unknown>) {
-  console.info('[workspace] Loading workspace...', {
+  workspaceLog.info('loading workspace', {
     reason,
     workspaceId,
     ...state,
@@ -574,6 +573,7 @@ function WorkspaceShell({
         />
       ) : (
         <ShellChrome
+          key={ctx.workspace.id}
           className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975"
           style={{ width: sidebarHidden ? '100vw' : undefined }}
           showHeader={false}
@@ -610,9 +610,6 @@ function WorkspaceShell({
           }
         />
       )}
-      <div className="fixed bottom-0 left-0 right-0 z-30">
-        <WorkspaceTabBar activeWorkspaceId={ctx.workspace.id} activeWorkspaceName={ctx.workspace.name} />
-      </div>
     </div>
     </>
   )

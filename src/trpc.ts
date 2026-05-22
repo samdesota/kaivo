@@ -20,7 +20,11 @@ export function makeTrpcClient() {
     links: [
       splitLink({
         condition: (op) => op.type === 'subscription',
-        true: httpSubscriptionLink({ url: '/trpc', transformer: superjson }),
+        true: httpSubscriptionLink({
+          url: '/trpc',
+          transformer: superjson,
+          eventSourceOptions: () => ({ withCredentials: true }),
+        }),
         false: httpBatchLink({
           url: '/trpc',
           transformer: superjson,
