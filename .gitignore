@@ -5,7 +5,7 @@ docker/base-sandbox/cc-env/
 .env
 .env.local
 .env.*.local
-data/
+/data/
 *.log
 .vite
 coverage

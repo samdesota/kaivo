@@ -6,6 +6,53 @@ let appRealtime: SqliteRealtimeEngine | null = null
 export function getAppRealtime(): SqliteRealtimeEngine {
   if (!appRealtime) appRealtime = new SqliteRealtimeEngine(sqlite, [
     {
+      table: 'workspaces',
+      keyColumns: ['id'],
+      columns: [
+        { name: 'id' },
+        { name: 'name' },
+        { name: 'folder_id', jsonName: 'folderId' },
+        { name: 'position' },
+        { name: 'name_source', jsonName: 'nameSource' },
+        { name: 'source_kind', jsonName: 'sourceKind' },
+        { name: 'source_path', jsonName: 'sourcePath' },
+        { name: 'kind' },
+        { name: 'system_key', jsonName: 'systemKey' },
+        { name: 'hidden' },
+        { name: 'protected' },
+        { name: 'created_at', jsonName: 'createdAt' },
+        { name: 'updated_at', jsonName: 'updatedAt' },
+        { name: 'last_opened_at', jsonName: 'lastOpenedAt' },
+        { name: 'archived_at', jsonName: 'archivedAt' },
+      ],
+    },
+    {
+      table: 'workspace_folders',
+      keyColumns: ['id'],
+      columns: [
+        { name: 'id' },
+        { name: 'parent_id', jsonName: 'parentId' },
+        { name: 'name' },
+        { name: 'position' },
+        { name: 'collapsed' },
+        { name: 'created_at', jsonName: 'createdAt' },
+        { name: 'updated_at', jsonName: 'updatedAt' },
+        { name: 'archived_at', jsonName: 'archivedAt' },
+      ],
+    },
+    {
+      table: 'workspace_view_states',
+      keyColumns: ['workspace_id'],
+      columns: [
+        { name: 'workspace_id', jsonName: 'workspaceId' },
+        { name: 'active_agent_session_id', jsonName: 'activeAgentSessionId' },
+        { name: 'active_workspace_tab_id', jsonName: 'activeWorkspaceTabId' },
+        { name: 'split_ratio', jsonName: 'splitRatio' },
+        { name: 'agent_collapsed', jsonName: 'agentCollapsed' },
+        { name: 'updated_at', jsonName: 'updatedAt' },
+      ],
+    },
+    {
       table: 'workspace_tabs',
       keyColumns: ['workspace_id', 'id'],
       columns: [
@@ -13,6 +60,7 @@ export function getAppRealtime(): SqliteRealtimeEngine {
         { name: 'id' },
         { name: 'type' },
         { name: 'title' },
+        { name: 'title_source', jsonName: 'titleSource' },
         { name: 'position' },
         { name: 'env_id', jsonName: 'envId' },
         { name: 'shell_id', jsonName: 'shellId' },

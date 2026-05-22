@@ -6,7 +6,7 @@ import { envTrpc } from '../../../env-trpc'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { openFolderPickerOverlay } from '../../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../../lib/utils'
-import { useWorkspaceAgentTabsStore } from '../../workspace/agent-tabs-store'
+import { deleteWorkspaceAgentTab, ensureWorkspaceAgentTab, orderAgentSessionsByTabs, reorderWorkspaceAgentTabs, useWorkspaceAgentTabRecords } from '../../../data/modules/workspace-agent-tabs'
 import { useEnv } from '../env-context'
 import { NewAgentChatOverlayLauncher } from './new-agent-chat-modal'
 
@@ -46,7 +46,7 @@ export function SessionTabs({
   const queryClient = useQueryClient()
   const close = envTrpc.agent.sessionClose.useMutation()
   const reopen = envTrpc.agent.sessionReopen.useMutation()
-  const agentTabs = useWorkspaceAgentTabsStore(workspaceId)
+  const agentTabs = useWorkspaceAgentTabRecords(workspaceId)
   const handledCloseActiveSignalRef = useRef(closeActiveSignal)
 
   const sessionsData = sessions.data as SessionSummary[] | undefined
@@ -59,24 +59,12 @@ export function SessionTabs({
     }
     if (!workspaceId) return { active: act, archived: arc }
 
-    const byId = new Map(act.map((session) => [session.id, session]))
-    const ordered: SessionSummary[] = []
-    for (const tab of agentTabs.records) {
-      const session = byId.get(tab.sessionId)
-      if (!session) continue
-      ordered.push(session)
-      byId.delete(tab.sessionId)
-    }
-    const missing = [...byId.values()].sort((a, b) => {
-      const created = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-      return created || a.id.localeCompare(b.id)
-    })
-    return { active: [...ordered, ...missing], archived: arc }
-  }, [agentTabs.records, sessionsData, workspaceId])
+    return { active: orderAgentSessionsByTabs({ sessions: act, tabs: agentTabs }), archived: arc }
+  }, [agentTabs, sessionsData, workspaceId])
 
   useEffect(() => {
     if (!workspaceId) return
-    for (const session of active) agentTabs.ensureSession(session.id)
+    for (const session of active) void ensureWorkspaceAgentTab({ workspaceId, sessionId: session.id })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, workspaceId])
 
@@ -85,7 +73,7 @@ export function SessionTabs({
     try {
       await close.mutateAsync({ sessionId: id })
       await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', sessionListInput) })
-      agentTabs.deleteSession(id)
+      if (workspaceId) void deleteWorkspaceAgentTab({ workspaceId, sessionId: id })
       if (id === sessionId) {
         const next = others[0]?.id
         if (next) onSelect(next)
@@ -107,7 +95,7 @@ export function SessionTabs({
     try {
       await reopen.mutateAsync({ sessionId: id })
       await queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', sessionListInput) })
-      agentTabs.ensureSession(id)
+      if (workspaceId) void ensureWorkspaceAgentTab({ workspaceId, sessionId: id })
       onSelect(id)
     } catch {
       /* ignore */
@@ -128,7 +116,7 @@ export function SessionTabs({
         activeId={sessionId}
         onSelect={onSelect}
         onClose={(id) => void onClose(id)}
-        onResort={workspaceId ? (ids) => agentTabs.reorderSessions(ids) : undefined}
+        onResort={workspaceId ? (ids) => void reorderWorkspaceAgentTabs({ workspaceId, sessionIds: ids }) : undefined}
         focused={focused}
       />
       {!workspaceId && <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />}

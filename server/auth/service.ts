@@ -2,7 +2,7 @@ import bcrypt from 'bcrypt'
 import { timingSafeEqual } from 'node:crypto'
 import { eq, lt, or } from 'drizzle-orm'
 import { ulid } from 'ulid'
-import { db } from '../db/client.js'
+import { db, sqlite } from '../db/client.js'
 import { admin, webSessions } from '../db/schema.js'
 import { env } from '../env.js'
 import { logger } from '../logger.js'
@@ -107,15 +107,30 @@ export async function resolveSession(sessionId: string): Promise<Session | null>
   const rows = await db.select().from(webSessions).where(eq(webSessions.id, sessionId)).limit(1)
   const row = rows[0]
   if (!row) return null
+  const rawSession = readRawSessionDates(row.id)
+  const expiresAt = coerceSessionDate(row.expiresAt, rawSession?.expires_at)
+  const lastSeen = coerceSessionDate(row.lastSeen, rawSession?.last_seen)
 
   const idleCutoff = new Date(now.getTime() - IDLE_TIMEOUT_MS)
-  if (row.expiresAt <= now || (!isDesktopAuthEnabled() && row.lastSeen <= idleCutoff)) {
+  if (expiresAt <= now || (!isDesktopAuthEnabled() && lastSeen <= idleCutoff)) {
     await db.delete(webSessions).where(eq(webSessions.id, sessionId))
     return null
   }
 
   await db.update(webSessions).set({ lastSeen: now }).where(eq(webSessions.id, sessionId))
-  return { id: row.id, expiresAt: row.expiresAt, lastSeen: now }
+  return { id: row.id, expiresAt, lastSeen: now }
+}
+
+function readRawSessionDates(id: string): { expires_at: unknown; last_seen: unknown } | null {
+  return sqlite.prepare('SELECT expires_at, last_seen FROM web_sessions WHERE id = ?').get(id) as { expires_at: unknown; last_seen: unknown } | undefined ?? null
+}
+
+function coerceSessionDate(value: Date | number | string, rawValue?: unknown): Date {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value
+  if (typeof rawValue === 'string' && /^\d+(\.\d+)?$/.test(rawValue)) return new Date(Number(rawValue))
+  if (typeof rawValue === 'number') return new Date(rawValue)
+  if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value)) return new Date(Number(value))
+  return new Date(value)
 }
 
 export async function refreshDesktopSession(session: Session): Promise<Session> {

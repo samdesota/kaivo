@@ -28,6 +28,13 @@ import {
 import { CSS as DndCss } from '@dnd-kit/utilities'
 import { trpc } from '../trpc'
 import { envTrpc, makeManagedEnvReactClient } from '../env-trpc'
+import { useAppData } from '../data/app-data-provider'
+import { archiveWorkspace, markWorkspaceOpened, renameWorkspace, useVisibleWorkspaces, useWorkspace } from '../data/modules/workspaces'
+import { createWorkspaceFolder, moveWorkspaceSidebarNode, renameWorkspaceFolder, setWorkspaceFolderCollapsed, useWorkspaceSidebarTree } from '../data/modules/workspace-folders'
+import { setActiveAgentSession, setActiveWorkspaceTab, setAgentCollapsed as setAgentCollapsedCommand, setWorkspaceSplitRatio, useWorkspaceSearchSync, useWorkspaceViewState } from '../data/modules/workspace-view-state'
+import { closeWorkspaceTab as closeWorkspaceTabCommand, openWorkspaceTab, reorderWorkspaceTabs, setWorkspaceTabBrowserId, setWorkspaceTabTitle, setWorkspaceTabUrl, useWorkspaceTabs } from '../data/modules/workspace-tabs'
+import type { WorkspaceFolderRecord, WorkspaceSidebarNode } from '../data/modules/workspace-folders'
+import type { WorkspaceRecord } from '../data/modules/workspaces'
 import { browserApi } from '../lib/browser-api'
 import { resolveBrowserAddress } from '../lib/browser-navigation'
 import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
@@ -54,7 +61,6 @@ import {
   type WorkspaceEnvRow,
 } from './workspace/env-targets'
 import { WorkspaceContextProvider, useWorkspaceContext } from './workspace/context'
-import { useWorkspaceViewStateStore } from './workspace/view-state-store'
 import { closeNativeBrowserTabsForWorkspace } from './workspace/browser-tab-cleanup'
 import {
   type WorkspaceTab,
@@ -62,7 +68,6 @@ import {
   type WorkspaceUiState,
   updateFileEditorStateForTab,
 } from './workspace/tab-state'
-import { useWorkspaceTabsStore } from './workspace/tabs-store'
 import { useWorkspaceResourcesStore, type WorkspaceResourceRecord } from './workspace/resources-store'
 import { useBookmarksStore } from './workspace/bookmarks-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
@@ -82,8 +87,9 @@ import {
   type SidebarTreeNode,
   type SidebarDropProjection,
 } from './workspace/sidebar-dnd-state'
-import { appTrpcMutation, trpcQueryKey } from '../lib/trpc-plain'
+import { trpcQueryKey } from '../lib/trpc-plain'
 import { playAgentNotificationSound, readAgentNotificationSoundPrefs, readLastAgentRunDurationMs, useAgentNotificationSoundPrefs } from '../lib/agent-notification-sounds'
+import { clientLogger } from '../lib/client-logger'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 
@@ -98,30 +104,14 @@ type GlobalTabDestination = {
   activeTabId: string | null
 }
 
-type WorkspaceSummary = {
-  id: string
-  name: string
-  folderId?: string | null
-  position?: number
-}
-
-type WorkspaceFolderSummary = {
-  id: string
-  parentId?: string | null
-  name: string
-  position: number
-  collapsed: boolean
-}
-
-type WorkspaceSidebarNode =
-  | { type: 'folder'; folder: WorkspaceFolderSummary; children: WorkspaceSidebarNode[] }
-  | { type: 'workspace'; workspace: WorkspaceSummary }
+type WorkspaceSummary = WorkspaceRecord
 
 const WORKSPACE_SIDEBAR_WIDTH_KEY = 'cloud-code.workspaceSidebarWidth'
 const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
 const WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
 const WORKSPACE_BOOTSTRAP_EVENT = 'cloud-code.workspaceBootstrapChanged'
+const workspaceLog = clientLogger.diagnostic('workspace')
 
 type WorkspaceBootstrapStatus = {
   message: string
@@ -220,84 +210,52 @@ export function WorkspacePage() {
   const { workspaceId } = useParams({ from: '/w/$workspaceId' })
   const search = useSearch({ from: '/w/$workspaceId' })
   const navigate = useNavigate({ from: '/w/$workspaceId' })
-  const queryClient = useQueryClient()
-  const workspace = trpc.workspace.get.useQuery({ id: workspaceId })
+  const appData = useAppData()
+  const workspace = useWorkspace(workspaceId)
   const envs = trpc.env.list.useQuery({}, { refetchInterval: 10_000 })
-  const markOpened = trpc.workspace.markOpened.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
-  })
   const upsertResource = trpc.workspace.upsertResource.useMutation()
-  const viewStateStore = useWorkspaceViewStateStore(workspaceId)
-  const tabsStore = useWorkspaceTabsStore(workspaceId)
-  const appliedSearchWorkspaceId = useRef<string | null>(null)
+  const viewState = useWorkspaceViewState(workspaceId)
+  const workspaceTabs = useWorkspaceTabs(workspaceId)
   const lastReadyWorkspaceRef = useRef<ReactNode | null>(null)
 
   useEffect(() => {
-    if (workspace.data?.id) markOpened.mutate({ id: workspace.data.id })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.data?.id])
+    if (workspace?.id) void markWorkspaceOpened(workspace.id).catch((error) => console.warn('mark workspace opened failed', error))
+  }, [workspace?.id])
 
-  useEffect(() => {
-    if (!workspace.data || workspace.data.id !== workspaceId || !viewStateStore.viewState) return
-    if (appliedSearchWorkspaceId.current !== workspaceId) {
-      appliedSearchWorkspaceId.current = workspaceId
-      if (search.chat && search.chat !== viewStateStore.viewState.activeAgentSessionId) {
-        viewStateStore.setActiveAgentSession(search.chat)
-      }
-      if (
-        search.tab &&
-        search.tab !== viewStateStore.viewState.activeWorkspaceTabId &&
-        tabsStore.tabs.some((tab) => tab.id === search.tab)
-      ) {
-        viewStateStore.setActiveWorkspaceTab(search.tab)
-      }
-      return
-    }
-    if (
-      viewStateStore.viewState.activeWorkspaceTabId &&
-      !tabsStore.tabs.some((tab) => tab.id === viewStateStore.viewState?.activeWorkspaceTabId)
-    ) {
-      viewStateStore.setActiveWorkspaceTab(tabsStore.tabs[0]?.id ?? null)
-      return
-    }
-    if (
-      viewStateStore.viewState.activeWorkspaceTabId !== (search.tab ?? null) ||
-      viewStateStore.viewState.activeAgentSessionId !== (search.chat ?? null)
-    ) {
+  useWorkspaceSearchSync({
+    workspaceId,
+    search,
+    viewState,
+    tabs: workspaceTabs,
+    enabled: workspace?.id === workspaceId,
+    replaceSearch: useCallback((nextSearch) => {
       void navigate({
         search: (prev) => ({
           ...prev,
-          chat: viewStateStore.viewState?.activeAgentSessionId ?? undefined,
-          tab: viewStateStore.viewState?.activeWorkspaceTabId ?? undefined,
+          chat: nextSearch.chat,
+          tab: nextSearch.tab,
         }),
         replace: true,
       })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.chat, search.tab, tabsStore.tabs, viewStateStore.viewState, workspace.data?.id, workspaceId])
+    }, [navigate]),
+  })
 
   const dispatchSyncedWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
     if (action.type === 'setActiveAgentSession') {
-      viewStateStore.setActiveAgentSession(action.sessionId)
+      void setActiveAgentSession({ workspaceId, sessionId: action.sessionId })
     } else if (action.type === 'activateTab') {
-      viewStateStore.setActiveWorkspaceTab(action.tabId)
+      void setActiveWorkspaceTab({ workspaceId, tabId: action.tabId })
     } else if (action.type === 'openTab' && action.activate !== false) {
-      const tab = tabsStore.openTab(action.tab, true)
-      viewStateStore.setActiveWorkspaceTab(tab.id)
+      void openWorkspaceTab({ workspaceId, tab: action.tab, activate: true })
     } else if (action.type === 'openTab') {
-      tabsStore.openTab(action.tab, false)
+      void openWorkspaceTab({ workspaceId, tab: action.tab, activate: false })
     } else if (action.type === 'closeTab') {
-      const idx = tabsStore.tabs.findIndex((tab) => tab.id === action.tabId)
-      if (idx !== -1 && viewStateStore.viewState?.activeWorkspaceTabId === action.tabId) {
-        const tabs = tabsStore.tabs.filter((tab) => tab.id !== action.tabId)
-        viewStateStore.setActiveWorkspaceTab(tabs[idx]?.id ?? tabs[idx - 1]?.id ?? null)
-      }
-      tabsStore.closeTab(action.tabId)
+      void closeWorkspaceTabCommand({ workspaceId, tabId: action.tabId })
     } else if (action.type === 'reorderTabs') {
-      tabsStore.reorderTabs(action.tabIds)
+      void reorderWorkspaceTabs({ workspaceId, tabIds: action.tabIds })
     } else if (action.type === 'setBrowserTabId') {
-      tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
-      const tab = tabsStore.tabs.find((candidate) => candidate.id === action.tabId)
+      void setWorkspaceTabBrowserId({ workspaceId, tabId: action.tabId, browserTabId: action.browserTabId })
+      const tab = workspaceTabs.find((candidate) => candidate.id === action.tabId)
       if (tab?.type === 'browser') {
         upsertResource.mutate({
           workspaceId,
@@ -310,17 +268,17 @@ export function WorkspacePage() {
         })
       }
     } else if (action.type === 'setTabUrl') {
-      tabsStore.setTabUrl(action.tabId, action.url)
+      void setWorkspaceTabUrl({ workspaceId, tabId: action.tabId, url: action.url })
     } else if (action.type === 'setTabTitle') {
-      tabsStore.setTabTitle(action.tabId, action.title)
+      void setWorkspaceTabTitle({ workspaceId, tabId: action.tabId, title: action.title, source: 'explicit' })
     } else if (action.type === 'setTabAutoTitle') {
-      tabsStore.setTabAutoTitle(action.tabId, action.title)
+      void setWorkspaceTabTitle({ workspaceId, tabId: action.tabId, title: action.title, source: 'auto' })
     } else if (action.type === 'setSplitRatio') {
-      viewStateStore.setSplitRatio(action.splitRatio)
+      void setWorkspaceSplitRatio({ workspaceId, splitRatio: action.splitRatio })
     } else if (action.type === 'setAgentCollapsed') {
-      viewStateStore.setAgentCollapsed(action.collapsed)
+      void setAgentCollapsedCommand({ workspaceId, collapsed: action.collapsed })
     }
-  }, [tabsStore, upsertResource, viewStateStore, workspaceId])
+  }, [upsertResource, workspaceId, workspaceTabs])
 
   const envTargets = useMemo(() => {
     return ((envs.data ?? []) as WorkspaceEnvRow[]).map(resolveWorkspaceEnvTarget)
@@ -331,66 +289,45 @@ export function WorkspacePage() {
     [envTargets],
   )
 
-  const initiallyLoading =
-    (workspace.isLoading && !workspace.data) ||
-    (envs.isLoading && !envs.data) ||
-    (viewStateStore.isLoading && !viewStateStore.viewState) ||
-    (tabsStore.isLoading && !tabsStore.data)
+  const initiallyLoading = !appData.ready && !workspace
 
   if (initiallyLoading) {
     logWorkspaceLoading('initiallyLoading', workspaceId, {
-      workspaceLoading: workspace.isLoading,
-      workspaceHasData: Boolean(workspace.data),
+      appDataReady: appData.ready,
+      workspaceHasData: Boolean(workspace),
       envsLoading: envs.isLoading,
       envsHasData: Boolean(envs.data),
-      viewStateLoading: viewStateStore.isLoading,
-      viewStateHasData: Boolean(viewStateStore.viewState),
-      tabsLoading: tabsStore.isLoading,
-      tabsHasData: Boolean(tabsStore.data),
+      workspaceTabs: workspaceTabs.length,
     })
     if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
     return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
-  if (workspace.error) return <WorkspaceError message={extractTrpcMessage(workspace.error)} />
+  if (appData.error && !workspace) return <WorkspaceError message={extractTrpcMessage(appData.error)} />
   if (envs.error) return <WorkspaceError message={extractTrpcMessage(envs.error)} />
-  if (viewStateStore.isError) return <WorkspaceError message="Workspace view state did not load." />
-  if (tabsStore.isError) return <WorkspaceError message="Workspace tabs did not load." />
-  if (!workspace.data) {
+  if (!workspace) {
     return <WorkspaceError message="Workspace did not load." />
-  }
-  if (!viewStateStore.viewState || !tabsStore.data) {
-    logWorkspaceLoading('missingStoreDataAfterInitialLoad', workspaceId, {
-      viewStateLoading: viewStateStore.isLoading,
-      viewStateHasData: Boolean(viewStateStore.viewState),
-      tabsLoading: tabsStore.isLoading,
-      tabsHasData: Boolean(tabsStore.data),
-      workspaceHasData: Boolean(workspace.data),
-      envsHasData: Boolean(envs.data),
-    })
-    if (lastReadyWorkspaceRef.current) return lastReadyWorkspaceRef.current
-    return <div className="p-8 text-neutral-500">Loading workspace…</div>
   }
 
   const syncedWorkspaceState: WorkspaceUiState = {
-    workspaceTabs: tabsStore.tabs,
-    activeAgentSessionId: viewStateStore.viewState.activeAgentSessionId,
-    activeWorkspaceTabId: viewStateStore.viewState.activeWorkspaceTabId,
-    splitRatio: viewStateStore.viewState.splitRatio,
-    agentCollapsed: viewStateStore.viewState.agentCollapsed,
-    tabOrder: tabsStore.tabs.map((tab) => tab.id),
+    workspaceTabs,
+    activeAgentSessionId: viewState.activeAgentSessionId,
+    activeWorkspaceTabId: viewState.activeWorkspaceTabId,
+    splitRatio: viewState.splitRatio,
+    agentCollapsed: viewState.agentCollapsed,
+    tabOrder: workspaceTabs.map((tab) => tab.id),
   }
 
   const readyWorkspace = (
     <WorkspaceContextProvider
       value={{
-        workspace: workspace.data,
+        workspace,
         uiState: syncedWorkspaceState,
         envTargets,
         localEnvTarget,
         getEnvClient,
       }}
     >
-      <WorkspaceShell key={workspace.data.id} dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
+      <WorkspaceShell dispatchWorkspaceState={dispatchSyncedWorkspaceState} />
     </WorkspaceContextProvider>
   )
   lastReadyWorkspaceRef.current = readyWorkspace
@@ -398,7 +335,7 @@ export function WorkspacePage() {
 }
 
 function logWorkspaceLoading(reason: string, workspaceId: string, state: Record<string, unknown>) {
-  console.info('[workspace] Loading workspace...', {
+  workspaceLog.info('loading workspace', {
     reason,
     workspaceId,
     ...state,
@@ -422,8 +359,7 @@ function WorkspaceShell({
   const [globalTabsWorkspace, setGlobalTabsWorkspace] = useState<GlobalTabsWorkspaceSummary | null>(null)
   const [activeGlobalTabId, setActiveGlobalTabId] = useState<string | null>(null)
   const agentCollapsed = ctx.uiState.agentCollapsed
-  const globalTabsStore = useWorkspaceTabsStore(globalTabsWorkspace?.id ?? '__global-tabs-pending__')
-  const globalTabs = globalTabsStore.tabs.filter((tab) => tab.type === 'browser')
+  const globalTabs = useWorkspaceTabs(globalTabsWorkspace?.id ?? '__global-tabs-pending__').filter((tab) => tab.type === 'browser')
   const activeGlobalTab = globalTabs.find((tab) => tab.id === activeGlobalTabId) ?? null
   const onSplitRatioChange = useCallback(
     (ratio: number) => dispatchWorkspaceState({ type: 'setSplitRatio', splitRatio: ratio }),
@@ -443,17 +379,17 @@ function WorkspaceShell({
     [agentSessionCount, openWorkspacePane, setAgentCollapsed],
   )
   const closeActiveTab = useCallback(() => {
-    if (activeGlobalTab) {
+    if (activeGlobalTab && globalTabsWorkspace) {
       closeWorkspaceTab(activeGlobalTab, {
         type: 'closeTab',
-        closeTab: globalTabsStore.closeTab,
+        closeTab: (tabId) => void closeWorkspaceTabCommand({ workspaceId: globalTabsWorkspace.id, tabId, activateFallback: false }),
         onActiveTabClosed: () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, activeGlobalTab.id)),
       })
       return
     }
     const activeTab = ctx.uiState.workspaceTabs.find((tab) => tab.id === ctx.uiState.activeWorkspaceTabId)
     if (activeTab) closeWorkspaceTab(activeTab, dispatchWorkspaceState)
-  }, [activeGlobalTab, ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState, globalTabs, globalTabsStore.closeTab])
+  }, [activeGlobalTab, ctx.uiState.activeWorkspaceTabId, ctx.uiState.workspaceTabs, dispatchWorkspaceState, globalTabs, globalTabsWorkspace])
 
   useEffect(() => {
     let cancelled = false
@@ -512,14 +448,9 @@ function WorkspaceShell({
     const tab = globalTabFromPaneContent(content, options)
     if (!tab) return
     const workspace = await ensureGlobalTabsWorkspace()
-    if (globalTabsWorkspace?.id === workspace.id) {
-      const opened = globalTabsStore.openTab(tab, true)
-      setActiveGlobalTabId(opened.id)
-      return
-    }
-    await appTrpcMutation('workspace.upsertTab', { workspaceId: workspace.id, tab, position: globalTabs.length })
+    await openWorkspaceTab({ workspaceId: workspace.id, tab, activate: false })
     setActiveGlobalTabId(tab.id)
-  }, [ensureGlobalTabsWorkspace, globalTabs.length, globalTabsStore, globalTabsWorkspace?.id])
+  }, [ensureGlobalTabsWorkspace])
 
   const openCommandPalette = useCallback(async (initialIntent: UniversalMenuInitialIntent = 'default') => {
     const target = ctx.localEnvTarget
@@ -611,7 +542,7 @@ function WorkspaceShell({
     <WorkspaceEnvTargetProvider>
       <WorkspaceBootstrapRunner dispatchWorkspaceState={dispatchWorkspaceState} appQueryClient={queryClient} />
     </WorkspaceEnvTargetProvider>
-    <div className="flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
+    <div className="relative flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
       {!sidebarHidden && (
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
@@ -622,10 +553,10 @@ function WorkspaceShell({
           onLeaveGlobalTabs={() => setActiveGlobalTabId(null)}
           onCloseGlobalTab={(tabId) => {
             const tab = globalTabs.find((candidate) => candidate.id === tabId)
-            if (!tab) return
+            if (!tab || !globalTabsWorkspace) return
             closeWorkspaceTab(tab, {
               type: 'closeTab',
-              closeTab: globalTabsStore.closeTab,
+              closeTab: (closingTabId) => void closeWorkspaceTabCommand({ workspaceId: globalTabsWorkspace.id, tabId: closingTabId, activateFallback: false }),
               onActiveTabClosed: tabId === activeGlobalTabId
                 ? () => setActiveGlobalTabId(nextGlobalTabIdAfterClose(globalTabs, tabId))
                 : undefined,
@@ -638,11 +569,11 @@ function WorkspaceShell({
           workspaceId={globalTabsWorkspace.id}
           tab={activeGlobalTab}
           tabs={globalTabs}
-          tabsStore={globalTabsStore}
           onActiveTabFallback={(tabId) => setActiveGlobalTabId(tabId)}
         />
       ) : (
         <ShellChrome
+          key={ctx.workspace.id}
           className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975"
           style={{ width: sidebarHidden ? '100vw' : undefined }}
           showHeader={false}
@@ -750,8 +681,6 @@ function WorkspaceBootstrapRunner({ dispatchWorkspaceState, appQueryClient }: { 
         console.info('[workspace-bootstrap] session start success', { workspaceId: job.workspaceId, sessionId: session.id })
         await Promise.all([
           servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId: job.workspaceId }) }),
-          servicesRef.current.appQueryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
-          servicesRef.current.appQueryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
           servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listRecentFolders') }),
           servicesRef.current.envQueryClient.invalidateQueries({ queryKey: trpcQueryKey('repo.listWorktrees') }),
         ])
@@ -813,38 +742,13 @@ export function WorkspaceSidebar({
 }) {
   const ctx = useWorkspaceContext()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const trpcUtils = trpc.useUtils()
-  const tree = trpc.workspace.listTree.useQuery(undefined, { refetchInterval: 15_000 })
-  const list = trpc.workspace.list.useQuery(undefined, { refetchInterval: 15_000 })
+  const nodes = useWorkspaceSidebarTree()
+  const workspaces = useVisibleWorkspaces()
   const resourcesStore = useWorkspaceResourcesStore()
-  const createFolder = trpc.workspace.createFolder.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
-  })
-  const rename = trpc.workspace.rename.useMutation({
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') })
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
-    },
-  })
-  const renameFolder = trpc.workspace.renameFolder.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
-  })
-  const archive = trpc.workspace.archive.useMutation({
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') })
-      queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
-    },
-  })
   const deleteResource = trpc.workspace.deleteResource.useMutation()
-  const setFolderCollapsed = trpc.workspace.setFolderCollapsed.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
-  })
-  const moveSidebarNode = trpc.workspace.moveSidebarNode.useMutation({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
-    onError: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
-  })
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
+  const [creatingFolder, setCreatingFolder] = useState(false)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [dragPlacement, setDragPlacement] = useState<DropPlacement>('after')
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
@@ -878,9 +782,9 @@ export function WorkspaceSidebar({
     const nextName = nextRenameValue(edit)
     if (nextName) {
       if (edit.editingKind === 'folder') {
-        await renameFolder.mutateAsync({ id: edit.editingId, name: nextName })
+        await renameWorkspaceFolder({ id: edit.editingId, name: nextName })
       } else {
-        await rename.mutateAsync({ id: edit.editingId, name: nextName })
+        await renameWorkspace({ id: edit.editingId, name: nextName })
       }
     }
     dispatchEdit({ type: 'saved' })
@@ -903,14 +807,12 @@ export function WorkspaceSidebar({
         await navigate({ to: '/', replace: true })
       }
     }
-    await archive.mutateAsync({ id: workspaceId })
+    await archiveWorkspace(workspaceId)
     for (const resource of resourcesStore.records.filter((record) => record.workspaceId === workspaceId)) {
       await deleteResource.mutateAsync({ id: resource.id }).catch(() => undefined)
     }
   }
 
-  const workspaces = (list.data ?? []) as WorkspaceSummary[]
-  const nodes = (tree.data ?? []) as WorkspaceSidebarNode[]
   const displayNodes = localTree ?? nodes
   const workspaceNames = useMemo(() => new Map(workspaces.map((workspace) => [workspace.id, workspace.name])), [workspaces])
   const dndNodes = displayNodes as unknown as SidebarTreeNode[]
@@ -976,41 +878,43 @@ export function WorkspaceSidebar({
   }
 
   async function createFolderFromSelection() {
-    if (createFolder.isPending || edit.editingId) return
+    if (creatingFolder || edit.editingId) return
+    setCreatingFolder(true)
     const effectiveSelection = new Set(selectedDndIdsRef.current)
-    effectiveSelection.add(sidebarDndId('workspace', ctx.workspace.id))
-    const selectedRows = flatRows.filter((row) => effectiveSelection.has(sidebarDndId(row.kind, row.id)))
-    const movableRows = selectedRows.filter((row) => !selectedRows.some((candidate) => (
-      candidate.kind === 'folder' && candidate.id !== row.id && row.ancestorFolderIds.includes(candidate.id)
-    )))
-    const commonParent = movableRows.length > 0 && movableRows.every((row) => row.parentFolderId === movableRows[0]?.parentFolderId)
-      ? movableRows[0]?.parentFolderId ?? null
-      : null
-    const firstSelectedDndId = movableRows[0] ? sidebarDndId(movableRows[0].kind, movableRows[0].id) : null
-    const folder = await createFolder.mutateAsync({ name: 'New folder', parentId: commonParent })
-    const folderDndId = sidebarDndId('folder', folder.id)
-    let serverTree: WorkspaceSidebarNode[] | null = null
-    if (firstSelectedDndId) {
-      serverTree = await moveSidebarNode.mutateAsync({
-        nodeType: 'folder',
-        nodeId: folder.id,
-        parentFolderId: commonParent,
-        beforeNodeId: firstSelectedDndId,
-      }) as WorkspaceSidebarNode[]
+    try {
+      effectiveSelection.add(sidebarDndId('workspace', ctx.workspace.id))
+      const selectedRows = flatRows.filter((row) => effectiveSelection.has(sidebarDndId(row.kind, row.id)))
+      const movableRows = selectedRows.filter((row) => !selectedRows.some((candidate) => (
+        candidate.kind === 'folder' && candidate.id !== row.id && row.ancestorFolderIds.includes(candidate.id)
+      )))
+      const commonParent = movableRows.length > 0 && movableRows.every((row) => row.parentFolderId === movableRows[0]?.parentFolderId)
+        ? movableRows[0]?.parentFolderId ?? null
+        : null
+      const firstSelectedDndId = movableRows[0] ? sidebarDndId(movableRows[0].kind, movableRows[0].id) : null
+      const folder = await createWorkspaceFolder({ name: 'New folder', parentId: commonParent })
+      const folderDndId = sidebarDndId('folder', folder.id)
+      if (firstSelectedDndId) {
+        await moveWorkspaceSidebarNode({
+          nodeType: 'folder',
+          nodeId: folder.id,
+          parentFolderId: commonParent,
+          beforeNodeId: firstSelectedDndId,
+        })
+      }
+      for (const row of movableRows) {
+        await moveWorkspaceSidebarNode({
+          nodeType: row.kind,
+          nodeId: row.id,
+          parentFolderId: folder.id,
+          beforeNodeId: null,
+        })
+      }
+      setSidebarSelection(new Set([folderDndId]))
+      lastSelectedDndIdRef.current = folderDndId
+      dispatchEdit({ type: 'begin', workspaceId: folder.id, name: folder.name, kind: 'folder' })
+    } finally {
+      setCreatingFolder(false)
     }
-    for (const row of movableRows) {
-      serverTree = await moveSidebarNode.mutateAsync({
-        nodeType: row.kind,
-        nodeId: row.id,
-        parentFolderId: folder.id,
-        beforeNodeId: null,
-      }) as WorkspaceSidebarNode[]
-    }
-    if (serverTree) queryClient.setQueryData(trpcQueryKey('workspace.listTree'), serverTree)
-    else await queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
-    setSidebarSelection(new Set([folderDndId]))
-    lastSelectedDndIdRef.current = folderDndId
-    dispatchEdit({ type: 'begin', workspaceId: folder.id, name: folder.name, kind: 'folder' })
   }
 
   useEffect(() => {
@@ -1065,7 +969,7 @@ export function WorkspaceSidebar({
     dragPointerOffsetRef.current = dragPointerOffsetFromEvent(id, event.activatorEvent)
     setLocalTree(startingTree)
     if (parsed?.kind === 'folder') {
-      setFolderCollapsed.mutate({ id: parsed.id, collapsed: true })
+      void setWorkspaceFolderCollapsed({ id: parsed.id, collapsed: true })
     }
   }
 
@@ -1098,7 +1002,6 @@ export function WorkspaceSidebar({
     }
     const optimisticTree = moveSidebarNodeInTree(dndNodes, projection) as unknown as WorkspaceSidebarNode[]
     setLocalTree(optimisticTree)
-    queryClient.setQueryData(trpcQueryKey('workspace.listTree'), optimisticTree)
     setActiveDragId(null)
     setDropProjection(null)
     lastPointerRef.current = null
@@ -1106,15 +1009,14 @@ export function WorkspaceSidebar({
     lastProjectionRef.current = null
     lastProjectionKeyRef.current = null
     try {
-      const serverTree = await moveSidebarNode.mutateAsync({
+      await moveWorkspaceSidebarNode({
         nodeType: projection.activeKind,
         nodeId: projection.activeId,
         parentFolderId: projection.parentFolderId,
         beforeNodeId: projection.beforeNodeId,
       })
-      queryClient.setQueryData(trpcQueryKey('workspace.listTree'), serverTree)
     } catch (err) {
-      await queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') })
+      console.warn('workspace sidebar move failed', err)
     } finally {
       setLocalTree(null)
     }
@@ -1249,7 +1151,7 @@ export function WorkspaceSidebar({
             )}
             <div className="group flex items-center gap-px py-px text-xs text-neutral-400 transition-all duration-150">
               <button
-                onClick={() => setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })}
+                onClick={() => void setWorkspaceFolderCollapsed({ id: folder.id, collapsed: !folder.collapsed })}
                 className="-ml-0.5 flex h-4 w-3 shrink-0 items-center justify-center rounded text-neutral-500 hover:text-neutral-300"
                 aria-label={`${folder.collapsed ? 'Expand' : 'Collapse'} folder ${folder.name}`}
               >
@@ -1258,11 +1160,11 @@ export function WorkspaceSidebar({
               <div className={
                 'flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 group-hover:bg-highlight group-hover:text-neutral-200 ' +
                 (selected ? 'bg-highlight text-neutral-100 ring-1 ring-neutral-700 ' : '') +
-                (dropProjection?.overId === folder.id && dropProjection.placement === 'inside' ? 'bg-highlight text-neutral-100 ring-1 ring-neutral-600 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
+                (dropProjection?.overId === folder.id && dropProjection?.placement === 'inside' ? 'bg-highlight text-neutral-100 ring-1 ring-neutral-600 shadow-[0_0_0_3px_rgba(56,189,248,0.10)]' : '')
               }
               onClick={(e) => {
                 if (updateSelection(e, dndId)) return
-                if (!editing) setFolderCollapsed.mutate({ id: folder.id, collapsed: !folder.collapsed })
+                if (!editing) void setWorkspaceFolderCollapsed({ id: folder.id, collapsed: !folder.collapsed })
               }}>
                 {editing ? (
                   <input
@@ -1536,19 +1438,15 @@ export function workspaceSidebarRowActive(workspaceId: string, currentWorkspaceI
   return workspaceId === currentWorkspaceId && !activeGlobalTabId
 }
 
-type WorkspaceTabsStoreApi = ReturnType<typeof useWorkspaceTabsStore>
-
 function GlobalBrowserTabPane({
   workspaceId,
   tab,
   tabs,
-  tabsStore,
   onActiveTabFallback,
 }: {
   workspaceId: string
   tab: WorkspaceTab
   tabs: WorkspaceTab[]
-  tabsStore: WorkspaceTabsStoreApi
   onActiveTabFallback: (tabId: string | null) => void
 }) {
   const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
@@ -1581,7 +1479,7 @@ function GlobalBrowserTabPane({
 
   const dispatchGlobalWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
     if (action.type === 'setBrowserTabId') {
-      tabsStore.setBrowserTabId(action.tabId, action.browserTabId)
+      void setWorkspaceTabBrowserId({ workspaceId, tabId: action.tabId, browserTabId: action.browserTabId })
       const current = tabs.find((candidate) => candidate.id === action.tabId)
       if (current?.type === 'browser') {
         upsertResource.mutate({
@@ -1595,15 +1493,15 @@ function GlobalBrowserTabPane({
         })
       }
     } else if (action.type === 'setTabUrl') {
-      tabsStore.setTabUrl(action.tabId, action.url)
+      void setWorkspaceTabUrl({ workspaceId, tabId: action.tabId, url: action.url })
     } else if (action.type === 'setTabTitle') {
-      tabsStore.setTabTitle(action.tabId, action.title)
+      void setWorkspaceTabTitle({ workspaceId, tabId: action.tabId, title: action.title, source: 'explicit' })
     } else if (action.type === 'closeTab') {
-      tabsStore.closeTab(action.tabId)
+      void closeWorkspaceTabCommand({ workspaceId, tabId: action.tabId, activateFallback: false })
     } else if (action.type === 'activateTab') {
       onActiveTabFallback(action.tabId)
     }
-  }, [onActiveTabFallback, tabs, tabsStore, upsertResource, workspaceId])
+  }, [onActiveTabFallback, tabs, upsertResource, workspaceId])
 
   return (
     <section className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975 text-neutral-500" aria-label="Global browser tab">
@@ -1614,7 +1512,7 @@ function GlobalBrowserTabPane({
         onClose={() => {
           closeWorkspaceTab(tab, {
             type: 'closeTab',
-            closeTab: tabsStore.closeTab,
+            closeTab: (tabId) => void closeWorkspaceTabCommand({ workspaceId, tabId, activateFallback: false }),
             onActiveTabClosed: () => onActiveTabFallback(nextGlobalTabIdAfterClose(tabs, tab.id)),
           })
         }}
@@ -1898,7 +1796,7 @@ function findSidebarNodeLabel(nodes: WorkspaceSidebarNode[], kind: 'folder' | 'w
   return null
 }
 
-function findSidebarFolder(nodes: WorkspaceSidebarNode[], id: string): WorkspaceFolderSummary | null {
+function findSidebarFolder(nodes: WorkspaceSidebarNode[], id: string): WorkspaceFolderRecord | null {
   for (const node of nodes) {
     if (node.type !== 'folder') continue
     if (node.folder.id === id) return node.folder
@@ -2083,12 +1981,7 @@ function WorkspaceAgentPane({
 }) {
   const ctx = useWorkspaceContext()
   const bootstrapStatus = useWorkspaceBootstrapStatus(ctx.workspace.id)
-  const queryClient = useQueryClient()
   const openPane = useWorkspaceOpenPane(dispatchWorkspaceState)
-  const refreshWorkspacePanes = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['sync', 'workspace_tabs'] })
-    void queryClient.invalidateQueries({ queryKey: ['workspace-view-state', ctx.workspace.id] })
-  }, [ctx.workspace.id, queryClient])
   if (collapsed) {
     return <AgentCollapsedRail onExpand={onToggleCollapsed} />
   }
@@ -2139,7 +2032,7 @@ function WorkspaceAgentPane({
           onActiveSessionChange={(sessionId) => dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })}
           onSessionListChange={onSessionListChange}
           onOpenPane={openPane}
-          onOpenPaneRefreshHint={refreshWorkspacePanes}
+          onOpenPaneRefreshHint={() => undefined}
           headerTrailing={agentHeaderTrailing}
           tabsFocused={focused}
           closeActiveTabSignal={closeActiveTabSignal}

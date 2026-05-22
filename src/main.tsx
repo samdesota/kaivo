@@ -7,6 +7,7 @@ import { router } from './router'
 import { initFontSize, initThemeColor } from './lib/ui-prefs'
 import { installClientLogCapture } from './lib/client-logger'
 import { installDesktopDiagnostics } from './lib/desktop-diagnostics'
+import { AppDataProvider } from './data/app-data-provider'
 import './index.css'
 
 initFontSize()
@@ -36,7 +37,9 @@ createRoot(root).render(
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <Suspense fallback={<AppSuspenseFallback />}>
-          <RouterProvider router={router} />
+          <AppDataProvider>
+            <RouterProvider router={router} />
+          </AppDataProvider>
         </Suspense>
       </QueryClientProvider>
     </trpc.Provider>

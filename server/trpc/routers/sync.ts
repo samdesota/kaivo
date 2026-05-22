@@ -16,14 +16,16 @@ export const syncRouter = router({
     .subscription(({ input }) => {
       return observable((emit) => {
         const realtime = getAppRealtime()
-        const missed = realtime.changes(input.afterSeq, input.tables)
-        if (missed.length > 0) emit.next(missed)
-        return realtime.subscribe((events) => {
+        const unsubscribe = realtime.subscribe((events) => {
           const filtered = input.tables?.length
             ? events.filter((event) => input.tables!.includes(event.table))
             : events
           if (filtered.length > 0) emit.next(filtered)
         })
+        const missed = realtime.changes(input.afterSeq, input.tables)
+        if (missed.length > 0) emit.next(missed)
+        emit.next([])
+        return unsubscribe
       })
     }),
 })
