@@ -5,7 +5,7 @@ import { parseDesktopLogFile } from './harness/logs'
 
 test('desktop harness launches the built skeleton app and captures logs', async ({ desktopLogPath, desktopStateDir }) => {
   const app = await electron.launch({
-    args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/zoottle-desktop/dist/main.js')],
+    args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/kaivo-desktop/dist/main.js')],
     env: {
       ...process.env,
       CC_INSTANCE_ID: 'desktop-skeleton-test',

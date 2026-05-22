@@ -9,7 +9,7 @@ describe('desktop documentation scripts', () => {
       scripts: Record<string, string>
     }
     const desktopPkg = JSON.parse(
-      fs.readFileSync(path.join(root, 'packages/zoottle-desktop/package.json'), 'utf8'),
+      fs.readFileSync(path.join(root, 'packages/kaivo-desktop/package.json'), 'utf8'),
     ) as { scripts: Record<string, string> }
     const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8')
 

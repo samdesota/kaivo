@@ -46,7 +46,7 @@ test('global browser tabs activate from sidebar and can be created with shortcut
     await waitForHttp(chromeUrl)
     const authenticatedChromeUrl = `${chromeUrl}/internal/desktop-auth?token=${encodeURIComponent(desktopAuthToken)}&next=${encodeURIComponent('/')}`
     const app = await electron.launch({
-      args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/zoottle-desktop/dist/main.js')],
+      args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/kaivo-desktop/dist/main.js')],
       env: {
         ...process.env,
         NODE_ENV: 'development',

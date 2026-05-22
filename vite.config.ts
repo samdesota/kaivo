@@ -17,8 +17,8 @@ export function resolveViteServerConfig(env: NodeJS.ProcessEnv = process.env) {
     watch: {
       ignored: [
         '**/.kaivo/**',
-        '**/packages/zoottle-desktop/bundle/**',
-        '**/packages/zoottle-desktop/release/**',
+        '**/packages/kaivo-desktop/bundle/**',
+        '**/packages/kaivo-desktop/release/**',
       ],
     },
     proxy: {

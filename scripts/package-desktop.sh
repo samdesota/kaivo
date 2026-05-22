@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# package-desktop.sh — build a self-contained Zoottle.app
+# package-desktop.sh — build a self-contained Kaivo.app
 #
 # Bundles the webapp server, env-server, Kaivo OpenCode plugin, and client SPA
 # into the Electron app so it runs without the source repo.
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-desktop_dir="$repo_root/packages/zoottle-desktop"
+desktop_dir="$repo_root/packages/kaivo-desktop"
 bundle_dir="$desktop_dir/bundle"
-package_cache_dir="${CC_PACKAGE_CACHE_DIR:-$repo_root/node_modules/.cache/zoottle-desktop-package}"
+package_cache_dir="${CC_PACKAGE_CACHE_DIR:-$repo_root/node_modules/.cache/kaivo-desktop-package}"
 install_app=false
 job_log_dir=""
 
@@ -99,7 +99,7 @@ done
 echo "==> cleaning bundle dir"
 rm -rf "$bundle_dir"
 mkdir -p "$bundle_dir/app-server" "$bundle_dir/env-server" "$bundle_dir/kaivo-opencode-plugin"
-job_log_dir=$(mktemp -d "${TMPDIR:-/tmp}/zoottle-desktop-package.XXXXXX")
+job_log_dir=$(mktemp -d "${TMPDIR:-/tmp}/kaivo-desktop-package.XXXXXX")
 
 run_job client_pid "client-spa" bash -lc "cd '$repo_root' && npx vite build"
 run_job app_server_pid "app-server-build" bash -lc "cd '$repo_root' && npx tsup"
@@ -179,7 +179,7 @@ cp "$repo_root/packages/opencode-plugin/dist/index.js" "$bundle_dir/kaivo-openco
 wait_job "desktop-build" "$desktop_pid"
 
 echo "==> packaging electron app"
-(cd "$desktop_dir" && npx electron-packager . "Zoottle" \
+(cd "$desktop_dir" && npx electron-packager . "Kaivo" \
   --platform=darwin --arch=arm64 --out=release --overwrite \
   --no-asar \
   --ignore='^/src($|/)' \
@@ -189,23 +189,27 @@ echo "==> packaging electron app"
 
 if [ "$install_app" = true ]; then
   echo "==> installing to /Applications"
-  stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/zoottle-install.XXXXXX")
-  next_app="$stage_dir/Zoottle.app"
-  backup_dir="${HOME}/Library/Application Support/zoottle-desktop/app-backups"
-  backup_app="$backup_dir/Zoottle.app.$(date +%Y%m%d%H%M%S)"
+  stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/kaivo-install.XXXXXX")
+  next_app="$stage_dir/Kaivo.app"
+  backup_dir="${HOME}/Library/Application Support/kaivo-desktop/app-backups"
+  backup_app="$backup_dir/Kaivo.app.$(date +%Y%m%d%H%M%S)"
+  legacy_backup_app="$backup_dir/Zoottle.app.$(date +%Y%m%d%H%M%S)"
   mkdir -p "$backup_dir"
-  cp -R "$desktop_dir/release/Zoottle-darwin-arm64/Zoottle.app" "$next_app"
+  cp -R "$desktop_dir/release/Kaivo-darwin-arm64/Kaivo.app" "$next_app"
   # fix spawn-helper permissions that cp may strip
   find "$next_app" -name spawn-helper -type f -exec chmod 755 {} + 2>/dev/null || true
   codesign --force --deep --sign - "$next_app"
-  if [ -e '/Applications/Zoottle.app' ]; then
-    mv '/Applications/Zoottle.app' "$backup_app"
+  if [ -e '/Applications/Kaivo.app' ]; then
+    mv '/Applications/Kaivo.app' "$backup_app"
   fi
-  mv "$next_app" '/Applications/Zoottle.app'
+  if [ -e '/Applications/Zoottle.app' ]; then
+    mv '/Applications/Zoottle.app' "$legacy_backup_app"
+  fi
+  mv "$next_app" '/Applications/Kaivo.app'
   rm -rf "$stage_dir"
   echo "==> previous app moved to $backup_app"
 else
-  echo "==> packaged app at $desktop_dir/release/Zoottle-darwin-arm64/Zoottle.app"
+  echo "==> packaged app at $desktop_dir/release/Kaivo-darwin-arm64/Kaivo.app"
   echo "==> not installing to /Applications; rerun with --install from outside the running app to install"
 fi
 

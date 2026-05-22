@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BrowserAgentConnectionRegistry } from '../../packages/zoottle-desktop/src/browser-agent-registry'
+import { BrowserAgentConnectionRegistry } from '../../packages/kaivo-desktop/src/browser-agent-registry'
 
 describe('BrowserAgentConnectionRegistry', () => {
   it('prevents cross-session cdpId reuse', () => {

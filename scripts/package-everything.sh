@@ -28,7 +28,7 @@ mkdir -p "$install_dir/kaivo-opencode-plugin"
 cp "$repo_root/packages/opencode-plugin/dist/index.js" "$install_dir/kaivo-opencode-plugin/index.js"
 
 echo "==> packaging desktop app"
-(cd "$repo_root/packages/zoottle-desktop" && npm run package:mac)
+(cd "$repo_root/packages/kaivo-desktop" && npm run package:mac)
 
 echo "==> restarting cc-env"
 launchctl kickstart -k "gui/$(id -u)/com.cloudcode.env"

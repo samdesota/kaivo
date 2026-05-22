@@ -3,9 +3,9 @@ import net from 'node:net'
 import path from 'node:path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import * as runtime from '../packages/zoottle-desktop/src/instance-runtime.ts'
-import type { InstanceRuntimeConfig, RuntimePortName } from '../packages/zoottle-desktop/src/instance-runtime'
-import * as desktopPairing from '../packages/zoottle-desktop/src/desktop-pairing.ts'
+import * as runtime from '../packages/kaivo-desktop/src/instance-runtime.ts'
+import type { InstanceRuntimeConfig, RuntimePortName } from '../packages/kaivo-desktop/src/instance-runtime'
+import * as desktopPairing from '../packages/kaivo-desktop/src/desktop-pairing.ts'
 import { runDevSeed } from './seed-dev'
 
 const runtimeModule = runtime as typeof runtime & { default?: typeof runtime }

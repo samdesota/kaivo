@@ -14,7 +14,7 @@ type DesktopFixtures = {
 
 export const test = base.extend<DesktopFixtures>({
   desktopStateDir: async ({}, use) => {
-    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zoottle-desktop-state-'))
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaivo-desktop-state-'))
     try {
       await use(stateDir)
     } finally {

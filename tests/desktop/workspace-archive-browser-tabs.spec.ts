@@ -21,7 +21,7 @@ test('workspace archive closes native browser tabs without removing persisted ta
   try {
     await waitForHttp(chromeUrl)
     const app = await electron.launch({
-      args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/zoottle-desktop/dist/main.js')],
+      args: [path.resolve(process.env.CC_DESKTOP_MAIN ?? 'packages/kaivo-desktop/dist/main.js')],
       env: {
         ...process.env,
         NODE_ENV: 'development',

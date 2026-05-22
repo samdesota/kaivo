@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import * as runtime from '../packages/zoottle-desktop/src/instance-runtime.ts'
+import * as runtime from '../packages/kaivo-desktop/src/instance-runtime.ts'
 import { runLocalDevLauncher } from './local-launch'
 
 const runtimeModule = runtime as typeof runtime & { default?: typeof runtime }
@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   console.log(`  manifest: ${path.join(result.config.rootDir, 'launch.json')}`)
   console.log(`  desktop auth: enabled`)
 
-  const desktopCwd = path.join(cwd, 'packages/zoottle-desktop')
+  const desktopCwd = path.join(cwd, 'packages/kaivo-desktop')
   run('npm', ['run', 'build'], desktopCwd)
 
   const electron = spawn('node_modules/.bin/electron', ['dist/main.js'], {

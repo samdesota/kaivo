@@ -100,7 +100,7 @@ export type ResolveInstanceRuntimeOptions = {
 }
 
 const defaultHost = '127.0.0.1'
-const defaultAppIdentity = 'zoottle-desktop'
+const defaultAppIdentity = 'kaivo-desktop'
 
 export function resolveInstanceRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,

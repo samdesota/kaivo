@@ -11,7 +11,7 @@ const DEFAULT_OPENAI_BASE_URL = 'https://llm.438d.xyz'
 const DEFAULT_OPENAI_API_KEY_OP_REF = 'op://Personal/llm.438d.xyz/password'
 const DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' }
 const BCRYPT_COST = 12
-const DESKTOP_APP_ID = 'zoottle-desktop'
+const DESKTOP_APP_ID = 'kaivo-desktop'
 
 export type DevSeedOptions = {
   env?: NodeJS.ProcessEnv
