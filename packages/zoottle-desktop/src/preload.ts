@@ -48,6 +48,5 @@ contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   focusOverlay: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/focus-overlay', input),
   registerOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/register-overlay-owner', input),
   unregisterOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/unregister-overlay-owner', input),
-  diagnosticsPing: (input: { seq: number; rendererNow: number }) => ipcRenderer.invoke('kaivo/diagnostics/ping', input),
   restartTerminalService: () => ipcRenderer.invoke('kaivo/services/restart-terminal'),
 })

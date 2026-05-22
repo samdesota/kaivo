@@ -6,14 +6,12 @@ import { trpc, makeTrpcClient } from './trpc'
 import { router } from './router'
 import { initFontSize, initThemeColor } from './lib/ui-prefs'
 import { installClientLogCapture } from './lib/client-logger'
-import { installDesktopDiagnostics } from './lib/desktop-diagnostics'
 import { AppDataProvider } from './data/app-data-provider'
 import './index.css'
 
 initFontSize()
 initThemeColor()
 installClientLogCapture()
-installDesktopDiagnostics()
 
 const queryClient = new QueryClient({
   defaultOptions: {

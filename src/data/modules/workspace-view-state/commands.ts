@@ -41,5 +41,5 @@ export function applyWorkspaceViewStateRowsForTests(rows: WorkspaceViewStateReco
 }
 
 function isNoopPatch(current: WorkspaceViewStateRecord, patch: WorkspaceViewStatePatch): boolean {
-  return Object.entries(patch).every(([key, value]) => current[key as keyof WorkspaceViewStateRecord] === value)
+  return Object.entries(patch).every(([key, value]) => Object.is(current[key as keyof WorkspaceViewStateRecord], value))
 }

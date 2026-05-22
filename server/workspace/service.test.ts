@@ -506,6 +506,18 @@ describe('workspace service', () => {
     expect(notificationRows).toHaveLength(1)
   })
 
+  it('does not rewrite view state when the patch is unchanged', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Project' })
+    const saved = await workspaceService.saveViewState(workspace.id, { activeAgentSessionId: 'session-1' })
+
+    const result = await workspaceService.saveViewState(workspace.id, { activeAgentSessionId: 'session-1' })
+
+    expect(result.updatedAt).toBe(saved.updatedAt)
+    expect(viewStateRows).toHaveLength(1)
+    expect(viewStateRows[0]?.updatedAt).toBe(saved.updatedAt)
+  })
+
   it('returns folders and workspaces ordered by parent and position', async () => {
     const { workspaceService } = await import('./service.js')
 
