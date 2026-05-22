@@ -9,7 +9,7 @@ import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../env/ag
 import { FolderPickerModal } from '../env/agent/folder-picker-modal'
 import { CommandPalette } from '../env/shell/command-palette'
 import type { PaneContent } from '../env/shell/tab-state'
-import { UniversalMenu, type UniversalMenuContextItem, type UniversalMenuInitialIntent, type UniversalMenuOpenTarget, type UniversalMenuWorkspaceBootstrapRequest } from '../env/universal-menu/universal-menu'
+import { UniversalMenu, type UniversalMenuChatBootstrap, type UniversalMenuContextItem, type UniversalMenuInitialIntent, type UniversalMenuOpenTarget, type UniversalMenuWorkspaceBootstrapRequest } from '../env/universal-menu/universal-menu'
 import { Modal } from '../../components/ui'
 import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
@@ -135,6 +135,7 @@ export type OverlayResponse =
   | { requestId: string; type: 'selected-folder'; path: string }
   | { requestId: string; type: 'open-pane'; content: PaneContent; target?: UniversalMenuOpenTarget }
   | { requestId: string; type: 'create-shell'; cwd?: string }
+  | { requestId: string; type: 'create-agent-chat'; bootstrap: UniversalMenuChatBootstrap }
   | { requestId: string; type: 'close-tab' }
   | { requestId: string; type: 'new-session' }
   | { requestId: string; type: 'new-workspace' }
@@ -327,6 +328,7 @@ function EnvOverlayRequestRenderer({
               }}
               onOpenContent={(content, target) => respond({ requestId: request.requestId, type: 'open-pane', content, target })}
               onCreateShell={(cwd) => respond({ requestId: request.requestId, type: 'create-shell', cwd })}
+              onCreateChat={(bootstrap) => respond({ requestId: request.requestId, type: 'create-agent-chat', bootstrap })}
               onCreatedChat={(sessionId: string, workspaceId?: string) => {
                 console.info('[overlay-layer] universal-menu created chat', { requestId: request.requestId, sessionId, workspaceId })
                 respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })

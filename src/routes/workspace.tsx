@@ -46,7 +46,7 @@ import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { NewSessionPopover } from './env/agent/session-tabs'
-import type { UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
+import type { UniversalMenuChatBootstrap, UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -120,6 +120,19 @@ type EnvShellCreateClient = {
   shell: {
     create: {
       mutate(input: { workspaceId?: string; cwd?: string }): Promise<{ id: string }>
+    }
+  }
+}
+
+type EnvChatBootstrapClient = {
+  agent: {
+    sessionStart: {
+      mutate(input: { workspaceId?: string; directory?: string }): Promise<{ id: string }>
+    }
+  }
+  repo: {
+    cloneConfig: {
+      mutate(input: { configId: string; worktreeName: string }): Promise<{ repoId: string; workingDir: string }>
     }
   }
 }
@@ -418,6 +431,7 @@ function WorkspaceShell({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const createWorkspace = trpc.workspace.create.useMutation()
+  const upsertResource = trpc.workspace.upsertResource.useMutation()
   const getOrCreateGlobalTabsWorkspace = trpc.workspace.getOrCreateGlobalTabsWorkspace.useMutation()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
@@ -507,6 +521,59 @@ function WorkspaceShell({
       search: { chat: sessionId, tab: undefined },
     })
   }, [ctx.workspace.id, dispatchWorkspaceState, navigate, queryClient])
+
+  const createWorkspaceChat = useCallback((bootstrap: UniversalMenuChatBootstrap) => {
+    const target = ctx.localEnvTarget
+    if (!target?.available || !target.token) return
+    setWorkspaceBootstrapStatus(bootstrap.workspaceId, {
+      message: bootstrap.type === 'repoConfig' ? 'Cloning worktree…' : 'Creating chat…',
+    })
+    if (bootstrap.workspaceId === ctx.workspace.id) {
+      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: null })
+      setFocusedTabGroup('agent')
+      if (agentCollapsed) setAgentCollapsed(false)
+    }
+    void (async () => {
+      try {
+        const client = ctx.getEnvClient(target.env.id) as unknown as EnvChatBootstrapClient
+        let workingDir: string
+        let repoId: string | undefined
+        let resourceName: string | undefined
+        if (bootstrap.type === 'repoConfig') {
+          const cloned = await client.repo.cloneConfig.mutate({ configId: bootstrap.configId, worktreeName: bootstrap.worktreeName })
+          workingDir = cloned.workingDir
+          repoId = cloned.repoId
+          resourceName = bootstrap.worktreeName
+          setWorkspaceBootstrapStatus(bootstrap.workspaceId, { message: 'Linking worktree…' })
+        } else if (bootstrap.type === 'worktree') {
+          workingDir = bootstrap.path
+          repoId = bootstrap.repoId
+          resourceName = bootstrap.name
+          setWorkspaceBootstrapStatus(bootstrap.workspaceId, { message: 'Linking worktree…' })
+        } else {
+          workingDir = bootstrap.path
+        }
+        if (bootstrap.type !== 'folder') {
+          await upsertResource.mutateAsync({
+            workspaceId: bootstrap.workspaceId,
+            resource: {
+              type: 'worktree',
+              resourceKey: repoId ? `repo:${repoId}` : `path:${workingDir}`,
+              shared: true,
+              data: { repoId, workingDir, name: resourceName },
+            },
+          })
+        }
+        setWorkspaceBootstrapStatus(bootstrap.workspaceId, { message: 'Creating chat…' })
+        const session = await client.agent.sessionStart.mutate({ workspaceId: bootstrap.workspaceId, directory: workingDir })
+        await getWorkspaceEnvResources(target)?.queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId: bootstrap.workspaceId }) })
+        await selectCreatedChat(session.id, bootstrap.workspaceId)
+        finishWorkspaceBootstrap(bootstrap.workspaceId)
+      } catch (error) {
+        failWorkspaceBootstrap(bootstrap.workspaceId, extractTrpcMessage(error))
+      }
+    })()
+  }, [agentCollapsed, ctx, dispatchWorkspaceState, selectCreatedChat, setAgentCollapsed, upsertResource])
 
   const ensureGlobalTabsWorkspace = useCallback(async (): Promise<GlobalTabsWorkspaceSummary> => {
     if (globalTabsWorkspace) return globalTabsWorkspace
@@ -606,6 +673,7 @@ function WorkspaceShell({
       else openPane(result.content)
     }
     if (result.type === 'create-shell') openPendingShellPane(result.cwd)
+    if (result.type === 'create-agent-chat') createWorkspaceChat(result.bootstrap)
     if (result.type === 'created-agent-chat') void selectCreatedChat(result.sessionId, result.workspaceId)
     if (result.type === 'workspace-bootstrap') {
       void bootstrapWorkspace(result.request)
@@ -617,7 +685,7 @@ function WorkspaceShell({
     if (result.type === 'toggle-agent-pane') setAgentCollapsed(!agentCollapsed)
     if (result.type === 'toggle-sidebar') setSidebarHidden((v) => !v)
     if (result.type === 'open-settings') void navigate({ to: '/settings' })
-  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, openPendingShellPane, selectCreatedChat, setAgentCollapsed])
+  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, createWorkspaceChat, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, openPendingShellPane, selectCreatedChat, setAgentCollapsed])
 
   useEffect(() => {
     prewarmOverlayLayer()

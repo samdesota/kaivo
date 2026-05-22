@@ -11,7 +11,7 @@ import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } fr
 import { matchBookmarks, resolveBrowserAddress } from '../../../lib/browser-navigation'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
-import { defaultWorkspaceName, newAgentChatStartInput, resolveWorkspaceName, type NewAgentChatSelection, type NewAgentChatWorkspaceMode } from '../agent/new-agent-chat-state'
+import { defaultWorkspaceName, resolveWorkspaceName, type NewAgentChatSelection, type NewAgentChatWorkspaceMode } from '../agent/new-agent-chat-state'
 import { WorkspaceModeControl } from '../agent/new-agent-chat-modal'
 import { useBookmarksStore, type BookmarkRecord } from '../../workspace/bookmarks-store'
 
@@ -84,6 +84,11 @@ export type UniversalMenuWorkspaceBootstrapRequest = {
     | { type: 'worktree'; path: string; repoId: string; name?: string }
     | { type: 'repoConfig'; configId: string; worktreeName: string }
 }
+
+export type UniversalMenuChatBootstrap =
+  | { type: 'folder'; workspaceId: string; path: string }
+  | { type: 'worktree'; workspaceId: string; path: string; repoId: string; name?: string }
+  | { type: 'repoConfig'; workspaceId: string; configId: string; worktreeName: string }
 
 interface AgentSessionRow {
   id: string
@@ -240,6 +245,7 @@ export function UniversalMenu({
   onClose,
   onOpenContent,
   onCreateShell,
+  onCreateChat,
   onCreatedChat,
   onBootstrapWorkspace,
   onSwitchWorkspace,
@@ -259,6 +265,7 @@ export function UniversalMenu({
   onClose: () => void
   onOpenContent?: (content: PaneContent, target?: UniversalMenuOpenTarget) => void
   onCreateShell?: (cwd?: string) => void
+  onCreateChat?: (bootstrap: UniversalMenuChatBootstrap) => void
   onCreatedChat?: (sessionId: string, workspaceId?: string) => void
   onBootstrapWorkspace?: (request: UniversalMenuWorkspaceBootstrapRequest) => void
   onSwitchWorkspace?: (workspaceId: string) => void
@@ -480,8 +487,7 @@ export function UniversalMenu({
             openDetails({ type: 'folder', path })
             return
           }
-          const created = await startChat.mutateAsync({ workspaceId, directory: path }) as { id: string }
-          onCreatedChat?.(created.id, workspaceId)
+          onCreateChat?.({ type: 'folder', workspaceId, path })
         },
         openFile: (path) => onOpenContent?.({ type: 'file', path, absolute: true }),
         drillFolder: drillIntoFolder,
@@ -511,8 +517,7 @@ export function UniversalMenu({
             openDetails({ type: 'folder', path })
             return
           }
-          const created = await startChat.mutateAsync({ workspaceId, directory: path }) as { id: string }
-          onCreatedChat?.(created.id, workspaceId)
+          onCreateChat?.({ type: 'folder', workspaceId, path })
         },
       })
     }
@@ -530,8 +535,7 @@ export function UniversalMenu({
         openNewWorkspaceChat: openDetails,
         startChat: async (path) => {
           if (!workspaceId) return
-          const created = await startChat.mutateAsync({ workspaceId, directory: path }) as { id: string }
-          onCreatedChat?.(created.id, workspaceId)
+          onCreateChat?.({ type: 'folder', workspaceId, path })
         },
       })
     }
@@ -576,7 +580,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, globalTabIntent, homePath, newWorkspaceIntent, newWorkspaceResults, onBootstrapWorkspace, onCreatedChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, startChat, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, globalTabIntent, homePath, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -593,11 +597,10 @@ export function UniversalMenu({
         icon: paneTabIconForType('file'),
         badge: 'chat',
         haystack: `${label} ${session.workingDir}`,
-        disabled: !workspaceId || startChat.isPending,
-          run: async () => {
+        disabled: !workspaceId,
+          run: () => {
             if (!workspaceId || !session.workingDir) return
-            const created = await startChat.mutateAsync({ workspaceId, directory: session.workingDir }) as { id: string }
-            onCreatedChat?.(created.id, workspaceId)
+            onCreateChat?.({ type: 'folder', workspaceId, path: session.workingDir })
           },
           alternateRun: () => openDetails({ type: 'folder', path: session.workingDir! }),
       })
@@ -656,7 +659,7 @@ export function UniversalMenu({
       { id: 'shells', label: 'Shells', results: shellResults },
       { id: 'browser-tabs', label: 'Pages', results: browserTabs },
     ].filter((section) => section.results.length > 0)
-  }, [contextItems, disposeShell, envUtils.shell.list, faviconCache.data, homePath, onCreatedChat, onOpenContent, sessions.data, shells.data, startChat, workspaceId])
+  }, [contextItems, disposeShell, envUtils.shell.list, faviconCache.data, homePath, onCreateChat, onOpenContent, sessions.data, shells.data, workspaceId])
 
   const contextualCount = contextualSections.reduce((sum, section) => sum + section.results.length, 0)
   const contextualResults = useMemo(() => contextualSections.flatMap((section) => section.results), [contextualSections])
@@ -894,22 +897,17 @@ export function UniversalMenu({
         setDetailsError('Choose a workspace.')
         return
       }
-      let workingDir: string
-      if (detailsSelection.type === 'folder') {
-        workingDir = detailsSelection.path
-      } else if (detailsSelection.type === 'worktree') {
-        workingDir = detailsSelection.path
-      } else {
+      if (detailsSelection.type === 'repoConfig') {
         if (!detailsSelection.worktreeName.trim()) {
           setDetailsError('Name the work tree.')
           return
         }
-        const cloned = await cloneConfig.mutateAsync({ configId: detailsSelection.configId, worktreeName: detailsSelection.worktreeName }) as { repoId: string; workingDir: string }
-        workingDir = cloned.workingDir
       }
-      const session = await startChat.mutateAsync(newAgentChatStartInput(detailsWorkspaceId, workingDir)) as { id: string }
-      onCreatedChat?.(session.id, detailsWorkspaceId)
-      onClose()
+      onCreateChat?.(detailsSelection.type === 'folder'
+        ? { type: 'folder', workspaceId: detailsWorkspaceId, path: detailsSelection.path }
+        : detailsSelection.type === 'worktree'
+          ? { type: 'worktree', workspaceId: detailsWorkspaceId, path: detailsSelection.path, repoId: detailsSelection.repoId, name: detailsSelection.name }
+          : { type: 'repoConfig', workspaceId: detailsWorkspaceId, configId: detailsSelection.configId, worktreeName: detailsSelection.worktreeName.trim() })
     } catch (error) {
       console.error('[universal-menu] create details failed', error)
       setDetailsError(extractTrpcMessage(error))
