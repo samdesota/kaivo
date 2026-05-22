@@ -32,7 +32,7 @@ import { useAppData } from '../data/app-data-provider'
 import { archiveWorkspace, markWorkspaceOpened, renameWorkspace, useVisibleWorkspaces, useWorkspace } from '../data/modules/workspaces'
 import { createWorkspaceFolder, moveWorkspaceSidebarNode, renameWorkspaceFolder, setWorkspaceFolderCollapsed, useWorkspaceSidebarTree } from '../data/modules/workspace-folders'
 import { setActiveAgentSession, setActiveWorkspaceTab, setAgentCollapsed as setAgentCollapsedCommand, setWorkspaceSplitRatio, useWorkspaceSearchSync, useWorkspaceViewState } from '../data/modules/workspace-view-state'
-import { closeWorkspaceTab as closeWorkspaceTabCommand, openWorkspaceTab, reorderWorkspaceTabs, setWorkspaceTabBrowserId, setWorkspaceTabTitle, setWorkspaceTabUrl, useWorkspaceTabs } from '../data/modules/workspace-tabs'
+import { closeWorkspaceTab as closeWorkspaceTabCommand, openWorkspaceTab, openWorkspaceTabLocal, replaceWorkspaceTab, reorderWorkspaceTabs, setWorkspaceTabBrowserId, setWorkspaceTabTitle, setWorkspaceTabUrl, useWorkspaceTabs } from '../data/modules/workspace-tabs'
 import type { WorkspaceFolderRecord, WorkspaceSidebarNode } from '../data/modules/workspace-folders'
 import type { WorkspaceRecord } from '../data/modules/workspaces'
 import { browserApi } from '../lib/browser-api'
@@ -113,7 +113,16 @@ const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
 const WORKSPACE_CHAT_READ_KEY = 'kaivo.workspaceChatReadAt'
 const LEGACY_WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
 const WORKSPACE_BOOTSTRAP_EVENT = 'kaivo.workspaceBootstrapChanged'
+const PENDING_SHELL_ID_PREFIX = '__pending-shell:'
 const workspaceLog = clientLogger.diagnostic('workspace')
+
+type EnvShellCreateClient = {
+  shell: {
+    create: {
+      mutate(input: { workspaceId?: string; cwd?: string }): Promise<{ id: string }>
+    }
+  }
+}
 
 type WorkspaceBootstrapStatus = {
   message: string
@@ -185,6 +194,14 @@ function useWorkspaceBootstrapStatus(workspaceId: string): WorkspaceBootstrapSta
 function dispatchWorkspaceBootstrapChanged() {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new Event(WORKSPACE_BOOTSTRAP_EVENT))
+}
+
+function pendingShellId(tabId: string): string {
+  return `${PENDING_SHELL_ID_PREFIX}${tabId}`
+}
+
+function isPendingShellTab(tab: WorkspaceTab): boolean {
+  return tab.type === 'shell' && tab.shellId.startsWith(PENDING_SHELL_ID_PREFIX)
 }
 
 type WorkspaceEnvResources = {
@@ -370,7 +387,6 @@ function WorkspaceRoutePage({
       }}
     >
       <WorkspaceShell
-        key={workspace.id}
         dispatchWorkspaceState={dispatchSyncedWorkspaceState}
         globalTabsMode={globalTabsMode}
         globalTabsActiveTabId={globalTabsActiveTabId}
@@ -507,6 +523,44 @@ function WorkspaceShell({
     showGlobalTab(tab.id)
   }, [ensureGlobalTabsWorkspace, showGlobalTab])
 
+  const openPendingShellPane = useCallback((cwd?: string) => {
+    const envId = ctx.localEnvTarget?.env.id
+    if (!envId) return
+    const tabId = makeWorkspaceTabId('shell', envId)
+    const tab: WorkspaceTab = {
+      id: tabId,
+      type: 'shell',
+      envId,
+      shellId: pendingShellId(tabId),
+      title: 'Starting shell…',
+      titleSource: 'explicit',
+    }
+    void openWorkspaceTabLocal({ workspaceId: ctx.workspace.id, tab, activate: true })
+    setFocusedTabGroup('workspace')
+    if (agentSessionCount === 0) setAgentCollapsed(true)
+    void (async () => {
+      try {
+        const client = ctx.getEnvClient(envId) as unknown as EnvShellCreateClient
+        const info = await client.shell.create.mutate({ workspaceId: ctx.workspace.id, ...(cwd ? { cwd } : {}) })
+        await replaceWorkspaceTab({
+          workspaceId: ctx.workspace.id,
+          tabId,
+          tab: {
+            id: tabId,
+            type: 'shell',
+            envId,
+            shellId: info.id,
+            title: `shell ${info.id.slice(-8)}`,
+            titleSource: 'auto',
+          },
+        })
+      } catch (error) {
+        console.warn('new shell failed', error)
+        await closeWorkspaceTabCommand({ workspaceId: ctx.workspace.id, tabId }).catch(() => undefined)
+      }
+    })()
+  }, [agentSessionCount, ctx, setAgentCollapsed])
+
   const openCommandPalette = useCallback(async (initialIntent: UniversalMenuInitialIntent = 'default') => {
     const target = ctx.localEnvTarget
     console.info('[universal-menu] open from workspace', { initialIntent, workspaceId: ctx.workspace.id, envAvailable: Boolean(target?.available), hasToken: Boolean(target?.token) })
@@ -551,6 +605,7 @@ function WorkspaceShell({
       if (result.target === 'global') void openGlobalPane(result.content)
       else openPane(result.content)
     }
+    if (result.type === 'create-shell') openPendingShellPane(result.cwd)
     if (result.type === 'created-agent-chat') void selectCreatedChat(result.sessionId, result.workspaceId)
     if (result.type === 'workspace-bootstrap') {
       void bootstrapWorkspace(result.request)
@@ -562,7 +617,7 @@ function WorkspaceShell({
     if (result.type === 'toggle-agent-pane') setAgentCollapsed(!agentCollapsed)
     if (result.type === 'toggle-sidebar') setSidebarHidden((v) => !v)
     if (result.type === 'open-settings') void navigate({ to: '/settings' })
-  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, selectCreatedChat, setAgentCollapsed])
+  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, openPendingShellPane, selectCreatedChat, setAgentCollapsed])
 
   useEffect(() => {
     prewarmOverlayLayer()
@@ -2462,14 +2517,13 @@ function WorkspaceShellTabTitleSync({
   useEffect(() => {
     if (!shells.data) return
     const liveShells = (shells.data as Array<{ id: string; alive?: boolean; title?: string | null }>).filter((shell) => shell.alive !== false)
-    const liveShellIds = new Set(liveShells.map((shell) => shell.id))
     for (const tab of tabs) {
-      if (tab.type === 'shell' && !liveShellIds.has(tab.shellId)) closeWorkspaceTab(tab, dispatchWorkspaceState)
+      if (tab.type === 'shell' && !isPendingShellTab(tab) && shells.data.some((shell) => shell.id === tab.shellId && shell.alive === false)) closeWorkspaceTab(tab, dispatchWorkspaceState)
     }
 
     const shellTitles = new Map(liveShells.map((shell) => [shell.id, shell.title?.trim() || `shell ${shell.id.slice(-8)}`]))
     for (const tab of tabs) {
-      if (tab.type !== 'shell' || tab.titleSource === 'explicit') continue
+      if (tab.type !== 'shell' || isPendingShellTab(tab) || tab.titleSource === 'explicit') continue
       const title = shellTitles.get(tab.shellId)
       if (title && title !== tab.title) dispatchWorkspaceState({ type: 'setTabAutoTitle', tabId: tab.id, title })
     }
@@ -2479,6 +2533,7 @@ function WorkspaceShellTabTitleSync({
 }
 
 function workspaceTabLabel(tab: WorkspaceTab): string {
+  if (isPendingShellTab(tab)) return 'Starting shell…'
   if (tab.type === 'shell') return `shell ${tab.shellId}`
   if (tab.type === 'file') return tab.path
   return tab.url
@@ -2516,6 +2571,13 @@ function WorkspaceTabContent({
   const ctx = useWorkspaceContext()
   const contentWorkspaceId = workspaceId ?? ctx.workspace.id
   if (tab.type === 'shell') {
+    if (isPendingShellTab(tab)) {
+      return (
+        <div className="flex h-full min-h-0 w-full items-center justify-center bg-neutral-975 text-sm text-neutral-500">
+          Starting shell…
+        </div>
+      )
+    }
     return (
       <div className="h-full min-h-0 w-full">
         <WorkspaceEnvTargetProvider>

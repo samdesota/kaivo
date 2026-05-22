@@ -134,6 +134,7 @@ export type OverlayResponse =
   | { requestId: string; type: 'switch-workspace'; workspaceId: string }
   | { requestId: string; type: 'selected-folder'; path: string }
   | { requestId: string; type: 'open-pane'; content: PaneContent; target?: UniversalMenuOpenTarget }
+  | { requestId: string; type: 'create-shell'; cwd?: string }
   | { requestId: string; type: 'close-tab' }
   | { requestId: string; type: 'new-session' }
   | { requestId: string; type: 'new-workspace' }
@@ -325,6 +326,7 @@ function EnvOverlayRequestRenderer({
                 respond({ requestId: request.requestId, type: 'closed' })
               }}
               onOpenContent={(content, target) => respond({ requestId: request.requestId, type: 'open-pane', content, target })}
+              onCreateShell={(cwd) => respond({ requestId: request.requestId, type: 'create-shell', cwd })}
               onCreatedChat={(sessionId: string, workspaceId?: string) => {
                 console.info('[overlay-layer] universal-menu created chat', { requestId: request.requestId, sessionId, workspaceId })
                 respond({ requestId: request.requestId, type: 'created-agent-chat', sessionId, workspaceId })

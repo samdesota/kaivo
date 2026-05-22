@@ -239,6 +239,7 @@ export function UniversalMenu({
   contextItems = [],
   onClose,
   onOpenContent,
+  onCreateShell,
   onCreatedChat,
   onBootstrapWorkspace,
   onSwitchWorkspace,
@@ -257,6 +258,7 @@ export function UniversalMenu({
   contextItems?: UniversalMenuContextItem[]
   onClose: () => void
   onOpenContent?: (content: PaneContent, target?: UniversalMenuOpenTarget) => void
+  onCreateShell?: (cwd?: string) => void
   onCreatedChat?: (sessionId: string, workspaceId?: string) => void
   onBootstrapWorkspace?: (request: UniversalMenuWorkspaceBootstrapRequest) => void
   onSwitchWorkspace?: (workspaceId: string) => void
@@ -303,7 +305,6 @@ export function UniversalMenu({
   const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && (scope?.definition.id === 'workspaces' || !!detailsSelection), staleTime: 15_000 })
   const envUtils = envTrpc.useUtils()
   const startChat = envTrpc.agent.sessionStart.useMutation()
-  const createShell = envTrpc.shell.create.useMutation()
   const disposeShell = envTrpc.shell.dispose.useMutation()
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const createDirectory = envTrpc.fs.createDirectory.useMutation()
@@ -391,10 +392,7 @@ export function UniversalMenu({
       kind: 'action',
       label: 'New shell',
       haystack: 'new shell terminal command workspace',
-      run: async () => {
-        const info = await createShell.mutateAsync({ ...(workspaceId ? { workspaceId } : {}), ...(activeCwd ? { cwd: activeCwd } : {}) }) as { id: string }
-        onOpenContent?.({ type: 'shell', shellId: info.id })
-      },
+      run: () => onCreateShell?.(activeCwd),
     })
 
     if (hasActiveTab) {
@@ -434,7 +432,7 @@ export function UniversalMenu({
       },
     )
     return out
-  }, [activeCwd, createShell, enterScope, hasActiveTab, onCloseTab, onOpenContent, onOpenSettings, onToggleAgentPane, onToggleSidebar, workspaceId])
+  }, [activeCwd, enterScope, hasActiveTab, onCloseTab, onCreateShell, onOpenSettings, onToggleAgentPane, onToggleSidebar])
 
   const newWorkspaceSections = useMemo(() => {
     const configs = [...((repoConfigs.data as RepoConfigRow[] | undefined) ?? [])]

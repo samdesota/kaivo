@@ -29,6 +29,35 @@ export async function openWorkspaceTab(input: { workspaceId: string; tab: Worksp
   return input.tab
 }
 
+export async function openWorkspaceTabLocal(input: { workspaceId: string; tab: WorkspaceTab; activate?: boolean }): Promise<WorkspaceTab> {
+  const before = workspaceTabsCollection.getRows()
+  const existing = findDuplicateWorkspaceTab(input.workspaceId, input.tab, before)
+  if (existing) {
+    if (input.activate !== false) await setActiveWorkspaceTab({ workspaceId: input.workspaceId, tabId: existing.id })
+    return recordToWorkspaceTab(existing) ?? input.tab
+  }
+  const position = nextWorkspaceTabPosition(input.workspaceId, before)
+  const record = workspaceTabToRecord(input.workspaceId, input.tab, position)
+  workspaceTabsCollection.applySnapshot(workspaceTabsSnapshot([...before, record]))
+  if (input.activate !== false) await setActiveWorkspaceTab({ workspaceId: input.workspaceId, tabId: record.id })
+  return input.tab
+}
+
+export async function replaceWorkspaceTab(input: { workspaceId: string; tabId: string; tab: WorkspaceTab }): Promise<void> {
+  const before = workspaceTabsCollection.getRows()
+  const current = before.find((row) => row.workspaceId === input.workspaceId && row.id === input.tabId)
+  if (!current) return
+  const record = workspaceTabToRecord(input.workspaceId, { ...input.tab, id: input.tabId } as WorkspaceTab, current.position)
+  workspaceTabsCollection.applySnapshot(workspaceTabsSnapshot(before.map((row) => row.workspaceId === input.workspaceId && row.id === input.tabId ? record : row)))
+  try {
+    const saved = normalizeWorkspaceTabRecord(await upsertTabMutation(record))
+    workspaceTabsCollection.applySnapshot(workspaceTabsSnapshot([...workspaceTabsCollection.getRows().filter((row) => workspaceTabRecordKey(row) !== workspaceTabRecordKey(saved)), saved]))
+  } catch (error) {
+    workspaceTabsCollection.applySnapshot(workspaceTabsSnapshot(before))
+    throw error
+  }
+}
+
 export async function closeWorkspaceTab(input: { workspaceId: string; tabId: string; activateFallback?: boolean }): Promise<string | null> {
   const before = workspaceTabsCollection.getRows()
   const records = workspaceTabsForWorkspace(input.workspaceId, before)

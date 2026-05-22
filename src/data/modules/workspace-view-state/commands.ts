@@ -28,7 +28,13 @@ export async function updateWorkspaceViewState(workspaceId: string, patch: Works
     const result = await appTrpcMutation('workspace.saveViewState', { workspaceId, state: patch })
     if (result && typeof result === 'object' && 'workspaceId' in result) {
       const saved = normalizeWorkspaceViewStateRecord(result)
-      workspaceViewStateCollection.applySnapshot(workspaceViewStateRowsSnapshot([...workspaceViewStateCollection.getRows().filter((row) => row.workspaceId !== workspaceId), saved]))
+      const latestRows = workspaceViewStateCollection.getRows()
+      const latest = latestRows.find((row) => row.workspaceId === workspaceId) ?? emptyWorkspaceViewState(workspaceId)
+      const merged = Object.keys(patch).reduce<WorkspaceViewStateRecord>(
+        (row, key) => ({ ...row, [key]: saved[key as keyof WorkspaceViewStateRecord] }),
+        { ...latest, updatedAt: saved.updatedAt },
+      )
+      workspaceViewStateCollection.applySnapshot(workspaceViewStateRowsSnapshot([...latestRows.filter((row) => row.workspaceId !== workspaceId), merged]))
     }
   } catch (error) {
     workspaceViewStateCollection.applySnapshot(workspaceViewStateRowsSnapshot(before))

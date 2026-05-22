@@ -2,7 +2,7 @@ import path from 'node:path'
 import { defineConfig } from '@playwright/test'
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3100'
-const DATA_DIR = path.resolve(process.cwd(), 'test-data')
+const DATA_DIR = path.resolve(process.cwd(), process.env.PLAYWRIGHT_DATA_DIR ?? 'test-data')
 
 export default defineConfig({
   testDir: './tests/e2e',

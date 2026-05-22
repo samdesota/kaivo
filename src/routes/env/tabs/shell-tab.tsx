@@ -22,13 +22,13 @@ export function ShellTabContent({
   const shells = envTrpc.shell.list.useQuery(shellListInput, { refetchInterval: 5_000 })
 
   const list = (shells.data ?? []) as ShellRow[]
-  const info = list.find((s) => s.id === shellId && s.alive !== false)
-  const missing = shells.data && !info
+  const info = list.find((s) => s.id === shellId)
+  const terminated = info?.alive === false
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-neutral-975 [--shell-pad:0.5rem]">
       <div className="min-h-0 flex-1 bg-neutral-975 p-[var(--shell-pad)]">
-        {missing ? (
+        {terminated ? (
           <div className="flex h-full items-center justify-center text-sm text-neutral-500">
             Shell terminated.
           </div>

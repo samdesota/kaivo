@@ -41,6 +41,7 @@ export type CommandPaletteOverlayResult =
 
 export type UniversalMenuOverlayResult =
   | { type: 'open-pane'; content: PaneContent; target?: UniversalMenuOpenTarget }
+  | { type: 'create-shell'; cwd?: string }
   | { type: 'created-agent-chat'; sessionId: string; workspaceId?: string }
   | { type: 'workspace-bootstrap'; request: UniversalMenuWorkspaceBootstrapRequest }
   | { type: 'switch-workspace'; workspaceId: string }
@@ -150,6 +151,7 @@ export async function openUniversalMenuOverlay(
     ...input,
   })
   if (response.type === 'open-pane') return { type: 'open-pane', content: response.content, target: response.target }
+  if (response.type === 'create-shell') return { type: 'create-shell', cwd: response.cwd }
   if (response.type === 'created-agent-chat') return { type: 'created-agent-chat', sessionId: response.sessionId, workspaceId: response.workspaceId }
   if (response.type === 'workspace-bootstrap') return { type: 'workspace-bootstrap', request: response.request }
   if (response.type === 'switch-workspace') return { type: 'switch-workspace', workspaceId: response.workspaceId }
