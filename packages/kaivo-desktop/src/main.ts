@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, ipcMain, Menu, webContents as electronWebContents, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, session as electronSession, webContents as electronWebContents, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
 import { desktopBrowserSocketPath, readOrCreateDesktopAuthToken } from './instance-runtime'
@@ -34,6 +34,11 @@ function chromeUserAgent(): string {
       : 'X11; Linux x86_64'
   return `Mozilla/5.0 (${platformToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`
 }
+
+const browserTabUserAgent = chromeUserAgent()
+const browserTabSessionPartition = 'persist:webframe'
+
+app.userAgentFallback = browserTabUserAgent
 
 type AppShortcutInput = {
   key: string
@@ -562,10 +567,14 @@ async function main(): Promise<void> {
     trackWebContents(contents)
   })
 
+  const browserTabSession = electronSession.fromPartition(browserTabSessionPartition)
+  browserTabSession.setUserAgent(browserTabUserAgent)
+
   webframeApp = await createApp({
     historyStore: createMemoryHistoryStore(),
     tabStore: createMemoryTabStore(),
-    tabUserAgent: chromeUserAgent(),
+    session: browserTabSession,
+    tabUserAgent: browserTabUserAgent,
   })
   writeLog('main', 'info', 'desktop app starting', { stateDir, config })
   browserAgentBridge = await startBrowserAgentBridge({
