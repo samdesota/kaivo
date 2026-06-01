@@ -181,11 +181,14 @@ wait_job "desktop-build" "$desktop_pid"
 echo "==> packaging electron app"
 (cd "$desktop_dir" && npx electron-packager . "Kaivo" \
   --platform=darwin --arch=arm64 --out=release --overwrite \
+  --app-bundle-id="${KAIVO_BUNDLE_ID:-com.samdesota.kaivo}" \
+  --helper-bundle-id="${KAIVO_BUNDLE_ID:-com.samdesota.kaivo}.helper" \
   --no-asar \
   --ignore='^/src($|/)' \
   --ignore='^/dist/.*\.map$' \
   --ignore='^/\.kaivo($|/)' \
-  --ignore='^/release($|/)')
+  --ignore='^/release($|/)' && \
+  node scripts/sign-macos-app.cjs release/Kaivo-darwin-arm64/Kaivo.app)
 
 if [ "$install_app" = true ]; then
   echo "==> installing to /Applications"
@@ -198,7 +201,7 @@ if [ "$install_app" = true ]; then
   cp -R "$desktop_dir/release/Kaivo-darwin-arm64/Kaivo.app" "$next_app"
   # fix spawn-helper permissions that cp may strip
   find "$next_app" -name spawn-helper -type f -exec chmod 755 {} + 2>/dev/null || true
-  codesign --force --deep --sign - "$next_app"
+  (cd "$desktop_dir" && node scripts/sign-macos-app.cjs "$next_app")
   if [ -e '/Applications/Kaivo.app' ]; then
     mv '/Applications/Kaivo.app' "$backup_app"
   fi
@@ -206,6 +209,7 @@ if [ "$install_app" = true ]; then
     mv '/Applications/Zoottle.app' "$legacy_backup_app"
   fi
   mv "$next_app" '/Applications/Kaivo.app'
+  (cd "$desktop_dir" && node scripts/check-macos-signing.cjs '/Applications/Kaivo.app')
   rm -rf "$stage_dir"
   echo "==> previous app moved to $backup_app"
 else
