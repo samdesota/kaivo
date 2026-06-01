@@ -131,6 +131,10 @@ vi.mock('../../src/routes/workspace/bookmarks-store', () => ({
   useBookmarksStore: () => ({ bookmarks: mocks.bookmarks, isLoading: false, error: null }),
 }))
 
+vi.mock('../../src/data/modules/workspace-folders', () => ({
+  useWorkspaceSidebarTree: () => mocks.workspaceTree,
+}))
+
 afterEach(() => cleanup())
 
 beforeEach(() => {
@@ -595,14 +599,14 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'workspace')
   })
 
-  it('keeps global-tab intent in the normal menu and targets web submissions globally', () => {
+  it('targets web submissions globally in new workspace intent mode', () => {
     const onOpenContent = vi.fn()
     render(
       <UniversalMenu
         open
         workspaceId="workspace-1"
         hasActiveTab={false}
-        initialIntent="global-tab"
+        initialIntent="new-workspace"
         onOpenContent={onOpenContent}
         onClose={vi.fn()}
         onCloseTab={vi.fn()}
@@ -610,10 +614,6 @@ describe('UniversalMenu baseline shell', () => {
     )
 
     const input = screen.getByLabelText('Universal menu search')
-    fireEvent.change(input, { target: { value: 'google.com' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
-    expect(onOpenContent).not.toHaveBeenCalled()
-
     fireEvent.change(input, { target: { value: '@google.com' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 

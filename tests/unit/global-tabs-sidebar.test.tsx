@@ -12,6 +12,10 @@ import {
 import type { WorkspaceTab } from '../../src/routes/workspace/tab-state'
 
 vi.mock('../../src/trpc', () => ({
+  makeTrpcClient: () => ({
+    query: vi.fn(),
+    subscription: vi.fn(() => ({ unsubscribe: vi.fn() })),
+  }),
   trpc: {
     favicon: {
       getByOrigins: {
@@ -80,8 +84,8 @@ describe('global tabs sidebar', () => {
     expect(nextGlobalTabIdAfterClose([tabs[0]], 'global-a')).toBeNull()
   })
 
-  it('maps Cmd+Shift+T to global-tab modal intent metadata', () => {
-    expect(universalMenuIntentForTabShortcut(true)).toBe('global-tab')
+  it('maps Cmd+Shift+T to new-workspace modal intent metadata', () => {
+    expect(universalMenuIntentForTabShortcut(true)).toBe('new-workspace')
     expect(universalMenuIntentForTabShortcut(false)).toBe('default')
   })
 

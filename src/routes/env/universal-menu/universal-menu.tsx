@@ -14,6 +14,7 @@ import type { PaneContent } from '../shell/tab-state'
 import { defaultWorkspaceName, resolveWorkspaceName, type NewAgentChatSelection, type NewAgentChatWorkspaceMode } from '../agent/new-agent-chat-state'
 import { WorkspaceModeControl } from '../agent/new-agent-chat-modal'
 import { useBookmarksStore, type BookmarkRecord } from '../../workspace/bookmarks-store'
+import { useWorkspaceSidebarTree } from '../../../data/modules/workspace-folders'
 
 export type UniversalMenuResultKind =
   | 'action'
@@ -63,7 +64,7 @@ export interface UniversalMenuContextItem {
   content: PaneContent
 }
 
-export type UniversalMenuInitialIntent = 'default' | 'new-workspace' | 'global-tab'
+export type UniversalMenuInitialIntent = 'default' | 'new-workspace'
 export type UniversalMenuOpenTarget = 'workspace' | 'global'
 
 export type UniversalMenuWorkspaceBootstrap =
@@ -289,7 +290,6 @@ export function UniversalMenu({
   const [detailsWorkspaceId, setDetailsWorkspaceId] = useState<string | undefined>(workspaceId)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const newWorkspaceIntent = intent === 'new-workspace'
-  const globalTabIntent = intent === 'global-tab'
   const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
   const folderProbe = envTrpc.fs.browseHome.useQuery(
@@ -309,7 +309,8 @@ export function UniversalMenu({
   const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open && (scope?.definition.id === 'work-trees' || !!detailsSelection || newWorkspaceIntent), staleTime: 5_000 })
   const worktrees = envTrpc.repo.listWorktrees.useQuery(undefined, { enabled: open && scope?.definition.id === 'work-trees', staleTime: 5_000 })
   const shells = envTrpc.shell.list.useQuery(workspaceId ? { workspaceId } : undefined, { enabled: open && !!workspaceId && (scope?.definition.id === 'shells' || (!scope && !query.trim())), staleTime: 5_000 })
-  const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && (scope?.definition.id === 'workspaces' || !!detailsSelection), staleTime: 15_000 })
+  const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && scope?.definition.id === 'workspaces', staleTime: 15_000 })
+  const localWorkspaceTree = useWorkspaceSidebarTree()
   const envUtils = envTrpc.useUtils()
   const startChat = envTrpc.agent.sessionStart.useMutation()
   const disposeShell = envTrpc.shell.dispose.useMutation()
@@ -556,7 +557,7 @@ export function UniversalMenu({
         bookmarks: bookmarksStore.bookmarks,
         query,
         faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
-        openContent: (content) => onOpenContent?.(content, globalTabIntent ? 'global' : 'workspace'),
+        openContent: (content) => onOpenContent?.(content, newWorkspaceIntent ? 'global' : 'workspace'),
       })
     }
     if (scope?.definition.id === 'workspaces') {
@@ -580,7 +581,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, globalTabIntent, homePath, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -975,12 +976,12 @@ export function UniversalMenu({
             onModeChange={setDetailsWorkspaceMode}
             existingWorkspaceName={workspaceName}
             selectedWorkspaceId={detailsWorkspaceId}
-            workspaceTree={(workspaceTree.data ?? []) as never[]}
+            workspaceTree={localWorkspaceTree as never[]}
             workspaceNameValue={workspaceNameDraft.edited ? workspaceNameDraft.value : generatedWorkspaceName}
             resolvedWorkspaceName={workspaceNameValue}
             parentFolderId={parentFolderId}
-            foldersLoading={workspaceTree.isLoading}
-            workspacesLoading={workspaceTree.isLoading}
+            foldersLoading={false}
+            workspacesLoading={false}
             onWorkspaceChange={setDetailsWorkspaceId}
             onParentFolderChange={setParentFolderId}
             onWorkspaceNameChange={(value) => setWorkspaceNameDraft({ value, edited: true })}

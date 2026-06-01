@@ -632,17 +632,16 @@ function WorkspaceShell({
     const target = ctx.localEnvTarget
     console.info('[universal-menu] open from workspace', { initialIntent, workspaceId: ctx.workspace.id, envAvailable: Boolean(target?.available), hasToken: Boolean(target?.token) })
     if (!target?.available || !target.token) {
-      if (initialIntent === 'default' || initialIntent === 'global-tab') {
+      if (initialIntent === 'default') {
         const value = await openTextInputOverlay({
-          title: initialIntent === 'global-tab' ? 'New global tab' : 'New tab',
+          title: 'New tab',
           label: 'URL or search',
           placeholder: 'example.com or search terms',
           confirmLabel: 'Open',
         })
         if (!value) return
         const content: PaneContent = { type: 'browser', url: resolveBrowserAddress(value).url }
-        if (initialIntent === 'global-tab') void openGlobalPane(content)
-        else openPane(content)
+        openPane(content)
       }
       return
     }
@@ -1604,7 +1603,7 @@ export function nextGlobalTabIdAfterClose(tabs: WorkspaceTab[], closingTabId: st
 }
 
 export function universalMenuIntentForTabShortcut(shiftKey: boolean): UniversalMenuInitialIntent {
-  return shiftKey ? 'global-tab' : 'default'
+  return shiftKey ? 'new-workspace' : 'default'
 }
 
 export function globalTabFromPaneContent(content: PaneContent, options?: { title?: string }): Extract<WorkspaceTab, { type: 'browser' }> | null {
