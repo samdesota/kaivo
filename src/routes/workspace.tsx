@@ -1466,7 +1466,7 @@ export function WorkspaceSidebar({
                 )
               )}
               {showChatRollup && (
-                <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-10">
+                <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-5">
                   <WorkspaceAgentEnvProvider>
                     <WorkspaceSidebarChatCount
                       workspaceId={workspace.id}

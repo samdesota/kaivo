@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { isValidElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
@@ -298,13 +298,80 @@ const markdownComponents = {
     if (!p.className) return <code className="rounded bg-neutral-900 px-1.5 py-0.5 font-mono text-[0.88em] text-content-strong">{p.children}</code>
     return <code {...sourceLineProps(p.node)} className={`${p.className} font-mono text-[13px]`}>{p.children}</code>
   },
-  pre: (p: MarkdownComponentProps) => <pre {...sourceLineProps(p.node)} className="my-4 overflow-x-auto rounded-md border border-neutral-800 bg-neutral-950 p-4 text-[13px] leading-relaxed text-content-strong">{p.children}</pre>,
+  pre: (p: MarkdownComponentProps) => {
+    const mermaidCode = getMermaidCode(p.children)
+    if (mermaidCode !== null) return <MermaidDiagram code={mermaidCode} sourceLine={p.node?.position?.start?.line} />
+    return <pre {...sourceLineProps(p.node)} className="my-4 overflow-x-auto rounded-md border border-neutral-800 bg-neutral-950 p-4 text-[13px] leading-relaxed text-content-strong">{p.children}</pre>
+  },
   table: (p: MarkdownComponentProps) => <div {...sourceLineProps(p.node)} className="my-4 overflow-x-auto"><table className="w-full border-collapse text-sm">{p.children}</table></div>,
   th: (p: MarkdownComponentProps) => <th className="border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-left font-semibold text-header-2">{p.children}</th>,
   td: (p: MarkdownComponentProps) => <td className="border border-neutral-800 px-3 py-1.5 text-content-default">{p.children}</td>,
   hr: () => <hr className="my-6 border-neutral-800" />,
   img: (p: MarkdownComponentProps & { src?: string; alt?: string }) => <img {...sourceLineProps(p.node)} src={p.src} alt={p.alt ?? ''} className="my-4 max-w-full rounded border border-neutral-800" />,
   strong: (p: MarkdownComponentProps) => <strong className="font-semibold text-header-1">{p.children}</strong>,
+}
+
+function MermaidDiagram({ code, sourceLine }: { code: string; sourceLine?: number }) {
+  const reactId = useId()
+  const [svg, setSvg] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setSvg(null)
+    setError(null)
+
+    async function renderDiagram() {
+      try {
+        const { default: mermaid } = await import('mermaid')
+        mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
+        const diagramId = `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`
+        const result = await mermaid.render(diagramId, code)
+        if (!cancelled) setSvg(result.svg)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to render Mermaid diagram')
+      }
+    }
+
+    void renderDiagram()
+    return () => {
+      cancelled = true
+    }
+  }, [code, reactId])
+
+  if (error) {
+    return (
+      <pre {...(sourceLine ? { 'data-source-line': sourceLine } : {})} className="my-4 overflow-x-auto rounded-md border border-red-900/70 bg-red-950/20 p-4 text-[13px] leading-relaxed text-red-200">
+        {error}
+      </pre>
+    )
+  }
+
+  return (
+    <div {...(sourceLine ? { 'data-source-line': sourceLine } : {})} className="my-4 overflow-x-auto rounded-md border border-neutral-800 bg-neutral-950 p-4">
+      {svg ? (
+        <div className="min-w-fit text-content-strong [&_svg]:mx-auto [&_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <div className="text-sm text-ui-muted">Rendering diagram…</div>
+      )}
+    </div>
+  )
+}
+
+function getMermaidCode(node: ReactNode): string | null {
+  const child = Array.isArray(node) ? node.find(isValidElement) : node
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(child)) return null
+  const className = child.props.className ?? ''
+  if (!/(^|\s)language-mermaid(\s|$)/.test(className)) return null
+  return textFromNode(child.props.children).replace(/\n$/, '')
+}
+
+function textFromNode(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textFromNode).join('')
+  if (isValidElement<{ children?: ReactNode }>(node)) return textFromNode(node.props.children)
+  return ''
 }
 
 function getPreviewAnchors(scroller: HTMLElement): Array<{ element: HTMLElement; line: number }> {
