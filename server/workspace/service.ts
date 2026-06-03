@@ -353,15 +353,19 @@ export function createWorkspaceService(database: Db = db) {
     beforeNodeId?: string | null
   }): Promise<WorkspaceSidebarNode[]> {
     const parentFolderId = await assertFolderParent(input.parentFolderId)
+    let previousParentId: string | null = null
     if (input.nodeType === 'folder') {
       const moving = await getFolder(input.nodeId)
+      previousParentId = moving.parentId ?? null
       if (parentFolderId === moving.id) throw new WorkspaceError('invalid_name', 'cannot move folder into itself')
       if (parentFolderId) {
         const descendants = folderDescendantIds(await listActiveFolders(), moving.id)
         if (descendants.has(parentFolderId)) throw new WorkspaceError('invalid_name', 'cannot move folder into its descendant')
       }
     } else {
-      assertMutableWorkspace(await get(input.nodeId))
+      const moving = await get(input.nodeId)
+      assertMutableWorkspace(moving)
+      previousParentId = moving.folderId ?? null
     }
 
     const before = parseMoveBeforeNodeId(input.beforeNodeId)
@@ -422,7 +426,23 @@ export function createWorkspaceService(database: Db = db) {
         await database.update(workspaces).set({ position, updatedAt: now }).where(eq(workspaces.id, row.id))
       }
     }
+    if (previousParentId && previousParentId !== parentFolderId) await deleteEmptyFolderAncestors(previousParentId)
     return await listTree()
+  }
+
+  async function deleteEmptyFolderAncestors(startFolderId: string | null): Promise<void> {
+    let folderId = startFolderId
+    while (folderId) {
+      const folders = await listActiveFolders()
+      const folder = folders.find((row) => row.id === folderId)
+      if (!folder) return
+      const workspaceRows = await listActiveWorkspaces({ includeSystem: true })
+      const hasChildFolder = folders.some((row) => (row.parentId ?? null) === folderId)
+      const hasWorkspace = workspaceRows.some((row) => (row.folderId ?? null) === folderId)
+      if (hasChildFolder || hasWorkspace) return
+      await database.delete(workspaceFolders).where(eq(workspaceFolders.id, folderId))
+      folderId = folder.parentId ?? null
+    }
   }
 
   async function getUiState(workspaceId: string): Promise<WorkspaceUiState> {
@@ -712,7 +732,7 @@ export function createWorkspaceService(database: Db = db) {
     },
 
     async archiveFolder(id: string): Promise<void> {
-      await getFolder(id)
+      const folder = await getFolder(id)
       const now = new Date()
       const folders = await listActiveFolders()
       const folderIds = new Set([id, ...folderDescendantIds(folders, id)])
@@ -731,6 +751,7 @@ export function createWorkspaceService(database: Db = db) {
           .set({ archivedAt: now, updatedAt: now })
           .where(eq(workspaces.id, workspace.id))
       }
+      await deleteEmptyFolderAncestors(folder.parentId ?? null)
     },
 
     async setFolderCollapsed(id: string, collapsed: boolean): Promise<WorkspaceFolder> {
@@ -826,12 +847,14 @@ export function createWorkspaceService(database: Db = db) {
     },
 
     async archive(id: string): Promise<void> {
-      assertMutableWorkspace(await get(id))
+      const workspace = await get(id)
+      assertMutableWorkspace(workspace)
       const now = new Date()
       await database
         .update(workspaces)
         .set({ archivedAt: now, updatedAt: now })
         .where(eq(workspaces.id, id))
+      await deleteEmptyFolderAncestors(workspace.folderId ?? null)
     },
 
     async markOpened(id: string): Promise<Workspace> {

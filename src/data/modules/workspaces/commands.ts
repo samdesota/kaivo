@@ -1,4 +1,6 @@
 import { appTrpcMutation } from '../../../lib/trpc-plain'
+import { folderRowsSnapshot, workspaceFoldersCollection } from '../workspace-folders/collection'
+import { removeEmptyWorkspaceFolderAncestors } from '../workspace-folders/empty-cleanup'
 import { normalizeWorkspaceRecord, workspacesCollection, workspaceRowsSnapshot } from './collection'
 import type { CreateWorkspaceInput, WorkspaceRecord } from './types'
 
@@ -38,7 +40,19 @@ export async function renameWorkspace(input: { id: string; name: string }): Prom
 }
 
 export async function archiveWorkspace(id: string): Promise<void> {
-  await optimisticWorkspacePatch(id, { archivedAt: Date.now(), updatedAt: Date.now() }, () => appTrpcMutation('workspace.archive', { id }))
+  const beforeFolders = workspaceFoldersCollection.getRows()
+  const beforeWorkspaces = workspacesCollection.getRows()
+  const folderId = beforeWorkspaces.find((row) => row.id === id)?.folderId ?? null
+  await optimisticWorkspacePatch(id, { archivedAt: Date.now(), updatedAt: Date.now() }, () => appTrpcMutation('workspace.archive', { id }), () => {
+    workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(removeEmptyWorkspaceFolderAncestors({
+      folders: workspaceFoldersCollection.getRows(),
+      workspaces: workspacesCollection.getRows(),
+      startFolderId: folderId,
+    })))
+  }, () => {
+    workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(beforeFolders))
+    workspacesCollection.applySnapshot(workspaceRowsSnapshot(beforeWorkspaces))
+  })
 }
 
 export async function markWorkspaceOpened(id: string): Promise<void> {
@@ -49,10 +63,11 @@ export function applyWorkspaceRowsForTests(rows: WorkspaceRecord[]): void {
   workspacesCollection.applySnapshot(workspaceRowsSnapshot(rows))
 }
 
-async function optimisticWorkspacePatch(id: string, patch: Partial<WorkspaceRecord>, call: () => Promise<unknown>): Promise<void> {
+async function optimisticWorkspacePatch(id: string, patch: Partial<WorkspaceRecord>, call: () => Promise<unknown>, afterPatch?: () => void, rollback?: () => void): Promise<void> {
   const before = workspacesCollection.getRows()
   const next = before.map((row) => row.id === id ? { ...row, ...patch } : row)
   workspacesCollection.applySnapshot(workspaceRowsSnapshot(next))
+  afterPatch?.()
   try {
     const result = await call()
     if (result && typeof result === 'object' && 'id' in result) {
@@ -60,7 +75,8 @@ async function optimisticWorkspacePatch(id: string, patch: Partial<WorkspaceReco
       workspacesCollection.applySnapshot(workspaceRowsSnapshot(workspacesCollection.getRows().map((row) => row.id === updated.id ? updated : row)))
     }
   } catch (error) {
-    workspacesCollection.applySnapshot(workspaceRowsSnapshot(before))
+    if (rollback) rollback()
+    else workspacesCollection.applySnapshot(workspaceRowsSnapshot(before))
     throw error
   }
 }

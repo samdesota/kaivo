@@ -7,9 +7,9 @@ import { getWorkspaceTabs } from '../../src/data/modules/workspace-tabs/selector
 import { workspaceTabsCollection } from '../../src/data/modules/workspace-tabs/collection'
 import type { WorkspaceTabRecord } from '../../src/data/modules/workspace-tabs'
 import { buildWorkspaceSidebarTree, type WorkspaceFolderRecord } from '../../src/data/modules/workspace-folders'
-import { applyWorkspaceFolderRowsForTests, renameWorkspaceFolder } from '../../src/data/modules/workspace-folders/commands'
+import { applyWorkspaceFolderRowsForTests, moveWorkspaceSidebarNode, renameWorkspaceFolder } from '../../src/data/modules/workspace-folders/commands'
 import { workspaceFoldersCollection } from '../../src/data/modules/workspace-folders/collection'
-import { applyWorkspaceRowsForTests, renameWorkspace } from '../../src/data/modules/workspaces/commands'
+import { applyWorkspaceRowsForTests, archiveWorkspace, renameWorkspace } from '../../src/data/modules/workspaces/commands'
 import { workspacesCollection } from '../../src/data/modules/workspaces/collection'
 import type { WorkspaceRecord } from '../../src/data/modules/workspaces'
 import { clearMemoryLocalStoreForTests } from '../../src/data/sync/local-store'
@@ -92,6 +92,36 @@ describe('workspace and folder commands', () => {
     await expect(promise).rejects.toThrow('folder failed')
 
     expect(workspaceFoldersCollection.getRows()[0]?.name).toBe('Before')
+  })
+
+  it('optimistically removes empty folder ancestors after archiving the last workspace', async () => {
+    applyWorkspaceFolderRowsForTests([
+      folder({ id: 'root', name: 'Root' }),
+      folder({ id: 'child', name: 'Child', parentId: 'root' }),
+    ])
+    applyWorkspaceRowsForTests([workspace({ id: 'workspace-1', name: 'Only', folderId: 'child' })])
+    vi.mocked(appTrpcMutation).mockResolvedValueOnce({ ok: true })
+
+    const promise = archiveWorkspace('workspace-1')
+
+    expect(workspaceFoldersCollection.getRows().map((row) => row.id)).toEqual([])
+    await promise
+  })
+
+  it('optimistically removes empty source folders after moving their last workspace', async () => {
+    applyWorkspaceFolderRowsForTests([
+      folder({ id: 'source', name: 'Source' }),
+      folder({ id: 'target', name: 'Target' }),
+    ])
+    applyWorkspaceRowsForTests([workspace({ id: 'workspace-1', name: 'Moved', folderId: 'source' })])
+    vi.mocked(appTrpcMutation).mockResolvedValueOnce([
+      { type: 'folder', folder: folder({ id: 'target', name: 'Target' }), children: [{ type: 'workspace', workspace: workspace({ id: 'workspace-1', name: 'Moved', folderId: 'target' }) }] },
+    ])
+
+    const promise = moveWorkspaceSidebarNode({ nodeType: 'workspace', nodeId: 'workspace-1', parentFolderId: 'target' })
+
+    expect(workspaceFoldersCollection.getRows().map((row) => row.id)).toEqual(['target'])
+    await promise
   })
 })
 

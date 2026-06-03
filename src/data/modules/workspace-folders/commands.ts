@@ -1,6 +1,7 @@
 import { appTrpcMutation } from '../../../lib/trpc-plain'
 import { workspacesCollection, workspaceRowsSnapshot } from '../workspaces/collection'
 import { folderRowsSnapshot, normalizeWorkspaceFolderRecord, workspaceFoldersCollection } from './collection'
+import { removeEmptyWorkspaceFolderAncestors } from './empty-cleanup'
 import type { MoveSidebarNodeInput, WorkspaceFolderRecord, WorkspaceSidebarNode } from './types'
 
 export async function createWorkspaceFolder(input: { name: string; parentId?: string | null }): Promise<WorkspaceFolderRecord> {
@@ -32,7 +33,15 @@ export async function renameWorkspaceFolder(input: { id: string; name: string })
 }
 
 export async function archiveWorkspaceFolder(id: string): Promise<void> {
-  await optimisticFolderPatch(id, { archivedAt: Date.now(), updatedAt: Date.now() }, () => appTrpcMutation('workspace.archiveFolder', { id }))
+  const before = workspaceFoldersCollection.getRows()
+  const parentId = before.find((row) => row.id === id)?.parentId ?? null
+  await optimisticFolderPatch(id, { archivedAt: Date.now(), updatedAt: Date.now() }, () => appTrpcMutation('workspace.archiveFolder', { id }), () => {
+    workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(removeEmptyWorkspaceFolderAncestors({
+      folders: workspaceFoldersCollection.getRows(),
+      workspaces: workspacesCollection.getRows(),
+      startFolderId: parentId,
+    })))
+  })
 }
 
 export async function setWorkspaceFolderCollapsed(input: { id: string; collapsed: boolean }): Promise<void> {
@@ -57,9 +66,10 @@ export function applyWorkspaceFolderRowsForTests(rows: WorkspaceFolderRecord[]):
   workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(rows))
 }
 
-async function optimisticFolderPatch(id: string, patch: Partial<WorkspaceFolderRecord>, call: () => Promise<unknown>): Promise<void> {
+async function optimisticFolderPatch(id: string, patch: Partial<WorkspaceFolderRecord>, call: () => Promise<unknown>, afterPatch?: () => void): Promise<void> {
   const before = workspaceFoldersCollection.getRows()
   workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(before.map((row) => row.id === id ? { ...row, ...patch } : row)))
+  afterPatch?.()
   try {
     const result = await call()
     if (result && typeof result === 'object' && 'id' in result) {
@@ -77,6 +87,9 @@ function applyOptimisticMove(input: MoveSidebarNodeInput): void {
   const before = parseBeforeNodeId(input.beforeNodeId)
   const folders = workspaceFoldersCollection.getRows()
   const workspaces = workspacesCollection.getRows()
+  const previousParentId = input.nodeType === 'folder'
+    ? (folders.find((row) => row.id === input.nodeId)?.parentId ?? null)
+    : (workspaces.find((row) => row.id === input.nodeId)?.folderId ?? null)
   const now = Date.now()
   const siblings = [
     ...folders.filter((row) => !row.archivedAt && (row.parentId ?? null) === parentFolderId).map((row) => ({ kind: 'folder' as const, id: row.id })),
@@ -86,16 +99,20 @@ function applyOptimisticMove(input: MoveSidebarNodeInput): void {
   siblings.splice(before && index >= 0 ? index : siblings.length, 0, { kind: input.nodeType, id: input.nodeId })
 
   const positions = new Map(siblings.map((row, position) => [`${row.kind}:${row.id}`, position]))
-  workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(folders.map((row) => {
+  const movedFolders = folders.map((row) => {
     if (input.nodeType === 'folder' && row.id === input.nodeId) return { ...row, parentId: parentFolderId, position: positions.get(`folder:${row.id}`) ?? row.position, updatedAt: now }
     const position = positions.get(`folder:${row.id}`)
     return position == null ? row : { ...row, position, updatedAt: now }
-  })))
-  workspacesCollection.applySnapshot(workspaceRowsSnapshot(workspaces.map((row) => {
+  })
+  const movedWorkspaces = workspaces.map((row) => {
     if (input.nodeType === 'workspace' && row.id === input.nodeId) return { ...row, folderId: parentFolderId, position: positions.get(`workspace:${row.id}`) ?? row.position, updatedAt: now }
     const position = positions.get(`workspace:${row.id}`)
     return position == null ? row : { ...row, position, updatedAt: now }
-  })))
+  })
+  workspacesCollection.applySnapshot(workspaceRowsSnapshot(movedWorkspaces))
+  workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(previousParentId && previousParentId !== parentFolderId
+    ? removeEmptyWorkspaceFolderAncestors({ folders: movedFolders, workspaces: movedWorkspaces, startFolderId: previousParentId })
+    : movedFolders))
 }
 
 function applyTreeRows(nodes: WorkspaceSidebarNode[]): void {

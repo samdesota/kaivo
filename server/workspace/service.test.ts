@@ -574,6 +574,24 @@ describe('workspace service', () => {
     expect(workspaceRows.find((row) => row.id === second.id)).toMatchObject({ folderId: target.id, position: 2 })
   })
 
+  it('deletes empty source folders after moving their last workspace', async () => {
+    const { workspaceService } = await import('./service.js')
+    const root = await workspaceService.createFolder({ name: 'Root' })
+    const child = await workspaceService.createFolder({ name: 'Child', parentId: root.id })
+    const target = await workspaceService.createFolder({ name: 'Target' })
+    const moved = await workspaceService.create({ name: 'moved', folderId: child.id })
+
+    await workspaceService.moveSidebarNode({
+      nodeType: 'workspace',
+      nodeId: moved.id,
+      parentFolderId: target.id,
+    })
+
+    expect(folderRows.find((row) => row.id === child.id)).toBeUndefined()
+    expect(folderRows.find((row) => row.id === root.id)).toBeUndefined()
+    expect(folderRows.find((row) => row.id === target.id)).toBeDefined()
+  })
+
   it('moves folders and rejects moving a folder into its own descendant', async () => {
     const { workspaceService } = await import('./service.js')
     const root = await workspaceService.createFolder({ name: 'Root' })
@@ -607,6 +625,18 @@ describe('workspace service', () => {
     expect(workspaceRows.find((row) => row.id === rootWorkspace.id)?.archivedAt).toBeInstanceOf(Date)
     expect(workspaceRows.find((row) => row.id === childWorkspace.id)?.archivedAt).toBeInstanceOf(Date)
     expect(workspaceRows.find((row) => row.id === siblingWorkspace.id)?.archivedAt).toBeNull()
+  })
+
+  it('deletes empty parent folders after archiving their last workspace', async () => {
+    const { workspaceService } = await import('./service.js')
+    const root = await workspaceService.createFolder({ name: 'Root' })
+    const child = await workspaceService.createFolder({ name: 'Child', parentId: root.id })
+    const workspace = await workspaceService.create({ name: 'only workspace', folderId: child.id })
+
+    await workspaceService.archive(workspace.id)
+
+    expect(folderRows.find((row) => row.id === child.id)).toBeUndefined()
+    expect(folderRows.find((row) => row.id === root.id)).toBeUndefined()
   })
 
   it('upserts and lists workspace resources', async () => {
