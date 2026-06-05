@@ -9,6 +9,7 @@ import { expect, test } from './harness/electron-fixture'
 const vitePort = 5196
 const chromeUrl = `http://127.0.0.1:${vitePort}/login`
 const openedUrl = `http://127.0.0.1:${vitePort}/browser-api-tab.html?bridge-existing`
+const directOpenedUrl = `http://127.0.0.1:${vitePort}/browser-api-tab.html?bridge-open-and-connect`
 
 test('agent browser bridge connects existing tabs', async ({ desktopLogPath, desktopStateDir }, testInfo) => {
   const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(vitePort), '--strictPort'], {
@@ -52,6 +53,29 @@ test('agent browser bridge connects existing tabs', async ({ desktopLogPath, des
         })).browserAgentSocketPath,
       )
 
+      const directConnection = await bridgeCall<{ cdpId: string; browserTabId: string; url: string }>(socketPath, 'openAndConnect', {
+        sandboxId: 'sb-a',
+        opencodeSessionId: 'oc-a',
+        url: directOpenedUrl,
+        activate: false,
+      })
+      expect(directConnection.browserTabId).toBeTruthy()
+      expect(directConnection.cdpId).toBeTruthy()
+      expect(directConnection.url).toBe(directOpenedUrl)
+      const directList = await bridgeCall<Array<{ browserTabId: string; connected: boolean }>>(socketPath, 'listTabs', {
+        sandboxId: 'sb-a',
+        opencodeSessionId: 'oc-a',
+        rootBrowserTabIds: [directConnection.browserTabId],
+      })
+      expect(directList).toContainEqual(expect.objectContaining({ browserTabId: directConnection.browserTabId, connected: true }))
+      const directSnapshot = await bridgeCall<{ url: string; text: string }>(socketPath, 'snapshot', {
+        sandboxId: 'sb-a',
+        opencodeSessionId: 'oc-a',
+        cdpId: directConnection.cdpId,
+      })
+      expect(directSnapshot.url).toBe(directOpenedUrl)
+      expect(directSnapshot.text).toContain('bridge-open-and-connect')
+
       const browserTabId = await page.evaluate(async (url) => {
         const mod = await (0, eval)('import("/src/lib/browser-api.ts")')
         const api = mod.createBrowserApi(window)
@@ -63,6 +87,7 @@ test('agent browser bridge connects existing tabs', async ({ desktopLogPath, des
       const list = await bridgeCall<Array<{ browserTabId: string; connected: boolean }>>(socketPath, 'listTabs', {
         sandboxId: 'sb-a',
         opencodeSessionId: 'oc-a',
+        rootBrowserTabIds: [browserTabId],
       })
       expect(list.some((tab) => tab.browserTabId === browserTabId && !tab.connected)).toBe(true)
 

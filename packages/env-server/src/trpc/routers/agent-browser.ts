@@ -54,7 +54,7 @@ export const agentBrowserRouter = router({
   }),
 
   openAndConnect: agentShellProcedure.input(openAndConnectInputSchema).mutation(async ({ input }) => {
-    return openNormalPaneAndConnect(input)
+    return openNativeTabAndMirrorPane(input)
   }),
 
   disconnect: agentShellProcedure.input(cdpConnectionInputSchema).mutation(async ({ input }) => {
@@ -97,38 +97,20 @@ export const agentBrowserRouter = router({
   }),
 })
 
-async function openNormalPaneAndConnect(
+async function openNativeTabAndMirrorPane(
   input: { sandboxId?: string; opencodeSessionId: string; url: string; title?: string; activate?: boolean },
 ) {
   const service = getAgentBrowserService()
-  const initialScope = await scope(input)
-  const before = new Set((await service.listTabs(initialScope)).map((tab) => tab.browserTabId))
-  await openPaneForAgent({
-    opencodeSessionId: input.opencodeSessionId,
-    content: { type: 'browser', url: input.url },
+  const connection = await service.openAndConnect(await scope(input), {
+    url: input.url,
     title: input.title,
     activate: input.activate,
   })
-  const tab = await waitForOpenedTab(async () => service.listTabs(await scope(input)), before, input.url)
-  return service.connectTab(await scope(input), { browserTabId: tab.browserTabId })
-}
-
-async function waitForOpenedTab(
-  listTabs: () => Promise<Array<{ browserTabId: string; url: string }>>,
-  before: Set<string>,
-  url: string,
-) {
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline) {
-    const tabs = await listTabs()
-    const tab = tabs.find((candidate) => !before.has(candidate.browserTabId) && candidate.url === url)
-      ?? tabs.find((candidate) => !before.has(candidate.browserTabId) && normalizeComparableUrl(candidate.url) === normalizeComparableUrl(url))
-    if (tab) return tab
-    await new Promise((resolve) => setTimeout(resolve, 150))
-  }
-  throw new Error('browser tab did not open')
-}
-
-function normalizeComparableUrl(value: string): string {
-  return value.replace(/\/+$/, '')
+  await openPaneForAgent({
+    opencodeSessionId: input.opencodeSessionId,
+    content: { type: 'browser', url: input.url, browserTabId: connection.browserTabId },
+    title: input.title,
+    activate: input.activate,
+  })
+  return connection
 }

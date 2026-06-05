@@ -61,6 +61,8 @@ type BrowserLogState = {
   disposers: Map<string, () => void>
 }
 
+const AGENT_BROWSER_VIEWPORT = { width: 1280, height: 720 }
+
 type SnapshotOutput = {
   url: string
   title: string
@@ -170,7 +172,7 @@ async function dispatch(
   const scope = parseScope(params)
   if (method === 'listTabs') return listTabs(scope, params, options, registry)
   if (method === 'connectTab') return connectTab(scope, String(params.browserTabId ?? ''), options, registry, logs)
-  if (method === 'openAndConnect') return openAndConnect(scope, params, options, registry)
+  if (method === 'openAndConnect') return openAndConnect(scope, params, options, registry, logs)
   if (method === 'disconnect') return disconnect(scope, String(params.cdpId ?? ''), options, registry, logs)
   if (method === 'snapshot') return snapshot(scope, params, options, registry)
   if (method === 'interact') return interact(scope, params, options, registry)
@@ -235,12 +237,13 @@ async function openAndConnect(
   params: Record<string, unknown>,
   options: BrowserAgentBridgeOptions,
   registry: BrowserAgentConnectionRegistry,
+  logs: BrowserLogState,
 ): Promise<BrowserConnection> {
-  void scope
-  void params
-  void options
-  void registry
-  throw new Error('openAndConnect must be routed through the app UI open-pane flow')
+  const url = String(params.url ?? '').trim()
+  if (!url) throw new Error('url is required')
+  const tab = await createTab(options, url)
+  await waitForTabWebContents(tab.id, options)
+  return connectTab(scope, tab.id, options, registry, logs)
 }
 
 async function disconnect(
@@ -628,6 +631,28 @@ async function evaluateExpression(contents: WebContents, expression: string): Pr
 async function getTabs(options: BrowserAgentBridgeOptions): Promise<TabRecord[]> {
   const app = requireWebframe(options)
   return await app.caller.tabs.list() as TabRecord[]
+}
+
+async function createTab(options: BrowserAgentBridgeOptions, url: string): Promise<TabRecord> {
+  const app = requireWebframe(options)
+  const windowId = app.windows.list()[0]?.id
+  if (!windowId) throw new Error('browser window unavailable')
+  return await app.caller.tabs.create({
+    url,
+    windowId,
+    placement: { x: 0, y: 0, w: AGENT_BROWSER_VIEWPORT.width, h: AGENT_BROWSER_VIEWPORT.height },
+    active: false,
+  }) as TabRecord
+}
+
+async function waitForTabWebContents(browserTabId: string, options: BrowserAgentBridgeOptions): Promise<WebContents> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const contents = options.findTabWebContents(browserTabId)
+    if (contents && !contents.isDestroyed()) return contents
+    await wait(50)
+  }
+  throw new Error('browser tab did not open')
 }
 
 function tabsForRoots(rootBrowserTabIds: string[], tabs: TabRecord[]): TabRecord[] {
