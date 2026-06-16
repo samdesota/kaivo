@@ -6,7 +6,7 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Eye, FileText } from 'lucide-react'
-import type { ReactNode } from 'react'
+import type { ReactNode, WheelEvent } from 'react'
 import { envTrpc } from '../../env-trpc'
 import { trpcQueryKey } from '../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../lib/utils'
@@ -313,13 +313,16 @@ const markdownComponents = {
 
 function MermaidDiagram({ code, sourceLine }: { code: string; sourceLine?: number }) {
   const reactId = useId()
+  const viewportRef = useRef<HTMLDivElement | null>(null)
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
 
   useEffect(() => {
     let cancelled = false
     setSvg(null)
     setError(null)
+    setView({ scale: 1, x: 0, y: 0 })
 
     async function renderDiagram() {
       try {
@@ -339,6 +342,43 @@ function MermaidDiagram({ code, sourceLine }: { code: string; sourceLine?: numbe
     }
   }, [code, reactId])
 
+  function zoomBy(delta: number) {
+    const viewport = viewportRef.current
+    setView((current) => {
+      const nextScale = clampMermaidScale(current.scale + delta)
+      if (!viewport) return { ...current, scale: nextScale }
+      const rect = viewport.getBoundingClientRect()
+      return zoomMermaidView(current, nextScale, rect.width / 2, rect.height / 2)
+    })
+  }
+
+  function resetView() {
+    setView({ scale: 1, x: 0, y: 0 })
+  }
+
+  function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!svg) return
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+
+    if (event.ctrlKey || event.metaKey) {
+      const zoomDelta = event.deltaY < 0 ? 0.12 : -0.12
+      setView((current) => zoomMermaidView(
+        current,
+        clampMermaidScale(current.scale + zoomDelta),
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+      ))
+      return
+    }
+
+    setView((current) => ({
+      ...current,
+      x: current.x - event.deltaX,
+      y: current.y - event.deltaY,
+    }))
+  }
+
   if (error) {
     return (
       <pre {...(sourceLine ? { 'data-source-line': sourceLine } : {})} className="my-4 overflow-x-auto rounded-md border border-red-900/70 bg-red-950/20 p-4 text-[13px] leading-relaxed text-red-200">
@@ -348,14 +388,45 @@ function MermaidDiagram({ code, sourceLine }: { code: string; sourceLine?: numbe
   }
 
   return (
-    <div {...(sourceLine ? { 'data-source-line': sourceLine } : {})} className="my-4 overflow-x-auto rounded-md border border-neutral-800 bg-neutral-950 p-4">
+    <div {...(sourceLine ? { 'data-source-line': sourceLine } : {})} className="my-4 rounded-md border border-neutral-800 bg-neutral-950">
       {svg ? (
-        <div className="min-w-fit text-content-strong [&_svg]:mx-auto [&_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div className="relative">
+          <div className="absolute right-2 top-2 z-10 flex overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/90 text-xs shadow-lg shadow-black/20 backdrop-blur">
+            <button type="button" onClick={() => zoomBy(-0.2)} className="px-2 py-1 text-content-default hover:bg-neutral-900 hover:text-content-strong" aria-label="Zoom out Mermaid diagram">-</button>
+            <button type="button" onClick={resetView} className="border-x border-neutral-800 px-2 py-1 tabular-nums text-ui-muted hover:bg-neutral-900 hover:text-content-strong" aria-label="Reset Mermaid diagram zoom">{Math.round(view.scale * 100)}%</button>
+            <button type="button" onClick={() => zoomBy(0.2)} className="px-2 py-1 text-content-default hover:bg-neutral-900 hover:text-content-strong" aria-label="Zoom in Mermaid diagram">+</button>
+          </div>
+          <div
+            ref={viewportRef}
+            onWheel={handleWheel}
+            className="h-[420px] overflow-hidden rounded-md text-content-strong [touch-action:none]"
+          >
+            <div
+              className="min-w-fit p-4 [&_svg]:max-w-none"
+              style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: '0 0' }}
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          </div>
+        </div>
       ) : (
-        <div className="text-sm text-ui-muted">Rendering diagram…</div>
+        <div className="p-4 text-sm text-ui-muted">Rendering diagram…</div>
       )}
     </div>
   )
+}
+
+function clampMermaidScale(scale: number): number {
+  return Math.min(4, Math.max(0.25, scale))
+}
+
+function zoomMermaidView(view: { scale: number; x: number; y: number }, nextScale: number, originX: number, originY: number) {
+  const diagramX = (originX - view.x) / view.scale
+  const diagramY = (originY - view.y) / view.scale
+  return {
+    scale: nextScale,
+    x: originX - diagramX * nextScale,
+    y: originY - diagramY * nextScale,
+  }
 }
 
 function getMermaidCode(node: ReactNode): string | null {

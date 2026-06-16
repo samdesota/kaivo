@@ -190,6 +190,7 @@ function installAppShortcutMenu(): void {
   const appShortcuts: Array<{ label: string; accelerator: string; input: AppShortcutInput }> = [
     { label: 'Find in Page', accelerator: 'CommandOrControl+F', input: shortcutInput('f', 'KeyF') },
     { label: 'Command Palette', accelerator: 'CommandOrControl+K', input: shortcutInput('k', 'KeyK') },
+    { label: 'Command Palette in Global Tabs', accelerator: 'CommandOrControl+Shift+K', input: shortcutInput('K', 'KeyK', { shiftKey: true }) },
     { label: 'New Browser Tab', accelerator: 'CommandOrControl+T', input: shortcutInput('t', 'KeyT') },
     { label: 'New Workspace Chat', accelerator: 'CommandOrControl+Shift+T', input: shortcutInput('T', 'KeyT', { shiftKey: true }) },
     { label: 'Close Focused Tab', accelerator: 'CommandOrControl+W', input: shortcutInput('w', 'KeyW') },

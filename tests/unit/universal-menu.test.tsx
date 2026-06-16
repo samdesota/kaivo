@@ -599,6 +599,27 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'workspace')
   })
 
+  it('opens directly into the web scope when requested', () => {
+    const onOpenContent = vi.fn()
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        initialScope="web"
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: 'google.com' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'workspace')
+  })
+
   it('targets web submissions globally in new workspace intent mode', () => {
     const onOpenContent = vi.fn()
     render(
@@ -607,6 +628,27 @@ describe('UniversalMenu baseline shell', () => {
         workspaceId="workspace-1"
         hasActiveTab={false}
         initialIntent="new-workspace"
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: '@google.com' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'global')
+  })
+
+  it('targets web submissions globally when opened with a global initial target', () => {
+    const onOpenContent = vi.fn()
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        initialOpenTarget="global"
         onOpenContent={onOpenContent}
         onClose={vi.fn()}
         onCloseTab={vi.fn()}

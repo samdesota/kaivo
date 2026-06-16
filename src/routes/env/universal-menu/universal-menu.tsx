@@ -65,6 +65,7 @@ export interface UniversalMenuContextItem {
 }
 
 export type UniversalMenuInitialIntent = 'default' | 'new-workspace'
+export type UniversalMenuInitialScope = 'web'
 export type UniversalMenuOpenTarget = 'workspace' | 'global'
 
 export type UniversalMenuWorkspaceBootstrap =
@@ -255,6 +256,8 @@ export function UniversalMenu({
   onToggleSidebar,
   onOpenSettings,
   initialIntent = 'default',
+  initialScope,
+  initialOpenTarget = 'workspace',
 }: {
   open: boolean
   workspaceName?: string
@@ -275,6 +278,8 @@ export function UniversalMenu({
   onToggleSidebar?: () => void
   onOpenSettings?: () => void
   initialIntent?: UniversalMenuInitialIntent
+  initialScope?: UniversalMenuInitialScope
+  initialOpenTarget?: UniversalMenuOpenTarget
 }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -359,7 +364,7 @@ export function UniversalMenu({
     setQuery('')
     setActive(0)
     setMouseMoved(false)
-    setScope(null)
+    setScope(initialScope ? { definition: scopeControllerById.get(initialScope)!.definition, query: '' } : null)
     setIntent(initialIntent)
     setDetailsSelection(null)
     setDetailsError(null)
@@ -368,7 +373,7 @@ export function UniversalMenu({
     setDetailsWorkspaceMode('new')
     setDetailsWorkspaceId(workspaceId)
     setActionMenuOpen(false)
-  }, [initialIntent, open, workspaceId])
+  }, [initialIntent, initialScope, open, workspaceId])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -557,7 +562,7 @@ export function UniversalMenu({
         bookmarks: bookmarksStore.bookmarks,
         query,
         faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
-        openContent: (content) => onOpenContent?.(content, newWorkspaceIntent ? 'global' : 'workspace'),
+        openContent: (content) => onOpenContent?.(content, newWorkspaceIntent ? 'global' : initialOpenTarget),
       })
     }
     if (scope?.definition.id === 'workspaces') {
@@ -581,7 +586,7 @@ export function UniversalMenu({
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.result)
-  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, initialOpenTarget, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()

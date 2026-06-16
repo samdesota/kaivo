@@ -162,4 +162,30 @@ describe('global bookmarks store', () => {
     await expect(handler.exists(resource)).resolves.toBe(true)
     expect(handler.row(resource)).toMatchObject({ type: 'other', label: 'Example Docs', orphan: true, canCleanup: true })
   })
+
+  it('discovers untracked live shell resources for cleanup', async () => {
+    const registry = createWorkspaceResourceCleanupRegistry({
+      workspaceId: 'workspace-1',
+      resources: [],
+      listShells: async () => [
+        { id: 'shell-1', cwd: '/tmp/project', title: 'dev shell', alive: true },
+        { id: 'shell-dead', cwd: '/tmp/project', title: null, alive: false },
+      ],
+      disposeShell: async () => undefined,
+      listWorktrees: async () => [],
+      deleteWorktree: async () => undefined,
+    })
+
+    const discovered = await registry.handlerFor('shell').discover?.()
+
+    expect(discovered).toHaveLength(1)
+    expect(discovered?.[0]).toMatchObject({
+      id: 'discovered:shell:shell-1',
+      workspaceId: 'workspace-1',
+      type: 'shell',
+      resourceKey: 'shell-1',
+      data: { shellId: 'shell-1', cwd: '/tmp/project', title: 'dev shell' },
+    })
+    expect(registry.handlerFor('shell').row(discovered![0])).toMatchObject({ id: 'discovered:shell:shell-1', type: 'shell', label: 'dev shell', detail: '/tmp/project', canCleanup: true })
+  })
 })

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { envTrpc } from '../../env-trpc'
 import { Modal } from '../../components/ui'
-import { extractTrpcMessage } from '../../lib/utils'
 import { createWorkspaceResourceCleanupRegistry, type CleanupResourceRow } from './resource-cleanup'
 import type { WorkspaceResourceRecord } from './resources-store'
 
@@ -29,8 +28,6 @@ export function WorkspaceCleanupOverlay({
   const [cleanupRows, setCleanupRows] = useState<CleanupResourceRow[]>([])
   const [loadingResources, setLoadingResources] = useState(true)
   const [selectedCleanupIds, setSelectedCleanupIds] = useState<Set<string>>(() => new Set())
-  const [err, setErr] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
   const resourcesRef = useRef(resources)
   const envUtilsRef = useRef(envUtils)
   const disposeShellAsyncRef = useRef(disposeShellAsync)
@@ -41,7 +38,7 @@ export function WorkspaceCleanupOverlay({
   deleteWorktreeAsyncRef.current = deleteWorktreeAsync
   const workspaceResources = useMemo(() => resources.filter((resource) => resource.workspaceId === workspace.id), [resources, workspace.id])
   const workspaceResourceSignature = workspaceResources.map((resource) => `${resource.id}:${resource.type}:${resource.resourceKey}:${resource.shared}:${JSON.stringify(resource.data)}`).join('\0')
-  const listShells = useCallback(() => envUtilsRef.current.shell.list.fetch({ workspaceId: workspace.id }) as Promise<Array<{ id: string }>>, [workspace.id])
+  const listShells = useCallback(() => envUtilsRef.current.shell.list.fetch({ workspaceId: workspace.id }) as Promise<Array<{ id: string; cwd?: string; title?: string | null; alive?: boolean }>>, [workspace.id])
   const cleanupShell = useCallback((id: string) => disposeShellAsyncRef.current({ id }), [])
   const listWorktrees = useCallback(() => envUtilsRef.current.repo.listWorktrees.fetch() as Promise<Array<{ id: string; workingDir: string }>>, [])
   const cleanupWorktree = useCallback((repoId: string) => deleteWorktreeAsyncRef.current({ repoId }), [])
@@ -62,7 +59,7 @@ export function WorkspaceCleanupOverlay({
         const next: CleanupResourceRow[] = []
         const seen = new Set<string>()
         const registry = makeCleanupRegistry()
-        const currentWorkspaceResources = resourcesRef.current.filter((resource) => resource.workspaceId === workspace.id)
+        const currentWorkspaceResources = await cleanupResources(registry, resourcesRef.current.filter((resource) => resource.workspaceId === workspace.id))
         for (const resource of currentWorkspaceResources) {
           const handler = registry.handlerFor(resource.type)
           if (!await handler.exists(resource)) continue
@@ -100,7 +97,7 @@ export function WorkspaceCleanupOverlay({
 
   async function cleanResources(resourceIds: Set<string>) {
     const registry = makeCleanupRegistry()
-    const currentWorkspaceResources = resourcesRef.current.filter((resource) => resource.workspaceId === workspace.id)
+    const currentWorkspaceResources = await cleanupResources(registry, resourcesRef.current.filter((resource) => resource.workspaceId === workspace.id))
     await Promise.all(currentWorkspaceResources.map(async (resource) => {
       if (!resourceIds.has(resource.id)) return
       const handler = registry.handlerFor(resource.type)
@@ -112,15 +109,8 @@ export function WorkspaceCleanupOverlay({
   }
 
   async function archiveWithCleanup() {
-    setErr(null)
-    setBusy(true)
-    try {
-      await cleanResources(selectedCleanupIds)
-      onCleaned()
-    } catch (error) {
-      setErr(extractTrpcMessage(error))
-      setBusy(false)
-    }
+    onCleaned()
+    void cleanResources(new Set(selectedCleanupIds)).catch((error) => console.warn('workspace cleanup failed', error))
   }
 
   return (
@@ -141,7 +131,7 @@ export function WorkspaceCleanupOverlay({
                 <input
                   type="checkbox"
                   checked={selectedCleanupIds.has(row.id)}
-                  disabled={!row.canCleanup || busy}
+                  disabled={!row.canCleanup}
                   onChange={() => toggleCleanup(row.id)}
                   className="h-3 w-3 shrink-0 accent-neutral-500 disabled:opacity-40"
                 />
@@ -163,14 +153,24 @@ export function WorkspaceCleanupOverlay({
           </div>
         </div>
         {allWorkspaces.length <= 1 && <div className="text-neutral-500">This is the last active workspace.</div>}
-        {err && <div className="rounded border border-red-900 bg-red-950/50 px-2 py-1 text-red-300">{err}</div>}
         <div className="flex justify-end gap-2 border-t border-neutral-800 pt-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-60">Cancel</button>
-          <button type="button" onClick={() => void archiveWithCleanup()} disabled={busy || loadingResources} className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
-            {busy ? 'Archiving...' : 'Archive and cleanup'}
+          <button type="button" onClick={onCancel} className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-60">Cancel</button>
+          <button type="button" onClick={() => void archiveWithCleanup()} disabled={loadingResources} className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
+            Archive and cleanup
           </button>
         </div>
       </div>
     </Modal>
   )
+}
+
+async function cleanupResources(
+  registry: ReturnType<typeof createWorkspaceResourceCleanupRegistry>,
+  trackedResources: WorkspaceResourceRecord[],
+): Promise<WorkspaceResourceRecord[]> {
+  const discoveryTypes = [...new Set([...trackedResources.map((resource) => resource.type), 'shell'])]
+  const discovered = (await Promise.all(discoveryTypes
+    .map(async (type) => registry.handlerFor(type).discover?.() ?? [])))
+    .flat()
+  return [...trackedResources, ...discovered]
 }

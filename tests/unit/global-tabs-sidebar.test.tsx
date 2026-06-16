@@ -2,11 +2,13 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  globalChildTabFromWindowTabCreated,
   globalTabFromPaneContent,
   globalTabUpsertInput,
   GlobalTabsSidebarSection,
   nextGlobalTabIdAfterClose,
-  universalMenuIntentForTabShortcut,
+  universalMenuOpenTargetForShortcut,
+  universalMenuScopeForTabShortcut,
   workspaceSidebarRowActive,
 } from '../../src/routes/workspace'
 import type { WorkspaceTab } from '../../src/routes/workspace/tab-state'
@@ -84,9 +86,14 @@ describe('global tabs sidebar', () => {
     expect(nextGlobalTabIdAfterClose([tabs[0]], 'global-a')).toBeNull()
   })
 
-  it('maps Cmd+Shift+T to new-workspace modal intent metadata', () => {
-    expect(universalMenuIntentForTabShortcut(true)).toBe('new-workspace')
-    expect(universalMenuIntentForTabShortcut(false)).toBe('default')
+  it('maps Cmd+T to the web scope', () => {
+    expect(universalMenuScopeForTabShortcut()).toBe('web')
+  })
+
+  it('maps shifted shortcuts and active global tabs to global opens', () => {
+    expect(universalMenuOpenTargetForShortcut(true, false)).toBe('global')
+    expect(universalMenuOpenTargetForShortcut(false, true)).toBe('global')
+    expect(universalMenuOpenTargetForShortcut(false, false)).toBe('workspace')
   })
 
   it('creates global browser tab data from browser pane content only', () => {
@@ -106,5 +113,41 @@ describe('global tabs sidebar', () => {
       tab: { type: 'browser', url: 'https://example.com/global' },
     })
     expect(input?.workspaceId).not.toBe('active-user-workspace')
+  })
+
+  it('creates global tab data for native child tabs opened from a global tab', () => {
+    const child = globalChildTabFromWindowTabCreated(
+      [{ ...tabs[0], browserTabId: 'native-parent' }],
+      {
+        browserTabId: 'native-child',
+        windowId: 'window-1',
+        openerBrowserTabId: 'native-parent',
+        url: 'https://example.com/child',
+        title: 'Child page',
+        presentation: 'embedded',
+      },
+    )
+
+    expect(child).toMatchObject({
+      type: 'browser',
+      url: 'https://example.com/child',
+      browserTabId: 'native-child',
+      title: 'Child page',
+    })
+  })
+
+  it('ignores popup, duplicate, and unrelated native child tab events for global tabs', () => {
+    const existing = { ...tabs[0], browserTabId: 'native-parent' }
+    const event = {
+      browserTabId: 'native-child',
+      windowId: 'window-1',
+      openerBrowserTabId: 'native-parent',
+      url: 'https://example.com/child',
+      title: 'Child page',
+    }
+
+    expect(globalChildTabFromWindowTabCreated([existing], { ...event, presentation: 'popup' })).toBeNull()
+    expect(globalChildTabFromWindowTabCreated([{ ...existing, browserTabId: 'native-child' }], event)).toBeNull()
+    expect(globalChildTabFromWindowTabCreated([existing], { ...event, openerBrowserTabId: 'other-tab' })).toBeNull()
   })
 })

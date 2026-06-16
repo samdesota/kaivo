@@ -12,6 +12,7 @@ export type CleanupResourceRow = {
 }
 
 export type ResourceCleanupHandler = {
+  discover?(): Promise<WorkspaceResourceRecord[]>
   exists(resource: WorkspaceResourceRecord): Promise<boolean>
   row(resource: WorkspaceResourceRecord): CleanupResourceRow
   cleanup(resource: WorkspaceResourceRecord): Promise<void>
@@ -24,7 +25,7 @@ export type WorkspaceResourceCleanupRegistry = {
 export type WorkspaceResourceCleanupServices = {
   workspaceId: string
   resources: WorkspaceResourceRecord[]
-  listShells: () => Promise<Array<{ id: string }>>
+  listShells: () => Promise<Array<{ id: string; cwd?: string; title?: string | null; alive?: boolean }>>
   disposeShell: (id: string) => Promise<unknown>
   listWorktrees: () => Promise<Array<{ id: string; workingDir: string }>>
   deleteWorktree: (repoId: string) => Promise<unknown>
@@ -79,11 +80,26 @@ export function createWorkspaceResourceCleanupRegistry(services: WorkspaceResour
       },
     },
     shell: {
+      async discover() {
+        const trackedShellIds = new Set(services.resources
+          .filter((resource) => resource.workspaceId === services.workspaceId && resource.type === 'shell')
+          .map((resource) => shellId(resource)))
+        const shells = await services.listShells().catch(() => [])
+        return shells
+          .filter((shell) => shell.alive !== false && !trackedShellIds.has(shell.id))
+          .map((shell) => discoveredResource({
+            workspaceId: services.workspaceId,
+            type: 'shell',
+            resourceKey: shell.id,
+            data: { shellId: shell.id, cwd: shell.cwd, title: shell.title },
+          }))
+      },
       async exists(resource) {
         return (await getShellIds()).has(shellId(resource))
       },
       row(resource) {
-        return { id: resource.id, type: 'shell', label: shellId(resource), shared: false, orphan: false, canCleanup: true }
+        const title = typeof resource.data.title === 'string' && resource.data.title.trim() ? resource.data.title : shellId(resource)
+        return { id: resource.id, type: 'shell', label: title, detail: typeof resource.data.cwd === 'string' ? resource.data.cwd : undefined, shared: false, orphan: false, canCleanup: true }
       },
       async cleanup(resource) {
         await ignoreAlreadyCleaned(services.disposeShell(shellId(resource)))
@@ -136,6 +152,24 @@ export function createWorkspaceResourceCleanupRegistry(services: WorkspaceResour
     handlerFor(type) {
       return handlers[type] ?? handlers.other
     },
+  }
+}
+
+function discoveredResource(input: {
+  workspaceId: string
+  type: WorkspaceResourceRecord['type']
+  resourceKey: string
+  data: Record<string, unknown>
+}): WorkspaceResourceRecord {
+  return {
+    id: `discovered:${input.type}:${input.resourceKey}`,
+    workspaceId: input.workspaceId,
+    type: input.type,
+    resourceKey: input.resourceKey,
+    shared: false,
+    data: input.data,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
   }
 }
 

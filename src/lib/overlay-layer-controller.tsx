@@ -7,7 +7,7 @@ import { OVERLAY_CHANNEL, OverlayLayerApp, type BrowserUrlPopoverResult, type Ov
 import type { PaneContent } from '../routes/env/shell/tab-state'
 import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
 import type { WorkspaceResourceRecord } from '../routes/workspace/resources-store'
-import type { UniversalMenuChatBootstrap, UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuOpenTarget, UniversalMenuWorkspaceBootstrapRequest } from '../routes/env/universal-menu/universal-menu'
+import type { UniversalMenuChatBootstrap, UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuInitialScope, UniversalMenuOpenTarget, UniversalMenuWorkspaceBootstrapRequest } from '../routes/env/universal-menu/universal-menu'
 
 /**
  * Desktop modals must be opened through this controller so they render in the
@@ -144,6 +144,8 @@ export async function openUniversalMenuOverlay(
     canToggleAgentPane?: boolean
     canToggleSidebar?: boolean
     initialIntent?: UniversalMenuInitialIntent
+    initialScope?: UniversalMenuInitialScope
+    initialOpenTarget?: UniversalMenuOpenTarget
   },
 ): Promise<UniversalMenuOverlayResult> {
   const response = await openOverlayRequest({

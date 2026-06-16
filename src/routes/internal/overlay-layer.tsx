@@ -9,7 +9,7 @@ import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../env/ag
 import { FolderPickerModal } from '../env/agent/folder-picker-modal'
 import { CommandPalette } from '../env/shell/command-palette'
 import type { PaneContent } from '../env/shell/tab-state'
-import { UniversalMenu, type UniversalMenuChatBootstrap, type UniversalMenuContextItem, type UniversalMenuInitialIntent, type UniversalMenuOpenTarget, type UniversalMenuWorkspaceBootstrapRequest } from '../env/universal-menu/universal-menu'
+import { UniversalMenu, type UniversalMenuChatBootstrap, type UniversalMenuContextItem, type UniversalMenuInitialIntent, type UniversalMenuInitialScope, type UniversalMenuOpenTarget, type UniversalMenuWorkspaceBootstrapRequest } from '../env/universal-menu/universal-menu'
 import { Modal } from '../../components/ui'
 import { NewRepoConfigForm, RepoConfigEditor } from '../repo-config-manager'
 import { ProviderCredentialsOverlay } from '../settings/provider-credentials-overlay'
@@ -67,6 +67,8 @@ export type OverlayRequest = {
   canToggleAgentPane?: boolean
   canToggleSidebar?: boolean
   initialIntent?: UniversalMenuInitialIntent
+  initialScope?: UniversalMenuInitialScope
+  initialOpenTarget?: UniversalMenuOpenTarget
 } | {
   requestId: string
   type: 'confirm'
@@ -322,6 +324,8 @@ function EnvOverlayRequestRenderer({
               hasActiveTab={request.hasActiveTab}
               contextItems={request.contextItems}
               initialIntent={request.initialIntent}
+              initialScope={request.initialScope}
+              initialOpenTarget={request.initialOpenTarget}
               onClose={() => {
                 console.info('[overlay-layer] universal-menu close', { requestId: request.requestId })
                 respond({ requestId: request.requestId, type: 'closed' })

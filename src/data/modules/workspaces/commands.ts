@@ -39,7 +39,11 @@ export async function renameWorkspace(input: { id: string; name: string }): Prom
   await optimisticWorkspacePatch(input.id, { name: input.name.trim() || 'Untitled workspace', updatedAt: Date.now() }, () => appTrpcMutation('workspace.rename', input))
 }
 
-export async function archiveWorkspace(id: string): Promise<void> {
+export async function archiveWorkspace(id: string, options: { optimistic?: boolean } = {}): Promise<void> {
+  if (options.optimistic === false) {
+    await archiveWorkspaceRemoteFirst(id)
+    return
+  }
   const beforeFolders = workspaceFoldersCollection.getRows()
   const beforeWorkspaces = workspacesCollection.getRows()
   const folderId = beforeWorkspaces.find((row) => row.id === id)?.folderId ?? null
@@ -53,6 +57,23 @@ export async function archiveWorkspace(id: string): Promise<void> {
     workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(beforeFolders))
     workspacesCollection.applySnapshot(workspaceRowsSnapshot(beforeWorkspaces))
   })
+}
+
+async function archiveWorkspaceRemoteFirst(id: string): Promise<void> {
+  const beforeWorkspaces = workspacesCollection.getRows()
+  const folderId = beforeWorkspaces.find((row) => row.id === id)?.folderId ?? null
+  const result = await appTrpcMutation('workspace.archive', { id })
+  if (result && typeof result === 'object' && 'id' in result) {
+    const updated = normalizeWorkspaceRecord(result)
+    workspacesCollection.applySnapshot(workspaceRowsSnapshot(workspacesCollection.getRows().map((row) => row.id === updated.id ? updated : row)))
+  } else {
+    workspacesCollection.applySnapshot(workspaceRowsSnapshot(workspacesCollection.getRows().map((row) => row.id === id ? { ...row, archivedAt: Date.now(), updatedAt: Date.now() } : row)))
+  }
+  workspaceFoldersCollection.applySnapshot(folderRowsSnapshot(removeEmptyWorkspaceFolderAncestors({
+    folders: workspaceFoldersCollection.getRows(),
+    workspaces: workspacesCollection.getRows(),
+    startFolderId: folderId,
+  })))
 }
 
 export async function markWorkspaceOpened(id: string): Promise<void> {

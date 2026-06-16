@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Settings, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2, Plus, Settings, X } from 'lucide-react'
 import {
   closestCenter,
   DndContext,
@@ -35,10 +35,10 @@ import { setActiveAgentSession, setActiveWorkspaceTab, setAgentCollapsed as setA
 import { closeWorkspaceTab as closeWorkspaceTabCommand, openWorkspaceTab, openWorkspaceTabLocal, replaceWorkspaceTab, reorderWorkspaceTabs, setWorkspaceTabBrowserId, setWorkspaceTabTitle, setWorkspaceTabUrl, useWorkspaceTabs } from '../data/modules/workspace-tabs'
 import type { WorkspaceFolderRecord, WorkspaceSidebarNode } from '../data/modules/workspace-folders'
 import type { WorkspaceRecord } from '../data/modules/workspaces'
-import { browserApi } from '../lib/browser-api'
+import { browserApi, type BrowserTabCreated } from '../lib/browser-api'
 import { resolveBrowserAddress } from '../lib/browser-navigation'
 import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
-import { openTextInputOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
+import { openConfirmOverlay, openTextInputOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
 import { paneTabIconForType, TabIconView } from '../components/tab-icon'
@@ -46,7 +46,7 @@ import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
 import { NewSessionPopover } from './env/agent/session-tabs'
-import type { UniversalMenuChatBootstrap, UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
+import type { UniversalMenuChatBootstrap, UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuInitialScope, UniversalMenuOpenTarget, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
@@ -628,7 +628,15 @@ function WorkspaceShell({
     })()
   }, [agentSessionCount, ctx, setAgentCollapsed])
 
-  const openCommandPalette = useCallback(async (initialIntent: UniversalMenuInitialIntent = 'default') => {
+  const openCommandPalette = useCallback(async ({
+    initialIntent = 'default',
+    initialScope,
+    initialOpenTarget = 'workspace',
+  }: {
+    initialIntent?: UniversalMenuInitialIntent
+    initialScope?: UniversalMenuInitialScope
+    initialOpenTarget?: UniversalMenuOpenTarget
+  } = {}) => {
     const target = ctx.localEnvTarget
     console.info('[universal-menu] open from workspace', { initialIntent, workspaceId: ctx.workspace.id, envAvailable: Boolean(target?.available), hasToken: Boolean(target?.token) })
     if (!target?.available || !target.token) {
@@ -641,7 +649,8 @@ function WorkspaceShell({
         })
         if (!value) return
         const content: PaneContent = { type: 'browser', url: resolveBrowserAddress(value).url }
-        openPane(content)
+        if (initialOpenTarget === 'global') void openGlobalPane(content)
+        else openPane(content)
       }
       return
     }
@@ -665,6 +674,8 @@ function WorkspaceShell({
       canToggleAgentPane: true,
       canToggleSidebar: true,
       initialIntent,
+      initialScope,
+      initialOpenTarget,
     })
     console.info('[universal-menu] result in workspace', { type: result.type, workspaceId: ctx.workspace.id })
     if (result.type === 'open-pane') {
@@ -694,10 +705,13 @@ function WorkspaceShell({
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        void openCommandPalette()
+        void openCommandPalette({ initialOpenTarget: universalMenuOpenTargetForShortcut(e.shiftKey, globalTabsMode) })
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
-        void openCommandPalette(universalMenuIntentForTabShortcut(e.shiftKey))
+        void openCommandPalette({
+          initialScope: universalMenuScopeForTabShortcut(),
+          initialOpenTarget: universalMenuOpenTargetForShortcut(e.shiftKey, globalTabsMode),
+        })
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setSidebarHidden((v) => !v)
@@ -712,7 +726,7 @@ function WorkspaceShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [agentCollapsed, closeActiveTab, focusedTabGroup, openCommandPalette, setAgentCollapsed])
+  }, [agentCollapsed, closeActiveTab, focusedTabGroup, globalTabsMode, openCommandPalette, setAgentCollapsed])
 
   return (
     <>
@@ -724,7 +738,7 @@ function WorkspaceShell({
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
           onHide={() => setSidebarHidden(true)}
-          onNewWorkspaceIntent={() => void openCommandPalette('new-workspace')}
+          onNewWorkspaceIntent={() => void openCommandPalette({ initialIntent: 'new-workspace' })}
           globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTab?.id ?? null }}
           onSelectGlobalTab={(tabId) => showGlobalTab(tabId)}
           onLeaveGlobalTabs={() => void navigate({ to: '/w/$workspaceId', params: { workspaceId: ctx.workspace.id }, search: { chat: undefined, tab: undefined } })}
@@ -936,6 +950,7 @@ export function WorkspaceSidebar({
   const [dropProjection, setDropProjection] = useState<SidebarDropProjection | null>(null)
   const [localTree, setLocalTree] = useState<WorkspaceSidebarNode[] | null>(null)
   const [selectedDndIds, setSelectedDndIds] = useState<Set<string>>(() => new Set())
+  const [archivingWorkspaceIds, setArchivingWorkspaceIds] = useState<Set<string>>(() => new Set())
   const [sidebarWidth, setSidebarWidth] = useState(() => readWorkspaceSidebarWidth())
   const [chatReadVersion, setChatReadVersion] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -973,10 +988,9 @@ export function WorkspaceSidebar({
   }
 
   async function closeWorkspace(workspaceId: string, workspaces: WorkspaceSummary[]) {
-    const tabs = await trpcUtils.workspace.listTabs.fetch({ workspaceId }).catch(() => [])
-    await closeNativeBrowserTabsForWorkspace(tabs)
-    const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId)
-    const next = remaining[0]
+    if (archivingWorkspaceIds.has(workspaceId)) return
+    setArchivingWorkspaceIds((current) => new Set(current).add(workspaceId))
+    const next = await nextWorkspaceAfterArchive(workspaceId, workspaces, ctx.localEnvTarget, archivingWorkspaceIds)
     if (workspaceId === ctx.workspace.id) {
       if (next) {
         await navigate({
@@ -989,9 +1003,24 @@ export function WorkspaceSidebar({
         await navigate({ to: '/', replace: true })
       }
     }
-    await archiveWorkspace(workspaceId)
-    for (const resource of resourcesStore.records.filter((record) => record.workspaceId === workspaceId)) {
-      await deleteResource.mutateAsync({ id: resource.id }).catch(() => undefined)
+    try {
+      const tabs = await trpcUtils.workspace.listTabs.fetch({ workspaceId }).catch(() => [])
+      await closeNativeBrowserTabsForWorkspace(tabs)
+      await archiveWorkspace(workspaceId, { optimistic: false })
+      for (const resource of resourcesStore.records.filter((record) => record.workspaceId === workspaceId)) {
+        await deleteResource.mutateAsync({ id: resource.id }).catch(() => undefined)
+      }
+    } catch (error) {
+      setArchivingWorkspaceIds((current) => {
+        const nextIds = new Set(current)
+        nextIds.delete(workspaceId)
+        return nextIds
+      })
+      await openConfirmOverlay({
+        title: 'Archive failed',
+        message: extractTrpcMessage(error),
+        confirmLabel: 'OK',
+      }).catch(() => false)
     }
   }
 
@@ -1384,6 +1413,7 @@ export function WorkspaceSidebar({
     if (!workspace) return null
     const dndId = sidebarDndId('workspace', workspace.id)
     const editing = edit.editingId === workspace.id && edit.editingKind === 'workspace'
+    const archiving = archivingWorkspaceIds.has(workspace.id)
     const activeGlobalTabId = globalTabsDestination?.activeTabId ?? null
     const active = workspaceSidebarRowActive(workspace.id, ctx.workspace.id, activeGlobalTabId)
     const selected = selectedDndIds.has(dndId)
@@ -1391,6 +1421,11 @@ export function WorkspaceSidebar({
     const workspaceHref = `/w/${workspace.id}`
     const workspaceRowClassName = 'min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium'
     const handleWorkspaceLinkClick = (e: ReactMouseEvent) => {
+      if (archiving) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
       onLeaveGlobalTabs?.()
       if (updateSelection(e, dndId)) return
       if (!activeGlobalTabId) return
@@ -1408,7 +1443,7 @@ export function WorkspaceSidebar({
         id={dndId}
         depth={row.depth}
         active={activeDragId === dndId}
-        disabled={Boolean(edit.editingId)}
+        disabled={Boolean(edit.editingId) || archiving}
         guideDepths={row.ancestorFolderIds.map((_, index) => index)}
       >
         <div className="relative mb-0.5">
@@ -1417,7 +1452,8 @@ export function WorkspaceSidebar({
             <div className={
               'relative flex min-w-0 flex-1 items-center rounded px-1.5 py-0.5 transition-colors group-hover:bg-highlight group-hover:text-neutral-200 ' +
               (active || selected ? 'bg-highlight text-neutral-100 ' : 'text-neutral-400') +
-              (selected ? 'ring-1 ring-neutral-700 ' : '')
+              (selected ? 'ring-1 ring-neutral-700 ' : '') +
+              (archiving ? 'opacity-45 grayscale group-hover:bg-transparent group-hover:text-neutral-400 ' : '')
             }>
               {editing ? (
                 <input
@@ -1444,6 +1480,7 @@ export function WorkspaceSidebar({
                     }}
                     className={workspaceRowClassName}
                     title={workspace.name}
+                    aria-disabled={archiving}
                   >
                     {workspace.name}
                   </a>
@@ -1460,12 +1497,17 @@ export function WorkspaceSidebar({
                     }}
                     className={workspaceRowClassName}
                     title={workspace.name}
+                    aria-disabled={archiving}
                   >
                     {workspace.name}
                   </Link>
                 )
               )}
-              {showChatRollup && (
+              {archiving ? (
+                <span className="pointer-events-none absolute right-1.5 flex items-center text-neutral-500" aria-label="Archiving workspace">
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                </span>
+              ) : showChatRollup && (
                 <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-5">
                   <WorkspaceAgentEnvProvider>
                     <WorkspaceSidebarChatCount
@@ -1482,6 +1524,7 @@ export function WorkspaceSidebar({
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
+                  if (archiving) return
                   const target = ctx.localEnvTarget
                   if (!target?.available || !target.token) return
                   void openWorkspaceCleanupOverlay({
@@ -1494,7 +1537,8 @@ export function WorkspaceSidebar({
                     if (cleaned) void closeWorkspace(workspace.id, workspaces)
                   }).catch((error) => console.warn('workspace cleanup overlay failed', error))
                 }}
-                className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100"
+                disabled={archiving}
+                className="rounded px-0.5 py-0.5 text-neutral-600 opacity-0 hover:text-neutral-200 group-hover:opacity-100 disabled:opacity-0"
                 aria-label={`Close workspace ${workspace.name}`}
                 title="Close workspace"
               >
@@ -1602,8 +1646,12 @@ export function nextGlobalTabIdAfterClose(tabs: WorkspaceTab[], closingTabId: st
   return remaining[idx]?.id ?? remaining[idx - 1]?.id ?? null
 }
 
-export function universalMenuIntentForTabShortcut(shiftKey: boolean): UniversalMenuInitialIntent {
-  return shiftKey ? 'new-workspace' : 'default'
+export function universalMenuScopeForTabShortcut(): UniversalMenuInitialScope {
+  return 'web'
+}
+
+export function universalMenuOpenTargetForShortcut(shiftKey: boolean, globalTabsMode: boolean): UniversalMenuOpenTarget {
+  return shiftKey || globalTabsMode ? 'global' : 'workspace'
 }
 
 export function globalTabFromPaneContent(content: PaneContent, options?: { title?: string }): Extract<WorkspaceTab, { type: 'browser' }> | null {
@@ -1614,6 +1662,23 @@ export function globalTabFromPaneContent(content: PaneContent, options?: { title
 export function globalTabUpsertInput(workspaceId: string, content: PaneContent, position: number, options?: { title?: string }): { workspaceId: string; tab: Extract<WorkspaceTab, { type: 'browser' }>; position: number } | null {
   const tab = globalTabFromPaneContent(content, options)
   return tab ? { workspaceId, tab, position } : null
+}
+
+export function globalChildTabFromWindowTabCreated(tabs: WorkspaceTab[], event: BrowserTabCreated): Extract<WorkspaceTab, { type: 'browser' }> | null {
+  if (event.presentation === 'popup') return null
+  if (!event.openerBrowserTabId) return null
+  if (tabs.some((tab) => tab.type === 'browser' && tab.browserTabId === event.browserTabId)) return null
+  const openedFromGlobalTab = tabs.some(
+    (tab) => tab.type === 'browser' && tab.browserTabId === event.openerBrowserTabId,
+  )
+  if (!openedFromGlobalTab) return null
+  return {
+    id: makeWorkspaceTabId('browser'),
+    type: 'browser',
+    url: event.url,
+    browserTabId: event.browserTabId,
+    title: truncateTabTitle(event.title || event.url),
+  }
 }
 
 export function workspaceSidebarRowActive(workspaceId: string, currentWorkspaceId: string, activeGlobalTabId: string | null): boolean {
@@ -1633,6 +1698,7 @@ function GlobalBrowserTabPane({
 }) {
   const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
   const pendingFaviconWritesRef = useRef(new Set<string>())
+  const tabsRef = useRef(tabs)
   const bookmarksStore = useBookmarksStore()
   const upsertResource = trpc.workspace.upsertResource.useMutation()
   const upsertFavicon = trpc.favicon.cacheFromUrl.useMutation()
@@ -1641,6 +1707,17 @@ function GlobalBrowserTabPane({
     { origins: faviconOrigin ? [faviconOrigin] : [] },
     { enabled: Boolean(faviconOrigin), staleTime: 60_000 },
   )
+
+  tabsRef.current = tabs
+
+  useEffect(() => {
+    return browserApi.onWindowTabCreated((event) => {
+      const childTab = globalChildTabFromWindowTabCreated(tabsRef.current, event)
+      if (!childTab) return
+      void openWorkspaceTab({ workspaceId, tab: childTab, activate: false })
+      onActiveTabFallback(childTab.id)
+    })
+  }, [onActiveTabFallback, workspaceId])
 
   async function handleBrowserFaviconChange(input: { pageUrl: string; faviconUrl: string }) {
     const origin = faviconOriginForUrl(input.pageUrl)
@@ -2129,6 +2206,67 @@ function readWorkspaceChatsAt(workspaceId: string): number {
   } catch {
     return 0
   }
+}
+
+async function nextWorkspaceAfterArchive(
+  workspaceId: string,
+  workspaces: WorkspaceSummary[],
+  envTarget: WorkspaceEnvTarget | null,
+  archivingWorkspaceIds: Set<string>,
+): Promise<WorkspaceSummary | null> {
+  const archivingIds = new Set(archivingWorkspaceIds)
+  archivingIds.add(workspaceId)
+  const current = workspaces.find((workspace) => workspace.id === workspaceId) ?? null
+  const candidates = workspaces.filter((workspace) => !archivingIds.has(workspace.id))
+  if (candidates.length === 0) return null
+
+  const envResources = envTarget?.available && envTarget.token ? getWorkspaceEnvResources(envTarget) : null
+  if (envResources) {
+    const statuses = await Promise.all(candidates.map((workspace) => workspaceArchiveNavigationStatus(workspace, envResources.managedClient.client)))
+    const unread = statuses.filter((status) => status.unread).sort((a, b) => b.latestActivityAt - a.latestActivityAt)[0]
+    if (unread) return unread.workspace
+    const active = statuses.filter((status) => status.activeWork).sort((a, b) => b.latestActivityAt - a.latestActivityAt)[0]
+    if (active) return active.workspace
+  }
+
+  const currentIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId)
+  const siblings = candidates.filter((workspace) => (workspace.folderId ?? null) === (current?.folderId ?? null))
+  return siblings.find((workspace) => workspaces.findIndex((candidate) => candidate.id === workspace.id) > currentIndex)
+    ?? siblings[0]
+    ?? candidates[0]
+    ?? null
+}
+
+async function workspaceArchiveNavigationStatus(
+  workspace: WorkspaceSummary,
+  envClient: ReturnType<typeof makeManagedEnvReactClient>['client'],
+): Promise<{ workspace: WorkspaceSummary; unread: boolean; activeWork: boolean; latestActivityAt: number }> {
+  try {
+    const [sessionsResult, runtimeResult] = await Promise.all([
+      envClient.query('agent.sessionList', { workspaceId: workspace.id }),
+      envClient.query('agentRuntime.snapshot', { workspaceId: workspace.id }),
+    ])
+    const sessions = Array.isArray(sessionsResult) ? sessionsResult as Array<{ status?: string; lastActivityAt?: string | Date | null }> : []
+    const runtimeRows = runtimeResult && typeof runtimeResult === 'object' && 'rows' in runtimeResult && Array.isArray(runtimeResult.rows)
+      ? runtimeResult.rows as Array<{ running?: boolean; pendingAttentionCount?: number; lastActivityAt?: string | Date | null }>
+      : []
+    const latestSessionActivityAt = sessions
+      .filter((session) => session.status !== 'archived')
+      .reduce((latest, session) => Math.max(latest, dateTime(session.lastActivityAt)), 0)
+    const latestRuntimeActivityAt = runtimeRows.reduce((latest, row) => Math.max(latest, dateTime(row.lastActivityAt)), 0)
+    const latestActivityAt = Math.max(latestSessionActivityAt, latestRuntimeActivityAt)
+    const activeWork = runtimeRows.some((row) => row.running || (row.pendingAttentionCount ?? 0) > 0)
+    const readAt = readWorkspaceChatsAt(workspace.id)
+    return { workspace, unread: readAt > 0 && latestActivityAt > readAt, activeWork, latestActivityAt }
+  } catch {
+    return { workspace, unread: false, activeWork: false, latestActivityAt: 0 }
+  }
+}
+
+function dateTime(value: string | Date | null | undefined): number {
+  if (!value) return 0
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime()
+  return Number.isFinite(time) ? time : 0
 }
 
 function markWorkspaceChatsRead(workspaceId: string) {
