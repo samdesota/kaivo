@@ -225,7 +225,7 @@ export async function openNewRepoConfigOverlay(): Promise<string | null> {
 }
 
 export async function openProviderCredentialsOverlay(input: {
-  provider: 'anthropic' | 'openai'
+  provider: 'anthropic' | 'openai' | 'zai'
   label: string
   hasApiKey: boolean
   baseUrl: string | null

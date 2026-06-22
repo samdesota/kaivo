@@ -97,7 +97,7 @@ export type OverlayRequest = {
 } | {
   requestId: string
   type: 'provider-credentials'
-  provider: 'anthropic' | 'openai'
+  provider: 'anthropic' | 'openai' | 'zai'
   label: string
   hasApiKey: boolean
   baseUrl: string | null

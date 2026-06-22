@@ -3,7 +3,7 @@ import { trpc } from '../../trpc'
 import { Button, FormError, Input, Modal } from '../../components/ui'
 import { extractTrpcMessage } from '../../lib/utils'
 
-type ProviderId = 'anthropic' | 'openai'
+type ProviderId = 'anthropic' | 'openai' | 'zai'
 
 export function ProviderCredentialsOverlay({
   provider,

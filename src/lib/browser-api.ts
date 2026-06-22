@@ -131,6 +131,7 @@ type SlotRecord = { name: string; rect: { x: number; y: number; w: number; h: nu
 
 export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow()): BrowserApi {
   const slots = new Map<string, SlotRecord>()
+  let slotUpdateSeq = 0
 
   async function getWindowId(): Promise<string> {
     const webframe = getWebframe(win)
@@ -166,18 +167,21 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     async createTab(input) {
       const webframe = getWebframe(win)
       const windowId = await getWindowId()
+      console.info('[browser-pane] createTab requested', { paneId: input.paneId, windowId, url: input.url, slot: paneSlotName(input.paneId) })
       const record = await trackBrowserCommand('tabs.create', { paneId: input.paneId, url: input.url }, () => webframe.trpc.tabs.create.mutate({
         url: input.url ?? 'about:blank',
         windowId,
         placement: { slot: paneSlotName(input.paneId) },
         active: true,
       }))
+      console.info('[browser-pane] createTab resolved', { paneId: input.paneId, windowId, browserTabId: record.id, slot: paneSlotName(input.paneId) })
       return { browserTabId: record.id, favicon: record.favicon }
     },
 
     async attachTab(input) {
       const webframe = getWebframe(win)
       const windowId = await getWindowId()
+      console.info('[browser-pane] attachTab requested', { paneId: input.paneId, windowId, browserTabId: input.browserTabId, slot: paneSlotName(input.paneId) })
       const moved = await trackBrowserCommand('tabs.move', { browserTabId: input.browserTabId, paneId: input.paneId }, () => webframe.trpc.tabs.move.mutate({
         tabId: input.browserTabId,
         windowId,
@@ -186,6 +190,7 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       assertTabFound(moved, input.browserTabId)
       const activated = await trackBrowserCommand('tabs.setActive', { browserTabId: input.browserTabId }, () => webframe.trpc.tabs.setActive.mutate({ tabId: input.browserTabId, windowId }))
       assertTabFound(activated, input.browserTabId)
+      console.info('[browser-pane] attachTab resolved', { paneId: input.paneId, windowId, browserTabId: input.browserTabId, slot: paneSlotName(input.paneId) })
     },
 
     async focusTab(input) {
@@ -268,6 +273,7 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     },
 
     async setSlot(input) {
+      const seq = ++slotUpdateSeq
       slots.set(input.paneId, {
         name: paneSlotName(input.paneId),
         rect: {
@@ -277,7 +283,9 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
           h: input.rect.height,
         },
       })
+      console.info('[browser-pane] setSlot requested', { seq, paneId: input.paneId, slot: paneSlotName(input.paneId), rect: input.rect, slotCount: slots.size })
       await trackBrowserCommand('windows.setSlots', { paneId: input.paneId, rect: input.rect }, setSlots)
+      console.info('[browser-pane] setSlot resolved', { seq, paneId: input.paneId, slot: paneSlotName(input.paneId), rect: input.rect, slotCount: slots.size })
     },
 
     async createDetachedOverlay(input) {

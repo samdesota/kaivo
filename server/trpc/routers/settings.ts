@@ -6,6 +6,7 @@ import {
   listProviders,
   setProviderApiKey,
   setProviderBaseUrl,
+  type ProviderId,
 } from '../../agent/providers.js'
 
 const providerEnum = z.enum(SUPPORTED_PROVIDERS as unknown as [string, ...string[]])
@@ -22,9 +23,10 @@ export const settingsRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
-      await setProviderApiKey(input.provider as 'anthropic' | 'openai', input.apiKey)
+      const provider = input.provider as ProviderId
+      await setProviderApiKey(provider, input.apiKey)
       if (input.baseUrl !== undefined) {
-        await setProviderBaseUrl(input.provider as 'anthropic' | 'openai', input.baseUrl)
+        await setProviderBaseUrl(provider, input.baseUrl)
       }
       return { ok: true as const }
     }),
@@ -37,14 +39,14 @@ export const settingsRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
-      await setProviderBaseUrl(input.provider as 'anthropic' | 'openai', input.baseUrl)
+      await setProviderBaseUrl(input.provider as ProviderId, input.baseUrl)
       return { ok: true as const }
     }),
 
   deleteProvider: protectedProcedure
     .input(z.object({ provider: providerEnum }))
     .mutation(async ({ input }) => {
-      await deleteProvider(input.provider as 'anthropic' | 'openai')
+      await deleteProvider(input.provider as ProviderId)
       return { ok: true as const }
     }),
 })

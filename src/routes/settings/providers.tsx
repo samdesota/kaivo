@@ -6,7 +6,7 @@ import { extractTrpcMessage } from '../../lib/utils'
 import { makeEnvClient, type EnvRef } from '../../lib/env-client'
 import { SettingsPanel } from './panel'
 
-type ProviderId = 'anthropic' | 'openai'
+type ProviderId = 'anthropic' | 'openai' | 'zai'
 type EnvOAuthClient = {
   agent: {
     openAIOAuthStatus: { query: () => Promise<{ state: 'idle' | 'pending' | 'connected' | 'failed'; message: string | null }> }
@@ -24,6 +24,11 @@ const PROVIDERS: { id: ProviderId; label: string; note: string }[] = [
     id: 'openai',
     label: 'OpenAI',
     note: 'GPT-compatible models and proxies.',
+  },
+  {
+    id: 'zai',
+    label: 'Z.AI Coding Plan',
+    note: 'GLM coding models via the Z.AI Coding Plan API key.',
   },
 ]
 

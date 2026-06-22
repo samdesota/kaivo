@@ -63,6 +63,7 @@ export function ToolPart({
       <ApplyPatchToolPart
         partId={part.id}
         state={state}
+        onOpenShell={onOpenShell}
       />
     )
   }
@@ -80,16 +81,18 @@ export function ToolPart({
 
 function ApplyPatchToolPart({
   state,
+  onOpenShell,
 }: {
   partId: string
   state: ToolState
+  onOpenShell?: (content: PaneContent) => void
 }) {
   const patchText = typeof state.input?.patchText === 'string' ? state.input.patchText : ''
 
   return (
     <div className="text-xs">
       {patchText ? (
-        <DiffView diff={patchText} />
+        <DiffView diff={patchText} onOpenFile={(path) => onOpenShell?.({ type: 'file', path })} />
       ) : (
         <div className="text-[11px] text-help">
           {state.status === 'pending' ? 'Waiting for patch…' : 'No patch available.'}

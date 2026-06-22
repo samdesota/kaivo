@@ -23,3 +23,7 @@ export function useEnv(): EnvContextValue {
   if (!v) throw new Error('useEnv must be used inside EnvContextProvider')
   return v
 }
+
+export function useOptionalEnv(): EnvContextValue | null {
+  return useContext(Ctx)
+}

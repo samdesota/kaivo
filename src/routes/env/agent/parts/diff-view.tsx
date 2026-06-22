@@ -25,7 +25,7 @@ type TokenMap = Record<string, ThemedToken[][]>
 
 const shikiTheme = 'github-dark-default'
 
-export function DiffView({ diff }: { diff: string }) {
+export function DiffView({ diff, onOpenFile }: { diff: string; onOpenFile?: (path: string) => void }) {
   const files = useMemo(() => parseDiff(diff), [diff])
   const [tokens, setTokens] = useState<TokenMap>({})
 
@@ -65,13 +65,13 @@ export function DiffView({ diff }: { diff: string }) {
   return (
     <div className="font-mono text-[11px] leading-5">
       {files.map((file) => (
-        <DiffFileSection key={file.id} file={file} tokens={tokens[file.id]} />
+        <DiffFileSection key={file.id} file={file} tokens={tokens[file.id]} onOpenFile={onOpenFile} />
       ))}
     </div>
   )
 }
 
-function DiffFileSection({ file, tokens }: { file: DiffFile; tokens?: ThemedToken[][] }) {
+function DiffFileSection({ file, tokens, onOpenFile }: { file: DiffFile; tokens?: ThemedToken[][]; onOpenFile?: (path: string) => void }) {
   const [open, setOpen] = useOpenState(`diff-file:${file.id}`, true)
   const [scrollLocked, setScrollLocked] = useState(true)
   const [hasScrollableContent, setHasScrollableContent] = useState(false)
@@ -88,16 +88,29 @@ function DiffFileSection({ file, tokens }: { file: DiffFile; tokens?: ThemedToke
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            className="inline-flex shrink-0 items-center justify-center text-left"
+            title={open ? 'Collapse file diff' : 'Expand file diff'}
+            aria-label={open ? `Collapse ${file.path} diff` : `Expand ${file.path} diff`}
           >
             <span className="inline-flex w-3 justify-center font-mono text-ui-muted">
               {open ? '▾' : '▸'}
             </span>
+          </button>
+          {onOpenFile ? (
+            <button
+              type="button"
+              className="min-w-0 flex-1 truncate text-left text-content-default hover:underline focus:underline focus:outline-none"
+              title={file.path}
+              onClick={() => onOpenFile(file.path)}
+            >
+              {file.path}
+            </button>
+          ) : (
             <span className="min-w-0 flex-1 truncate text-content-default" title={file.path}>
               {file.path}
             </span>
-            {file.language !== 'text' && <span className="text-[10px] text-ui-muted">{file.language}</span>}
-          </button>
+          )}
+          {file.language !== 'text' && <span className="text-[10px] text-ui-muted">{file.language}</span>}
           <span className="flex shrink-0 items-center gap-1.5 pr-1">
             <LineDiffCount added={file.added} deleted={file.deleted} />
             {hasScrollableContent && (

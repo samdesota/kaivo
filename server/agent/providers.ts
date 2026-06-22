@@ -5,9 +5,9 @@ import { db } from '../db/client.js'
 import { secrets as secretsTable } from '../db/schema.js'
 import { eq } from 'drizzle-orm'
 
-export type ProviderId = 'anthropic' | 'openai'
+export type ProviderId = 'anthropic' | 'openai' | 'zai'
 
-export const SUPPORTED_PROVIDERS: ProviderId[] = ['anthropic', 'openai']
+export const SUPPORTED_PROVIDERS: ProviderId[] = ['anthropic', 'openai', 'zai']
 
 export interface ProviderConfig {
   provider: ProviderId
@@ -29,6 +29,10 @@ const PROVIDER_ENV: Record<ProviderId, ProviderEnvBootstrap> = {
   openai: {
     apiKeyEnv: 'OPENAI_API_KEY_BOOTSTRAP',
     baseUrlEnv: 'OPENAI_BASE_URL_BOOTSTRAP',
+  },
+  zai: {
+    apiKeyEnv: 'ZAI_API_KEY_BOOTSTRAP',
+    baseUrlEnv: 'ZAI_BASE_URL_BOOTSTRAP',
   },
 }
 
@@ -173,6 +177,9 @@ export async function buildProviderEnv(): Promise<Record<string, string>> {
     } else if (provider === 'openai') {
       out.OPENAI_API_KEY = apiKey
       if (cfg.baseUrl) out.OPENAI_BASE_URL = rewriteLoopbackForSandbox(normalizeOpenAIBaseUrl(cfg.baseUrl))
+    } else if (provider === 'zai') {
+      out.ZHIPU_API_KEY = apiKey
+      if (cfg.baseUrl) out.ZAI_BASE_URL = rewriteLoopbackForSandbox(cfg.baseUrl.replace(/\/$/, ''))
     }
   }
   return out
@@ -197,6 +204,9 @@ export async function buildProviderEnvRaw(): Promise<Record<string, string>> {
     } else if (provider === 'openai') {
       out.OPENAI_API_KEY = apiKey
       if (cfg.baseUrl) out.OPENAI_BASE_URL = normalizeOpenAIBaseUrl(cfg.baseUrl)
+    } else if (provider === 'zai') {
+      out.ZHIPU_API_KEY = apiKey
+      if (cfg.baseUrl) out.ZAI_BASE_URL = cfg.baseUrl.replace(/\/$/, '')
     }
   }
   return out

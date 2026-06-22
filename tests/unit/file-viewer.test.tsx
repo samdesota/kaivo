@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileEditorState } from '../../src/routes/env/file-editor-state'
 import { FileViewer } from '../../src/routes/env/file-viewer'
+import { EnvContextProvider } from '../../src/routes/env/env-context'
 
 type ReadState = {
   isLoading: boolean
@@ -49,15 +50,27 @@ vi.mock('../../src/env-trpc', () => ({
   },
 }))
 
-function renderViewer(props?: { editorState?: FileEditorState; onEditorStateChange?: (state: FileEditorState) => void }) {
+function renderViewer(props?: {
+  path?: string
+  editorState?: FileEditorState
+  onEditorStateChange?: (state: FileEditorState) => void
+  env?: boolean
+}) {
+  const viewer = (
+    <FileViewer
+      path={props?.path ?? '/tmp/a.ts'}
+      absolute
+      editorState={props?.editorState}
+      onEditorStateChange={props?.onEditorStateChange}
+    />
+  )
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <FileViewer
-        path="/tmp/a.ts"
-        absolute
-        editorState={props?.editorState}
-        onEditorStateChange={props?.onEditorStateChange}
-      />
+      {props?.env ? (
+        <EnvContextProvider value={{ env: { id: 'env-1', kind: 'local', url: 'http://env.test', label: 'Test env' }, envToken: 'secret-token' }}>
+          {viewer}
+        </EnvContextProvider>
+      ) : viewer}
     </QueryClientProvider>,
   )
 }
@@ -94,6 +107,22 @@ describe('FileViewer render-time freshness', () => {
     renderViewer()
 
     expect((screen.getByLabelText('editor') as HTMLTextAreaElement).value).toBe('new disk content')
+  })
+
+  it('resolves relative markdown image paths through the env raw-file endpoint', async () => {
+    readState.data = {
+      content: '![Local](images/pic.png)\n\n![Remote](https://example.test/pic.png)',
+      mtime: '2026-05-07T00:00:01.000Z',
+      binary: false,
+      tooLarge: false,
+      size: 68,
+    }
+
+    renderViewer({ path: '/tmp/docs/readme.md', env: true })
+
+    const images = screen.getAllByRole('img') as HTMLImageElement[]
+    expect(images[0].src).toBe('http://env.test/fs/raw?path=%2Ftmp%2Fdocs%2Fimages%2Fpic.png&absolute=true&token=secret-token')
+    expect(images[1].src).toBe('https://example.test/pic.png')
   })
 
   it('captures fs.read mtime when the first local edit starts', async () => {

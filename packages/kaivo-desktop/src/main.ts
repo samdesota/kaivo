@@ -577,6 +577,10 @@ async function main(): Promise<void> {
     tabStore: createMemoryTabStore(),
     session: browserTabSession,
     tabUserAgent: browserTabUserAgent,
+    logger: {
+      warn: (message: unknown, ctx?: unknown) => writeLog('main', 'info', 'webframe warn', { message: String(message), ctx }),
+      error: (message: unknown, ctx?: unknown) => writeLog('main', 'error', 'webframe error', { message: String(message), ctx }),
+    },
   })
   writeLog('main', 'info', 'desktop app starting', { stateDir, config })
   browserAgentBridge = await startBrowserAgentBridge({

@@ -94,7 +94,7 @@ mkdir -p "$install_dir/app" "$state_dir"
 echo "==> ensuring opencode CLI is available"
 if ! command -v opencode >/dev/null 2>&1; then
   echo "    opencode not found in PATH; installing globally via npm"
-  npm install -g --no-audit --no-fund --silent opencode-ai@1.4.14
+  npm install -g --no-audit --no-fund --silent opencode-ai@1.17.9
 fi
 opencode_bin=$(command -v opencode)
 opencode_dir=$(dirname "$opencode_bin")

@@ -366,7 +366,7 @@ class OpenCodeSupervisor {
       }
       throw err
     }
-    if (!providerEnv.ANTHROPIC_API_KEY && !providerEnv.OPENAI_API_KEY) {
+    if (!providerEnv.ANTHROPIC_API_KEY && !providerEnv.OPENAI_API_KEY && !providerEnv.ZHIPU_API_KEY) {
       if (options.allowOpenAIOAuthOnly || (await hasOpenAIOAuthMarker())) {
         providerEnv.OPENAI_API_KEY = OPENAI_OAUTH_PLACEHOLDER_KEY
       } else {
@@ -378,7 +378,7 @@ class OpenCodeSupervisor {
     }
     // Rewrite loopback URLs based on this env's kind. Identity returns raw
     // URLs; we adapt them to the container/local boundary.
-    for (const key of ['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL']) {
+    for (const key of ['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL', 'ZAI_BASE_URL']) {
       const val = providerEnv[key]
       if (val) providerEnv[key] = rewriteProviderUrl(val)
     }
@@ -405,7 +405,7 @@ class OpenCodeSupervisor {
     this.stopInner()
 
     const token = this.mintAgentShellToken()
-    await this.ensureOpencodeConfig()
+    await this.ensureOpencodeConfig(providerEnv)
     await this.ensureXdgDirs()
 
     const spawnEnv: Record<string, string> = {
@@ -545,7 +545,7 @@ class OpenCodeSupervisor {
     }
   }
 
-  private async ensureOpencodeConfig(): Promise<void> {
+  private async ensureOpencodeConfig(providerEnv: Record<string, string>): Promise<void> {
     const xdgConfigHome = path.join(config.CC_STATE_DIR, 'xdg', 'config')
     const dir = path.join(xdgConfigHome, 'opencode')
     await fs.mkdir(dir, { recursive: true })
@@ -568,6 +568,17 @@ class OpenCodeSupervisor {
         medium: { reasoningEffort: 'medium' },
         high: { reasoningEffort: 'high' },
         xhigh: { reasoningEffort: 'xhigh' },
+      },
+    }
+    const glm52Model = {
+      limit: {
+        context: 1_000_000,
+        input: 936_000,
+        output: 64_000,
+      },
+      modalities: {
+        input: ['text'],
+        output: ['text'],
       },
     }
     const userPlugins = await readUserOpenCodePlugins()
@@ -596,6 +607,20 @@ class OpenCodeSupervisor {
             'gpt-5.5-fast': {
               name: 'GPT 5.5 Fast (OAuth)',
               ...gpt55Model,
+            },
+          },
+        },
+        'zai-coding-plan': {
+          name: 'Z.AI Coding Plan',
+          npm: '@ai-sdk/openai-compatible',
+          options: {
+            baseURL: providerEnv.ZAI_BASE_URL ?? 'https://api.z.ai/api/coding/paas/v4',
+            apiKey: '{env:ZHIPU_API_KEY}',
+          },
+          models: {
+            'glm-5.2': {
+              name: 'GLM 5.2',
+              ...glm52Model,
             },
           },
         },

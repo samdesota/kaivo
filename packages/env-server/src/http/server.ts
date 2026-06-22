@@ -6,6 +6,7 @@ import { isAllowedOrigin } from './cors.js'
 import { logger } from '../logger.js'
 import { appRouter } from '../trpc/router.js'
 import { createContext } from '../trpc/trpc.js'
+import { FsError, readRawFile } from '../fs/service.js'
 import { getMeta, hashEnvToken, hasEnvTokenHash, isPaired } from '../envmeta/service.js'
 import { desktopPair, PairError } from '../pair/service.js'
 import { terminalService } from '../terminal/service.js'
@@ -67,6 +68,28 @@ export async function buildServer(): Promise<FastifyInstance> {
       : ''
     if (!token || !hasEnvTokenHash(hashEnvToken(token))) return reply.code(401).send({ ok: false })
     return { ok: true, instanceId: config.CC_INSTANCE_ID }
+  })
+
+  app.get('/fs/raw', async (req, reply) => {
+    const query = req.query as { path?: string; absolute?: string; token?: string } | undefined
+    const token = query?.token ?? bearerToken(req.headers.authorization)
+    if (!token || !hasEnvTokenHash(hashEnvToken(token))) return reply.code(401).send({ error: 'unauthorized' })
+    if (!query?.path) return reply.code(400).send({ error: 'path required' })
+
+    try {
+      const file = await readRawFile(query.path, { absolute: query.absolute === 'true' })
+      reply
+        .header('content-type', contentTypeForPath(file.path))
+        .header('cache-control', 'no-store')
+        .header('last-modified', file.mtime.toUTCString())
+      return reply.send(file.content)
+    } catch (err) {
+      if (err instanceof FsError) {
+        const status = err.code === 'not_found' ? 404 : err.code === 'path_traversal' ? 400 : 400
+        return reply.code(status).send({ error: err.message })
+      }
+      throw err
+    }
   })
 
   app.post('/pair/desktop', async (req, reply) => {
@@ -179,4 +202,26 @@ export async function buildServer(): Promise<FastifyInstance> {
 
 function verifyEnvToken(token: string): boolean {
   return hasEnvTokenHash(hashEnvToken(token))
+}
+
+function bearerToken(value: string | string[] | undefined): string | null {
+  const header = Array.isArray(value) ? value[0] : value
+  return typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
+    ? header.slice(7).trim()
+    : null
+}
+
+function contentTypeForPath(filePath: string): string {
+  const ext = filePath.toLowerCase().split('.').pop()
+  switch (ext) {
+    case 'apng': return 'image/apng'
+    case 'avif': return 'image/avif'
+    case 'gif': return 'image/gif'
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg'
+    case 'png': return 'image/png'
+    case 'svg': return 'image/svg+xml'
+    case 'webp': return 'image/webp'
+    default: return 'application/octet-stream'
+  }
 }

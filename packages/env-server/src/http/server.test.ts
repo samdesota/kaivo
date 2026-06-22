@@ -82,6 +82,41 @@ describe('env-server healthz', () => {
       await app.close()
     }
   })
+
+  it('serves paired raw workspace files for markdown images', async () => {
+    vi.resetModules()
+    const workingDir = tempStateDir()
+    fs.mkdirSync(path.join(workingDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(workingDir, 'docs', 'pic.png'), 'image-bytes')
+    vi.stubEnv('CC_KIND', 'local')
+    vi.stubEnv('CC_WORKING_DIR', workingDir)
+    vi.stubEnv('CC_IDENTITY_URL', 'https://code.438d.xyz')
+    vi.stubEnv('CC_STATE_DIR', tempStateDir())
+    vi.stubEnv('CC_INSTANCE_ID', 'dev-worktree-a')
+    vi.stubEnv('CC_LABEL', 'Worktree A')
+
+    const { runMigrations } = await import('../db/migrate.js')
+    const { initEnvMetaFromSecrets } = await import('../envmeta/service.js')
+    const { buildServer } = await import('./server.js')
+    await runMigrations()
+    await initEnvMetaFromSecrets()
+    const app = await buildServer()
+
+    try {
+      const unauthorized = await app.inject({ method: 'GET', url: '/fs/raw?path=/docs/pic.png' })
+      expect(unauthorized.statusCode).toBe(401)
+
+      const paired = await app.inject({ method: 'POST', url: '/pair/desktop', payload: { instanceId: 'dev-worktree-a' } })
+      const { envToken } = paired.json() as { envToken: string }
+      const response = await app.inject({ method: 'GET', url: `/fs/raw?path=${encodeURIComponent('/docs/pic.png')}&token=${encodeURIComponent(envToken)}` })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-type']).toBe('image/png')
+      expect(response.body).toBe('image-bytes')
+    } finally {
+      await app.close()
+    }
+  })
 })
 
 function tempStateDir(): string {

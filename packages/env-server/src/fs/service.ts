@@ -34,6 +34,13 @@ export interface ReadResult {
   tooLarge: boolean
 }
 
+export interface RawFileResult {
+  path: string
+  size: number
+  mtime: Date
+  content: Buffer
+}
+
 export interface FsEvent {
   type: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
   path: string
@@ -193,6 +200,30 @@ export async function readFile(
     content: binary ? null : buf.toString('utf8'),
     binary,
     tooLarge: false,
+  }
+}
+
+export async function readRawFile(
+  filePath: string,
+  opts: { absolute?: boolean } = {},
+): Promise<RawFileResult> {
+  const abs = opts.absolute ? requireAbsolute(filePath) : resolveWorkspacePath(filePath)
+  let stat
+  try {
+    stat = await fs.stat(abs)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new FsError('not_found', 'file not found')
+    }
+    throw err
+  }
+  if (!stat.isFile()) throw new FsError('not_readable', 'not a regular file')
+
+  return {
+    path: opts.absolute ? abs : toWorkspaceRelative(abs),
+    size: stat.size,
+    mtime: stat.mtime,
+    content: await fs.readFile(abs),
   }
 }
 

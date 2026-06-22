@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm'
 import { Eye, FileText } from 'lucide-react'
 import type { ReactNode, WheelEvent } from 'react'
 import { envTrpc } from '../../env-trpc'
+import { resolveEnvUrl } from '../../lib/env-client'
 import { trpcQueryKey } from '../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../lib/utils'
 import { languageForPath } from '../../lib/cm-language'
@@ -18,6 +19,7 @@ import {
   type FileEditorState,
 } from './file-editor-state'
 import { shouldRefreshFileForFsEvent } from './file-watch-match'
+import { useOptionalEnv } from './env-context'
 
 const workspaceEditorTheme = EditorView.theme({
   '&': { backgroundColor: 'var(--color-neutral-950)' },
@@ -43,6 +45,7 @@ export function FileViewer({
   onEditorStateChange?: (state: FileEditorState) => void
 }) {
   const read = envTrpc.fs.read.useQuery({ path, absolute })
+  const envContext = useOptionalEnv()
   const queryClient = useQueryClient()
   const write = envTrpc.fs.write.useMutation()
 
@@ -156,6 +159,10 @@ export function FileViewer({
       {markdown && markdownMode === 'preview' ? (
         <MarkdownPreview
           value={value}
+          path={path}
+          absolute={absolute}
+          rawFileBaseUrl={envContext ? `${resolveEnvUrl(envContext.env)}/fs/raw` : null}
+          envToken={envContext?.envToken ?? null}
           targetSourceLine={pendingSourceLineRef.current}
           onTopLineReaderChange={(reader) => {
             getPreviewTopLineRef.current = reader
@@ -241,16 +248,28 @@ function FileViewerBar({
 
 function MarkdownPreview({
   value,
+  path,
+  absolute,
+  rawFileBaseUrl,
+  envToken,
   targetSourceLine,
   onTopLineReaderChange,
   onTargetSourceLineApplied,
 }: {
   value: string
+  path: string
+  absolute?: boolean
+  rawFileBaseUrl: string | null
+  envToken: string | null
   targetSourceLine: number | null
   onTopLineReaderChange: (reader: () => number | null) => void
   onTargetSourceLineApplied: () => void
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents((src) => resolveMarkdownImageSrc(src, path, Boolean(absolute), rawFileBaseUrl, envToken)),
+    [absolute, envToken, path, rawFileBaseUrl],
+  )
   useLayoutEffect(() => {
     if (targetSourceLine === null) return
     scrollPreviewToSourceLine(scrollerRef.current, targetSourceLine)
@@ -283,7 +302,8 @@ function sourceLineProps(node: MarkdownComponentProps['node']): { 'data-source-l
   return typeof line === 'number' ? { 'data-source-line': line } : {}
 }
 
-const markdownComponents = {
+function createMarkdownComponents(resolveImageSrc: (src: string | undefined) => string | undefined) {
+  return {
   h1: (p: MarkdownComponentProps) => <h1 {...sourceLineProps(p.node)} className="mt-0 mb-4 border-b border-neutral-800 pb-2 text-2xl font-semibold text-header-1">{p.children}</h1>,
   h2: (p: MarkdownComponentProps) => <h2 {...sourceLineProps(p.node)} className="mt-7 mb-3 border-b border-neutral-800/70 pb-1.5 text-xl font-semibold text-header-1">{p.children}</h2>,
   h3: (p: MarkdownComponentProps) => <h3 {...sourceLineProps(p.node)} className="mt-6 mb-2 text-lg font-semibold text-header-2">{p.children}</h3>,
@@ -307,8 +327,57 @@ const markdownComponents = {
   th: (p: MarkdownComponentProps) => <th className="border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-left font-semibold text-header-2">{p.children}</th>,
   td: (p: MarkdownComponentProps) => <td className="border border-neutral-800 px-3 py-1.5 text-content-default">{p.children}</td>,
   hr: () => <hr className="my-6 border-neutral-800" />,
-  img: (p: MarkdownComponentProps & { src?: string; alt?: string }) => <img {...sourceLineProps(p.node)} src={p.src} alt={p.alt ?? ''} className="my-4 max-w-full rounded border border-neutral-800" />,
+  img: (p: MarkdownComponentProps & { src?: string; alt?: string }) => <img {...sourceLineProps(p.node)} src={resolveImageSrc(p.src)} alt={p.alt ?? ''} className="my-4 max-w-full rounded border border-neutral-800" />,
   strong: (p: MarkdownComponentProps) => <strong className="font-semibold text-header-1">{p.children}</strong>,
+  }
+}
+
+function resolveMarkdownImageSrc(
+  src: string | undefined,
+  markdownPath: string,
+  markdownAbsolute: boolean,
+  rawFileBaseUrl: string | null,
+  envToken: string | null,
+): string | undefined {
+  if (!src || isExternalMarkdownUrl(src) || !rawFileBaseUrl || !envToken) return src
+  const imagePath = resolveMarkdownRelativePath(markdownPath, src)
+  const url = new URL(rawFileBaseUrl)
+  url.searchParams.set('path', imagePath)
+  url.searchParams.set('absolute', String(markdownAbsolute && imagePath.startsWith('/')))
+  url.searchParams.set('token', envToken)
+  return url.toString()
+}
+
+function isExternalMarkdownUrl(src: string): boolean {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)
+}
+
+function resolveMarkdownRelativePath(markdownPath: string, src: string): string {
+  if (src.startsWith('/')) return normalizeSlashPath(src)
+  const dir = dirnameSlashPath(markdownPath)
+  return normalizeSlashPath(dir ? `${dir}/${src}` : src)
+}
+
+function dirnameSlashPath(filePath: string): string {
+  const normalized = normalizeSlashPath(filePath)
+  const index = normalized.lastIndexOf('/')
+  if (index <= 0) return normalized.startsWith('/') ? '/' : ''
+  return normalized.slice(0, index)
+}
+
+function normalizeSlashPath(filePath: string): string {
+  const absolute = filePath.startsWith('/')
+  const parts: string[] = []
+  for (const part of filePath.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (parts.length && parts[parts.length - 1] !== '..') parts.pop()
+      else if (!absolute) parts.push(part)
+      continue
+    }
+    parts.push(part)
+  }
+  return `${absolute ? '/' : ''}${parts.join('/')}` || (absolute ? '/' : '.')
 }
 
 function MermaidDiagram({ code, sourceLine }: { code: string; sourceLine?: number }) {
