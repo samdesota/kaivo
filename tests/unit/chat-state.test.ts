@@ -20,6 +20,7 @@ function status(overrides: Partial<ChatSessionStatus> = {}): ChatSessionStatus {
 class MockChatApi implements ChatStateApi {
   messages: Array<{ info: unknown; parts: unknown[] }> = []
   children: Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }> = []
+  replay: ChatTranscriptEvent[] = []
   latestSeq = 0
   currentStatus = status()
   subscriptions: Array<{
@@ -31,6 +32,7 @@ class MockChatApi implements ChatStateApi {
 
   sessionMessages = vi.fn(async () => this.messages)
   childTranscripts = vi.fn(async () => this.children)
+  transcriptReplay = vi.fn(async (_sessionId: string, sinceSeq: number) => this.replay.filter((evt) => (evt.seq ?? 0) > sinceSeq))
   transcriptLatestSeq = vi.fn(async () => this.latestSeq)
   sessionStatus = vi.fn(async () => this.currentStatus)
 
@@ -124,6 +126,65 @@ describe('ChatStateStore', () => {
     })
 
     expect(store.getSnapshot('s1').running).toBe(true)
+  })
+
+  it('renders session errors as transcript parts and stops running', async () => {
+    const api = new MockChatApi()
+    const store = new ChatStateStore(api)
+    store.retainSession('s1')
+    await flush()
+
+    api.subscriptions[0]?.handlers.onData({
+      seq: 1,
+      type: 'session.busy',
+      payload: { sessionID: 'oc1' },
+    })
+    api.subscriptions[0]?.handlers.onData({
+      seq: 2,
+      type: 'session.error',
+      payload: {
+        sessionID: 'oc1',
+        message: 'AI_APICallError: Insufficient balance or no resource package. Please recharge.',
+        time: { created: 123 },
+      },
+    })
+
+    const snap = store.getSnapshot('s1')
+    expect(snap.running).toBe(false)
+    const part = [...snap.state.parts.values()].find((candidate) => candidate.type === 'session-error')
+    expect(part?.message).toContain('Insufficient balance')
+  })
+
+  it('hydrates persisted session errors from transcript replay', async () => {
+    const api = new MockChatApi()
+    api.latestSeq = 2
+    api.replay = [
+      {
+        seq: 1,
+        type: 'session.busy',
+        payload: { sessionID: 'oc1' },
+      },
+      {
+        seq: 2,
+        type: 'session.error',
+        payload: {
+          sessionID: 'oc1',
+          message: 'unknown provider for model gpt-5.5-pro',
+          time: { created: 123 },
+        },
+      },
+    ]
+    const store = new ChatStateStore(api)
+
+    store.retainSession('s1')
+    await flush()
+
+    expect(api.transcriptReplay).toHaveBeenCalledWith('s1', 0)
+    expect(api.subscriptions[0]?.sinceSeq).toBe(2)
+    const snap = store.getSnapshot('s1')
+    expect(snap.running).toBe(false)
+    const part = [...snap.state.parts.values()].find((candidate) => candidate.type === 'session-error')
+    expect(part?.message).toBe('unknown provider for model gpt-5.5-pro')
   })
 
   it('keeps the optimistic user message visible and hides the real echo until idle', async () => {

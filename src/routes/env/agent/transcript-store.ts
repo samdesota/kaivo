@@ -70,6 +70,12 @@ export interface TranscriptState {
   childTranscripts: Map<string, TranscriptState>
 }
 
+export interface SessionErrorPart extends Part {
+  type: 'session-error'
+  title: string
+  message: string
+}
+
 export function emptyTranscript(): TranscriptState {
   return {
     messages: new Map(),
@@ -154,7 +160,7 @@ export function hydrateChildren(
 
 export function applyEvent(
   state: TranscriptState,
-  evt: { type: string; parentSessionId?: string; payload: Record<string, unknown> },
+  evt: { seq?: number; type: string; parentSessionId?: string; payload: Record<string, unknown> },
 ): TranscriptState {
   if (evt.type === 'child.session.created') {
     const info = (evt.payload as { info?: { id?: string } }).info
@@ -249,9 +255,50 @@ export function applyEvent(
       if (!Array.isArray(t.todos)) return state
       return { ...state, todos: t.todos }
     }
+    case 'session.error': {
+      const sessionID = (evt.payload as { sessionID?: string }).sessionID ?? 'unknown'
+      const message = extractSessionErrorMessage(evt.payload)
+      const created = extractSessionErrorTime(evt.payload) ?? Date.now()
+      const messageID = `session-error:${sessionID}:${evt.seq ?? created}`
+      let next = upsertMessage(state, {
+        id: messageID,
+        role: 'assistant',
+        sessionID,
+        time: { created, completed: created },
+        synthetic: true,
+      } as MessageInfo)
+      next = upsertPart(next, {
+        id: `${messageID}:part`,
+        type: 'session-error',
+        messageID,
+        sessionID,
+        title: 'Agent error',
+        message,
+        time: { start: created, end: created },
+      } as SessionErrorPart)
+      return next
+    }
     default:
       return state
   }
+}
+
+function extractSessionErrorMessage(payload: Record<string, unknown>): string {
+  const raw = (payload as { message?: unknown; error?: unknown }).message ?? (payload as { error?: unknown }).error
+  if (typeof raw === 'string' && raw.trim()) return raw.trim()
+  if (raw instanceof Error && raw.message.trim()) return raw.message.trim()
+  if (raw && typeof raw === 'object') {
+    const nested = raw as { message?: unknown; error?: unknown }
+    if (typeof nested.message === 'string' && nested.message.trim()) return nested.message.trim()
+    if (typeof nested.error === 'string' && nested.error.trim()) return nested.error.trim()
+  }
+  return 'The agent hit an error and stopped. Check the model/provider configuration and try again.'
+}
+
+function extractSessionErrorTime(payload: Record<string, unknown>): number | undefined {
+  const time = (payload as { time?: { created?: unknown; completed?: unknown } }).time
+  const created = time?.created ?? time?.completed
+  return typeof created === 'number' ? created : undefined
 }
 
 export function flattenParts(state: TranscriptState): Part[] {

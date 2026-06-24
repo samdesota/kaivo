@@ -183,6 +183,12 @@ export interface TranscriptEvent {
 
 type TranscriptListener = (evt: TranscriptEvent) => void
 
+type OpencodeSessionStatus = {
+  type?: string
+  message?: unknown
+  error?: unknown
+}
+
 // One opencode `/event` SSE stream per project directory. opencode routes
 // events for sessions bound to a non-default directory through that
 // project's bus, so a single global subscription only sees the supervisor's
@@ -234,6 +240,7 @@ class AgentService {
   private runningOpencodeSessions = new Set<string>()
   private queuedFollowUps = new Map<string, QueuedFollowUp[]>()
   private blockingNotificationKeys = new Set<string>()
+  private surfacedStatusErrors = new Map<string, string>()
   private openAIOAuthStatus: OpenAIOAuthStatus = {
     state: 'idle',
     message: null,
@@ -862,9 +869,11 @@ class AgentService {
     let running = false
     try {
       const statusRes = await client.session.status({ ...dirOpts, throwOnError: true })
-      const statuses = statusRes.data as Record<string, { type: string }>
+      const statuses = statusRes.data as Record<string, OpencodeSessionStatus>
       const st = statuses[row.opencodeSessionId]
       running = st?.type === 'busy'
+      if (st?.type === 'retry') await this.handleRetryStatus(row.opencodeSessionId, st, client, dirOpts)
+      else this.surfacedStatusErrors.delete(row.opencodeSessionId)
     } catch {
       // opencode down
     }
@@ -1403,6 +1412,7 @@ class AgentService {
     type: TranscriptEvent['type'],
     payload: Record<string, unknown>,
   ): TranscriptEvent {
+    if (type === 'session.busy') this.surfacedStatusErrors.delete(opencodeSessionId)
     const running = type === 'session.busy' || type === 'message.part.updated'
       ? true
       : type === 'session.idle' || type === 'session.error'
@@ -1422,6 +1432,38 @@ class AgentService {
       }
     }
     return evt
+  }
+
+  private async handleRetryStatus(
+    opencodeSessionId: string,
+    status: OpencodeSessionStatus,
+    client: OpencodeClient,
+    dirOpts: ReturnType<typeof directoryOpts>,
+  ): Promise<void> {
+    this.surfaceStatusError(opencodeSessionId, status)
+    this.queuedFollowUps.delete(opencodeSessionId)
+    try {
+      await client.session.abort({
+        path: { id: opencodeSessionId },
+        ...dirOpts,
+        throwOnError: true,
+      })
+    } catch (err) {
+      logger.warn({ err, opencodeSessionId }, 'failed to abort retrying opencode session')
+    }
+  }
+
+  private surfaceStatusError(opencodeSessionId: string, status: OpencodeSessionStatus): void {
+    const message = String(status.message ?? status.error ?? 'The agent hit an error and is retrying.')
+    if (this.surfacedStatusErrors.get(opencodeSessionId) === message) return
+    this.surfacedStatusErrors.set(opencodeSessionId, message)
+    this.runningOpencodeSessions.delete(opencodeSessionId)
+    this.emitTranscriptEvent(opencodeSessionId, 'session.error', {
+      sessionID: opencodeSessionId,
+      message,
+      time: { created: Date.now() },
+    })
+    void this.createBlockingNotification(opencodeSessionId, 'error', 'error', 'Agent error', message)
   }
 
   private async sendPromptToOpencode(input: {
@@ -1445,8 +1487,13 @@ class AgentService {
     if (this.runningOpencodeSessions.has(opencodeSessionId)) return true
     try {
       const statusRes = await client.session.status({ ...dirOpts, throwOnError: true })
-      const statuses = statusRes.data as Record<string, { type: string }>
-      return statuses[opencodeSessionId]?.type === 'busy'
+      const statuses = statusRes.data as Record<string, OpencodeSessionStatus>
+      const st = statuses[opencodeSessionId]
+      if (st?.type === 'retry') {
+        await this.handleRetryStatus(opencodeSessionId, st, client, dirOpts)
+        return false
+      }
+      return st?.type === 'busy'
     } catch {
       return false
     }

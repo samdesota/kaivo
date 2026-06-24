@@ -1,5 +1,6 @@
 import type { PaneContent } from '../../shell/tab-state'
-import type { Part, TranscriptState } from '../transcript-store'
+import type { Part, SessionErrorPart, TranscriptState } from '../transcript-store'
+import { ErrorPart } from './error-part'
 import { FilePart } from './file-part'
 import { PatchPart } from './patch-part'
 import { ReasoningPart } from './reasoning-part'
@@ -44,6 +45,8 @@ export function PartRenderer({
       return <FilePart part={part} />
     case 'patch':
       return <PatchPart part={part} />
+    case 'session-error':
+      return <ErrorPart part={part as SessionErrorPart} />
     default:
       return (
         <div className="text-[10px] italic text-neutral-600">

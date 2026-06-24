@@ -31,12 +31,16 @@ const opencodeMessagesData = vi.hoisted(() => [] as Array<{
   info?: { role?: string }
   parts?: Array<{ type?: string; text?: string }>
 }>)
+const opencodeStatusData = vi.hoisted(() => new Map<string, { type: string; message?: string }>())
+const opencodeAbortCalls = vi.hoisted(() => [] as string[])
 
 function resetState() {
   agentRows.length = 0
   transcriptRows.length = 0
   recentRows.length = 0
   opencodeMessagesData.length = 0
+  opencodeStatusData.clear()
+  opencodeAbortCalls.length = 0
   opencodeSessionSeq = 0
   createAgentNotificationMock.mockReset()
 }
@@ -161,6 +165,12 @@ vi.mock('@opencode-ai/sdk', () => ({
         data: { id: `oc-${++opencodeSessionSeq}`, title: body?.title ?? null },
       }),
       messages: async () => ({ data: opencodeMessagesData }),
+      status: async () => ({ data: Object.fromEntries(opencodeStatusData) }),
+      todo: async () => ({ data: [] }),
+      abort: async ({ path }: { path: { id: string } }) => {
+        opencodeAbortCalls.push(path.id)
+        opencodeStatusData.delete(path.id)
+      },
       promptAsync: async () => undefined,
     },
   }),
@@ -271,6 +281,36 @@ describe('agent service workspace sessions', () => {
       sessionId: session.opencodeSessionId,
     })
     expect(await agentService.transcriptReplay(session.id, 1)).toEqual([])
+  })
+
+  it('surfaces opencode retry status as a transcript error once', async () => {
+    const { agentService } = await import('./service.js')
+
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    opencodeStatusData.set(session.opencodeSessionId, {
+      type: 'retry',
+      message: 'unknown provider for model gpt-5.5-pro',
+    })
+
+    const status = await agentService.sessionStatus({ sessionId: session.id })
+    expect(status.running).toBe(false)
+    expect(opencodeAbortCalls).toEqual([session.opencodeSessionId])
+
+    await agentService.sessionStatus({ sessionId: session.id })
+    const replay = await agentService.transcriptReplay(session.id, 0)
+    const errors = replay.filter((evt) => evt.type === 'session.error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]?.payload).toMatchObject({
+      sessionID: session.opencodeSessionId,
+      message: 'unknown provider for model gpt-5.5-pro',
+    })
+    await vi.waitFor(() => expect(createAgentNotificationMock).toHaveBeenCalledTimes(1))
+    expect(createAgentNotificationMock.mock.calls[0]?.[0]).toMatchObject({
+      workspaceId: 'workspace-a',
+      sessionId: session.id,
+      kind: 'error',
+      summary: 'unknown provider for model gpt-5.5-pro',
+    })
   })
 
   it('preserves fast-tier session model selections', async () => {
