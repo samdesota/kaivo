@@ -313,6 +313,31 @@ describe('agent service workspace sessions', () => {
     })
   })
 
+  it('projects persisted session errors into canonical session messages only for the matching session', async () => {
+    const { agentService } = await import('./service.js')
+
+    const failed = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    const unrelated = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: failed.opencodeSessionId,
+        message: 'unknown provider for model gpt-5.5-pro',
+        time: { created: 123 },
+      },
+    })
+
+    const failedMessages = await agentService.sessionMessages(failed.id)
+    const failedError = failedMessages.flatMap((message) => message.parts).find((part) => part.type === 'session-error')
+    expect(failedError).toMatchObject({
+      sessionID: failed.opencodeSessionId,
+      message: 'unknown provider for model gpt-5.5-pro',
+    })
+
+    const unrelatedMessages = await agentService.sessionMessages(unrelated.id)
+    expect(unrelatedMessages.flatMap((message) => message.parts).some((part) => part.type === 'session-error')).toBe(false)
+  })
+
   it('preserves fast-tier session model selections', async () => {
     const { agentService } = await import('./service.js')
     const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })

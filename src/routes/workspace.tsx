@@ -703,13 +703,9 @@ function WorkspaceShell({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        void openCommandPalette({ initialOpenTarget: universalMenuOpenTargetForShortcut(e.shiftKey, globalTabsMode) })
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
         void openCommandPalette({
-          initialScope: universalMenuScopeForTabShortcut(),
           initialOpenTarget: universalMenuOpenTargetForShortcut(e.shiftKey, globalTabsMode),
         })
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
@@ -912,7 +908,7 @@ function WorkspaceEmptyPaneCta({ onOpenPalette }: { onOpenPalette: () => void })
       >
         <span>Open a shell, file, or browser pane</span>
         <span className="rounded border border-neutral-800 bg-neutral-900/60 px-1.5 py-0.5 text-[12px] uppercase tracking-wide text-neutral-400 group-hover:bg-neutral-900 group-hover:text-neutral-200">
-          ⌘K
+          ⌘T
         </span>
       </button>
     </section>
@@ -1644,10 +1640,6 @@ export function nextGlobalTabIdAfterClose(tabs: WorkspaceTab[], closingTabId: st
   if (idx === -1) return browserTabs[0]?.id ?? null
   const remaining = browserTabs.filter((tab) => tab.id !== closingTabId)
   return remaining[idx]?.id ?? remaining[idx - 1]?.id ?? null
-}
-
-export function universalMenuScopeForTabShortcut(): UniversalMenuInitialScope {
-  return 'web'
 }
 
 export function universalMenuOpenTargetForShortcut(shiftKey: boolean, globalTabsMode: boolean): UniversalMenuOpenTarget {

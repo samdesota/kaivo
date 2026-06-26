@@ -52,7 +52,6 @@ export interface ChatSnapshot {
 export interface ChatStateApi {
   sessionMessages(sessionId: string): Promise<Array<{ info: unknown; parts: unknown[] }>>
   childTranscripts(sessionId: string): Promise<Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }>>
-  transcriptReplay(sessionId: string, sinceSeq: number): Promise<ChatTranscriptEvent[]>
   transcriptLatestSeq(sessionId: string): Promise<number>
   sessionStatus(sessionId: string): Promise<ChatSessionStatus>
   subscribeTranscript(
@@ -68,7 +67,6 @@ interface TrpcChatClient {
     childTranscripts: {
       query(input: { sessionId: string }): Promise<Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }>>
     }
-    transcriptReplay: { query(input: { sessionId: string; sinceSeq: number }): Promise<ChatTranscriptEvent[]> }
     transcriptLatestSeq: { query(input: { sessionId: string }): Promise<{ seq?: number }> }
     sessionStatus: { query(input: { sessionId: string }): Promise<ChatSessionStatus> }
     transcript: {
@@ -245,10 +243,9 @@ export class ChatStateStore {
     entry.error = null
     this.emit(sessionId)
     try {
-      const [messages, children, replay, latestSeq, status] = await Promise.all([
+      const [messages, children, latestSeq, status] = await Promise.all([
         this.api.sessionMessages(sessionId),
         this.api.childTranscripts(sessionId),
-        this.api.transcriptReplay(sessionId, 0),
         this.api.transcriptLatestSeq(sessionId),
         this.api.sessionStatus(sessionId).catch(() => null),
       ])
@@ -261,7 +258,7 @@ export class ChatStateStore {
         hadStatus: Boolean(status),
         optimisticCount: entry.optimisticMessages.size,
       })
-      entry.state = applyReplayEvents(hydrateChildren(hydrateFromMessages(emptyTranscript(), messages), children), replay)
+      entry.state = hydrateChildren(hydrateFromMessages(emptyTranscript(), messages), children)
       entry.state = reapplyOptimisticMessages(entry.state, entry.optimisticMessages)
       entry.lastSeenSeq = latestSeq
       entry.seenSeqs = new Set()
@@ -363,14 +360,13 @@ export class ChatStateStore {
 
   private async replayAndReconnect(sessionId: string, entry: SessionEntry): Promise<void> {
     try {
-      const [messages, children, replay, latestSeq] = await Promise.all([
+      const [messages, children, latestSeq] = await Promise.all([
         this.api.sessionMessages(sessionId),
         this.api.childTranscripts(sessionId),
-        this.api.transcriptReplay(sessionId, entry.lastSeenSeq),
         this.api.transcriptLatestSeq(sessionId),
       ])
       if (!this.isRetained(sessionId, entry)) return
-      entry.state = applyReplayEvents(hydrateChildren(hydrateFromMessages(entry.state, messages), children), replay)
+      entry.state = hydrateChildren(hydrateFromMessages(entry.state, messages), children)
       entry.state = removeEchoedOptimisticMessages(entry.state, entry.optimisticMessages)
       entry.lastSeenSeq = Math.max(entry.lastSeenSeq, latestSeq)
       entry.reconnecting = false
@@ -461,13 +457,6 @@ function addOptimisticMessage(state: TranscriptState, id: string, text: string):
       },
     },
   })
-  return next
-}
-
-function applyReplayEvents(state: TranscriptState, events: ChatTranscriptEvent[]): TranscriptState {
-  let next = state
-  const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
-  for (const evt of ordered) next = applyEvent(next, evt)
   return next
 }
 
@@ -586,9 +575,6 @@ export function createTrpcChatStateApi(env: EnvRef, envToken: string): ChatState
     },
     childTranscripts(sessionId) {
       return client.agent.childTranscripts.query({ sessionId })
-    },
-    transcriptReplay(sessionId, sinceSeq) {
-      return client.agent.transcriptReplay.query({ sessionId, sinceSeq })
     },
     async transcriptLatestSeq(sessionId) {
       const res = await client.agent.transcriptLatestSeq.query({ sessionId })

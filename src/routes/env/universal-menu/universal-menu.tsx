@@ -581,11 +581,13 @@ export function UniversalMenu({
         .map((entry) => entry.result)
     }
     if (!trimmed) return []
-    return commandResults
-      .map((result) => ({ result, score: fuzzyScore(result.haystack.toLowerCase(), trimmed) }))
-      .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .map((entry) => entry.result)
+    return normalSearchResults({
+      bookmarks: bookmarksStore.bookmarks,
+      commandResults,
+      faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
+      query,
+      openContent: (content) => onOpenContent?.(content, newWorkspaceIntent ? 'global' : initialOpenTarget),
+    })
   }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, initialOpenTarget, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
@@ -646,24 +648,9 @@ export function UniversalMenu({
     }
     const shellResults = [...shellMap.values()]
 
-    const browserTabs = contextItems
-      .filter((item) => item.kind === 'browser-tab')
-      .map((item): UniversalMenuResult => ({
-        id: item.id,
-        kind: 'browser-tab',
-        label: item.label,
-        detail: item.detail,
-        icon: item.content.type === 'browser'
-          ? browserTabIconForUrl({ url: item.content.url, records: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord> })
-          : paneTabIconForType('browser'),
-        haystack: `${item.label} ${item.detail ?? ''}`,
-        run: () => onOpenContent?.(item.content),
-      }))
-
     return [
       { id: 'folders', label: 'Recent workspace folders', results: [...folderMap.values()] },
       { id: 'shells', label: 'Shells', results: shellResults },
-      { id: 'browser-tabs', label: 'Pages', results: browserTabs },
     ].filter((section) => section.results.length > 0)
   }, [contextItems, disposeShell, envUtils.shell.list, faviconCache.data, homePath, onCreateChat, onOpenContent, sessions.data, shells.data, workspaceId])
 
@@ -767,7 +754,7 @@ export function UniversalMenu({
 
   function setInputValue(value: string) {
     if (!scope) {
-      if (isPathLikeInput(value)) {
+      if (isPathLikeInput(value) && resolveBrowserAddress(value).kind !== 'url') {
         startTransition(() => enterScope(openFolderScope, value))
         return
       }
@@ -1696,6 +1683,56 @@ function shellScopeResults({ shells, loading, error, query, homePath, openShell,
       actions: [{ id: 'terminate', label: 'Terminate shell', key: 't', run: () => terminateShell(shell.id) }],
     }))
   return rows.length ? rows : [disabledRow('shells-empty', q ? 'No matching shells.' : 'No shells in this workspace.')]
+}
+
+function normalSearchResults({
+  bookmarks,
+  commandResults,
+  faviconRecords,
+  query,
+  openContent,
+}: {
+  bookmarks: BookmarkRecord[]
+  commandResults: UniversalMenuResult[]
+  faviconRecords: Record<string, FaviconCacheRecord>
+  query: string
+  openContent: (content: PaneContent) => void
+}): UniversalMenuResult[] {
+  const trimmed = query.trim()
+  const lower = trimmed.toLowerCase()
+  const rows: UniversalMenuResult[] = []
+  const directDecision = resolveBrowserAddress(trimmed)
+
+  if (directDecision.kind === 'url') {
+    const directUrl = directDecision.url.replace(/\/$/, '')
+    rows.push({
+      id: `normal-url:${directUrl}`,
+      kind: 'browser-tab',
+      label: directUrl.replace(/^https?:\/\//, ''),
+      detail: directUrl,
+      icon: browserTabIconForUrl({ url: directUrl, records: faviconRecords }),
+      haystack: directUrl,
+      run: () => openContent({ type: 'browser', url: directUrl }),
+    })
+  }
+
+  rows.push(...matchBookmarks(bookmarks, query).map((match): UniversalMenuResult => ({
+    id: `normal-bookmark:${match.bookmark.id}`,
+    kind: 'bookmark',
+    label: match.bookmark.title,
+    detail: match.bookmark.origin?.replace(/^https?:\/\//, '') ?? match.bookmark.url,
+    icon: bookmarkIcon(match.bookmark, faviconRecords),
+    haystack: `${match.bookmark.title} ${match.bookmark.url} ${match.bookmark.origin ?? ''}`,
+    run: () => openContent({ type: 'browser', url: match.bookmark.url }),
+  })))
+
+  rows.push(...commandResults
+    .map((result) => ({ result, score: fuzzyScore(result.haystack.toLowerCase(), lower) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.result))
+
+  return rows
 }
 
 function webScopeResults({

@@ -77,10 +77,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        void openCommandPalette()
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
         void openCommandPalette(e.shiftKey ? 'new-workspace' : 'default')
       }
@@ -118,9 +115,9 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
           <button
             onClick={() => void openCommandPalette()}
             className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
-            title="Open command palette (⌘K)"
+            title="Open command palette (⌘T)"
           >
-            ⌘K
+            ⌘T
           </button>
           <ShellsDropdown onOpen={openContent} />
           <Link

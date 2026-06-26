@@ -102,6 +102,24 @@ function errorMessage(err: unknown): string {
   return 'OpenAI OAuth failed'
 }
 
+function extractSessionErrorMessage(payload: Record<string, unknown>): string {
+  const raw = (payload as { message?: unknown; error?: unknown }).message ?? (payload as { error?: unknown }).error
+  if (typeof raw === 'string' && raw.trim()) return raw.trim()
+  if (raw instanceof Error && raw.message.trim()) return raw.message.trim()
+  if (raw && typeof raw === 'object') {
+    const nested = raw as { message?: unknown; error?: unknown }
+    if (typeof nested.message === 'string' && nested.message.trim()) return nested.message.trim()
+    if (typeof nested.error === 'string' && nested.error.trim()) return nested.error.trim()
+  }
+  return 'The agent hit an error and stopped. Check the model/provider configuration and try again.'
+}
+
+function extractSessionErrorTime(payload: Record<string, unknown>): number | undefined {
+  const time = (payload as { time?: { created?: unknown; completed?: unknown } }).time
+  const created = time?.created ?? time?.completed
+  return typeof created === 'number' ? created : undefined
+}
+
 export interface AgentSessionSummary {
   id: string
   workspaceId: string | null
@@ -765,10 +783,47 @@ class AgentService {
       ...dirOpts,
       throwOnError: true,
     })
-    return (res.data ?? []) as Array<{
+    const messages = (res.data ?? []) as Array<{
       info: Record<string, unknown>
       parts: Array<Record<string, unknown>>
     }>
+    return this.withPersistedSessionErrors(row.id, row.opencodeSessionId, messages)
+  }
+
+  private withPersistedSessionErrors(
+    sessionId: string,
+    opencodeSessionId: string,
+    messages: Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>,
+  ): Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }> {
+    const out = [...messages]
+    for (const evt of this.transcriptReplayRows(sessionId, 0)) {
+      if (evt.type !== 'session.error') continue
+      if (evt.sessionId !== opencodeSessionId) continue
+      const created = extractSessionErrorTime(evt.payload) ?? evt.seq ?? Date.now()
+      const message = extractSessionErrorMessage(evt.payload)
+      const messageID = `session-error:${opencodeSessionId}:${evt.seq ?? created}`
+      out.push({
+        info: {
+          id: messageID,
+          role: 'assistant',
+          sessionID: opencodeSessionId,
+          time: { created, completed: created },
+          synthetic: true,
+        },
+        parts: [
+          {
+            id: `${messageID}:part`,
+            type: 'session-error',
+            messageID,
+            sessionID: opencodeSessionId,
+            title: 'Agent error',
+            message,
+            time: { start: created, end: created },
+          },
+        ],
+      })
+    }
+    return out
   }
 
   async childTranscripts(sessionId: string): Promise<
