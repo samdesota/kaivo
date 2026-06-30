@@ -12,10 +12,11 @@ import { LoginPage } from './routes/login'
 import { SetupPage } from './routes/setup'
 import { DashboardPage } from './routes/dashboard'
 import { WorkspaceLandingPage } from './routes/workspace-landing'
-import { GlobalTabsPage, WorkspacePage } from './routes/workspace'
+import { GlobalTabsPage, WorkspacePage, WorkspaceSidebarOverlayPage } from './routes/workspace'
 import { EnvAuthDevicePage } from './routes/envauth-device'
 import { SettingsPage } from './routes/settings'
 import { OverlayLayerPage } from './routes/internal/overlay-layer'
+import { WorkspaceSidebarOverlayShell } from './routes/workspace/sidebar-overlay-shell'
 
 function RootLayout() {
   const navigate = useNavigate()
@@ -52,6 +53,7 @@ function RootLayout() {
 
   return (
     <Suspense fallback={<RouteSuspenseFallback />}>
+      <WorkspaceSidebarOverlayShell />
       <Outlet />
     </Suspense>
   )
@@ -125,6 +127,16 @@ const overlayLayerRoute = createRoute({
   path: '/internal/overlay-layer',
   component: OverlayLayerPage,
 })
+const workspaceSidebarOverlayRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/internal/workspace-sidebar-overlay',
+  component: WorkspaceSidebarOverlayPage,
+  validateSearch: (s: Record<string, unknown>) => ({
+    workspaceId: typeof s.workspaceId === 'string' ? s.workspaceId : '',
+    globalTabId: typeof s.globalTabId === 'string' ? s.globalTabId : undefined,
+    channel: typeof s.channel === 'string' ? s.channel : '',
+  }),
+})
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -136,6 +148,7 @@ const routeTree = rootRoute.addChildren([
   envAuthDeviceRoute,
   settingsRoute,
   overlayLayerRoute,
+  workspaceSidebarOverlayRoute,
 ])
 
 export const router = createRouter({ routeTree })

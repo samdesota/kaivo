@@ -73,6 +73,8 @@ import { useBookmarksStore } from './workspace/bookmarks-store'
 import { idleRenameEditState, nextRenameValue, renameEditReducer } from './workspace/tab-bar-state'
 import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/open-pane'
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
+import { useWorkspaceSidebarLayoutState, WorkspaceSidebarLayout } from './workspace/sidebar-layout'
+import { clearWorkspaceSidebarOverlayTarget, setWorkspaceSidebarOverlayTarget, type WorkspaceSidebarOverlayAction, type WorkspaceSidebarOverlayCommand } from './workspace/sidebar-overlay-controller'
 import { useAgentNotificationsStore, type AgentNotificationRecord } from './workspace/notifications-store'
 import { useAgentRuntimeStore } from './workspace/agent-runtime-store'
 import {
@@ -266,18 +268,61 @@ export function GlobalTabsPage() {
   )
 }
 
+export function WorkspaceSidebarOverlayPage() {
+  const search = useSearch({ from: '/internal/workspace-sidebar-overlay' })
+  const workspaceId = search.workspaceId
+  const channelName = search.channel
+  const overlayChannel = useMemo(() => {
+    if (!channelName) return null
+    return new BroadcastChannel(channelName)
+  }, [channelName])
+  const postAction = useCallback((action: WorkspaceSidebarOverlayAction) => {
+    overlayChannel?.postMessage(action)
+  }, [overlayChannel])
+
+  useEffect(() => {
+    document.documentElement.classList.add('overlay-layer-document')
+    document.body.classList.add('overlay-layer-document')
+    document.getElementById('root')?.classList.add('overlay-layer-document')
+    return () => {
+      document.documentElement.classList.remove('overlay-layer-document')
+      document.body.classList.remove('overlay-layer-document')
+      document.getElementById('root')?.classList.remove('overlay-layer-document')
+      overlayChannel?.close()
+    }
+  }, [overlayChannel])
+
+  if (!workspaceId || !overlayChannel) return <div className="min-h-screen bg-transparent" />
+
+  return (
+    <WorkspaceRoutePage
+      workspaceId={workspaceId}
+      search={{ chat: undefined, tab: undefined }}
+      syncWorkspaceSearch={false}
+      globalTabsMode={Boolean(search.globalTabId)}
+      globalTabsActiveTabId={search.globalTabId ?? null}
+      sidebarOverlayActions={postAction}
+      sidebarOverlayChannel={overlayChannel}
+    />
+  )
+}
+
 function WorkspaceRoutePage({
   workspaceId,
   search,
   syncWorkspaceSearch,
   globalTabsMode,
   globalTabsActiveTabId,
+  sidebarOverlayActions,
+  sidebarOverlayChannel,
 }: {
   workspaceId: string
   search: { chat?: string; tab?: string }
   syncWorkspaceSearch: boolean
   globalTabsMode: boolean
   globalTabsActiveTabId: string | null
+  sidebarOverlayActions?: (action: WorkspaceSidebarOverlayAction) => void
+  sidebarOverlayChannel?: BroadcastChannel | null
 }) {
   const navigate = useNavigate()
   const appData = useAppData()
@@ -403,6 +448,8 @@ function WorkspaceRoutePage({
         dispatchWorkspaceState={dispatchSyncedWorkspaceState}
         globalTabsMode={globalTabsMode}
         globalTabsActiveTabId={globalTabsActiveTabId}
+        sidebarOverlayActions={sidebarOverlayActions}
+        sidebarOverlayChannel={sidebarOverlayChannel}
       />
     </WorkspaceContextProvider>
   )
@@ -422,10 +469,14 @@ function WorkspaceShell({
   dispatchWorkspaceState,
   globalTabsMode,
   globalTabsActiveTabId,
+  sidebarOverlayActions,
+  sidebarOverlayChannel,
 }: {
   dispatchWorkspaceState: WorkspaceUiDispatch
   globalTabsMode: boolean
   globalTabsActiveTabId: string | null
+  sidebarOverlayActions?: (action: WorkspaceSidebarOverlayAction) => void
+  sidebarOverlayChannel?: BroadcastChannel | null
 }) {
   const ctx = useWorkspaceContext()
   const navigate = useNavigate()
@@ -433,7 +484,15 @@ function WorkspaceShell({
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertResource = trpc.workspace.upsertResource.useMutation()
   const getOrCreateGlobalTabsWorkspace = trpc.workspace.getOrCreateGlobalTabsWorkspace.useMutation()
-  const [sidebarHidden, setSidebarHidden] = useState(false)
+  const {
+    hidden: sidebarHidden,
+    previewed: sidebarPreviewed,
+    setHidden: setSidebarHidden,
+    toggleHidden: toggleSidebarHiddenState,
+    showPreview: showSidebarPreview,
+    hidePreview: hideSidebarPreview,
+  } = useWorkspaceSidebarLayoutState()
+  const [combinedPaneSnapshot, setCombinedPaneSnapshot] = useState<{ sidebarHidden: boolean; agentCollapsed: boolean } | null>(null)
   const [agentSessionCount, setAgentSessionCount] = useState(0)
   const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
   const [closeAgentTabSignal, setCloseAgentTabSignal] = useState(0)
@@ -454,6 +513,29 @@ function WorkspaceShell({
     (collapsed: boolean) => dispatchWorkspaceState({ type: 'setAgentCollapsed', collapsed }),
     [dispatchWorkspaceState],
   )
+  const setSidebarHiddenExplicit = useCallback((hidden: boolean) => {
+    setSidebarHidden(hidden)
+    setCombinedPaneSnapshot(null)
+  }, [setSidebarHidden])
+  const toggleSidebarHidden = useCallback(() => {
+    toggleSidebarHiddenState()
+    setCombinedPaneSnapshot(null)
+  }, [toggleSidebarHiddenState])
+  const toggleAgentCollapsed = useCallback(() => {
+    setAgentCollapsed(!agentCollapsed)
+    setCombinedPaneSnapshot(null)
+  }, [agentCollapsed, setAgentCollapsed])
+  const toggleCombinedPanes = useCallback(() => {
+    if (combinedPaneSnapshot) {
+      setSidebarHidden(combinedPaneSnapshot.sidebarHidden)
+      setAgentCollapsed(combinedPaneSnapshot.agentCollapsed)
+      setCombinedPaneSnapshot(null)
+      return
+    }
+    setCombinedPaneSnapshot({ sidebarHidden, agentCollapsed })
+    setSidebarHidden(true)
+    setAgentCollapsed(true)
+  }, [agentCollapsed, combinedPaneSnapshot, setAgentCollapsed, setSidebarHidden, sidebarHidden])
   const openWorkspacePane = useWorkspaceOpenPane(dispatchWorkspaceState)
   const openPane = useCallback(
     (content: PaneContent, options?: { title?: string; activate?: boolean }) => {
@@ -692,10 +774,45 @@ function WorkspaceShell({
       void navigate({ to: '/w/$workspaceId', params: { workspaceId: result.workspaceId }, search: { chat: undefined, tab: undefined } })
     }
     if (result.type === 'close-tab') closeActiveTab()
-    if (result.type === 'toggle-agent-pane') setAgentCollapsed(!agentCollapsed)
-    if (result.type === 'toggle-sidebar') setSidebarHidden((v) => !v)
+    if (result.type === 'toggle-agent-pane') toggleAgentCollapsed()
+    if (result.type === 'toggle-sidebar') toggleSidebarHidden()
     if (result.type === 'open-settings') void navigate({ to: '/settings' })
-  }, [agentCollapsed, bootstrapWorkspace, closeActiveTab, createWorkspaceChat, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, openPendingShellPane, selectCreatedChat, setAgentCollapsed])
+  }, [bootstrapWorkspace, closeActiveTab, createWorkspaceChat, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, openPendingShellPane, selectCreatedChat, toggleAgentCollapsed, toggleSidebarHidden])
+
+  const handleSidebarOverlayAction = useCallback((action: WorkspaceSidebarOverlayAction) => {
+    if (action.type === 'hide-preview') hideSidebarPreview()
+    if (action.type === 'hide-sidebar') setSidebarHiddenExplicit(true)
+    if (action.type === 'new-workspace') void openCommandPalette({ initialIntent: 'new-workspace' })
+    if (action.type === 'navigate-workspace') void navigate({ to: '/w/$workspaceId', params: { workspaceId: action.workspaceId }, search: { chat: undefined, tab: undefined } })
+    if (action.type === 'navigate-settings') void navigate({ to: '/settings' })
+    if (action.type === 'select-global-tab') showGlobalTab(action.tabId)
+    if (action.type === 'leave-global-tabs') void navigate({ to: '/w/$workspaceId', params: { workspaceId: ctx.workspace.id }, search: { chat: undefined, tab: undefined } })
+    if (action.type === 'close-global-tab') {
+      const tab = globalTabs.find((candidate) => candidate.id === action.tabId)
+      if (!tab || !globalTabsWorkspace) return
+      closeWorkspaceTab(tab, {
+        type: 'closeTab',
+        closeTab: (closingTabId) => void closeWorkspaceTabCommand({ workspaceId: globalTabsWorkspace.id, tabId: closingTabId, activateFallback: false }),
+        onActiveTabClosed: action.tabId === activeGlobalTab?.id
+          ? () => showGlobalTab(nextGlobalTabIdAfterClose(globalTabs, action.tabId))
+          : undefined,
+      })
+    }
+  }, [activeGlobalTab?.id, ctx.workspace.id, globalTabs, globalTabsWorkspace, hideSidebarPreview, navigate, openCommandPalette, setSidebarHiddenExplicit, showGlobalTab])
+
+  useEffect(() => {
+    if (sidebarOverlayActions) return
+    const target = {
+      hidden: sidebarHidden,
+      previewed: sidebarPreviewed,
+      workspaceId: ctx.workspace.id,
+      globalTabId: activeGlobalTab?.id ?? null,
+      sidebarWidth: readWorkspaceSidebarWidth(),
+      onAction: handleSidebarOverlayAction,
+    }
+    setWorkspaceSidebarOverlayTarget(target)
+    return () => clearWorkspaceSidebarOverlayTarget(target)
+  }, [activeGlobalTab?.id, ctx.workspace.id, handleSidebarOverlayAction, sidebarHidden, sidebarOverlayActions, sidebarPreviewed])
 
   useEffect(() => {
     prewarmOverlayLayer()
@@ -710,10 +827,13 @@ function WorkspaceShell({
         })
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        setSidebarHidden((v) => !v)
+        toggleSidebarHidden()
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault()
-        setAgentCollapsed(!agentCollapsed)
+        toggleAgentCollapsed()
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        toggleCombinedPanes()
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w') {
         e.preventDefault()
         if (focusedTabGroup === 'agent') setCloseAgentTabSignal((signal) => signal + 1)
@@ -722,18 +842,35 @@ function WorkspaceShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [agentCollapsed, closeActiveTab, focusedTabGroup, globalTabsMode, openCommandPalette, setAgentCollapsed])
+  }, [closeActiveTab, focusedTabGroup, globalTabsMode, openCommandPalette, toggleAgentCollapsed, toggleCombinedPanes, toggleSidebarHidden])
+
+  if (sidebarOverlayActions) {
+    return (
+      <WorkspaceSidebarOverlayContent
+        dispatchWorkspaceState={dispatchWorkspaceState}
+        actions={sidebarOverlayActions}
+        globalTabsWorkspace={globalTabsWorkspace}
+        globalTabs={globalTabs}
+        activeGlobalTabId={activeGlobalTab?.id ?? null}
+        channel={sidebarOverlayChannel ?? null}
+      />
+    )
+  }
 
   return (
     <>
     <WorkspaceEnvTargetProvider>
       <WorkspaceBootstrapRunner dispatchWorkspaceState={dispatchWorkspaceState} appQueryClient={queryClient} />
     </WorkspaceEnvTargetProvider>
-    <div className="relative flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
-      {!sidebarHidden && (
+    <WorkspaceSidebarLayout
+      hidden={sidebarHidden}
+      previewed={sidebarPreviewed}
+      onShowPreview={showSidebarPreview}
+      onHidePreview={hideSidebarPreview}
+      sidebar={(
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
-          onHide={() => setSidebarHidden(true)}
+          onHide={() => setSidebarHiddenExplicit(true)}
           onNewWorkspaceIntent={() => void openCommandPalette({ initialIntent: 'new-workspace' })}
           globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTab?.id ?? null }}
           onSelectGlobalTab={(tabId) => showGlobalTab(tabId)}
@@ -751,6 +888,7 @@ function WorkspaceShell({
           }}
         />
       )}
+    >
       {activeGlobalTab && globalTabsWorkspace ? (
         <GlobalBrowserTabPane
           workspaceId={globalTabsWorkspace.id}
@@ -762,7 +900,7 @@ function WorkspaceShell({
         <ShellChrome
           key={ctx.workspace.id}
           className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975"
-          style={{ width: sidebarHidden ? '100vw' : undefined }}
+          style={{ width: sidebarHidden ? '100%' : undefined }}
           showHeader={false}
           title={ctx.workspace.name}
           subtitle={ctx.localEnvTarget ? `local · ${ctx.localEnvTarget.env.label}` : 'local env unavailable'}
@@ -775,7 +913,7 @@ function WorkspaceShell({
           left={
             <WorkspaceAgentPane
               collapsed={agentCollapsed}
-              onToggleCollapsed={() => setAgentCollapsed(!agentCollapsed)}
+              onToggleCollapsed={toggleAgentCollapsed}
               onSessionListChange={setAgentSessionCount}
               dispatchWorkspaceState={dispatchWorkspaceState}
               focused={focusedTabGroup === 'agent'}
@@ -797,8 +935,84 @@ function WorkspaceShell({
           }
         />
       )}
-    </div>
+    </WorkspaceSidebarLayout>
     </>
+  )
+}
+
+function WorkspaceSidebarOverlayContent({
+  dispatchWorkspaceState,
+  actions,
+  globalTabsWorkspace,
+  globalTabs,
+  activeGlobalTabId,
+  channel,
+}: {
+  dispatchWorkspaceState: WorkspaceUiDispatch
+  actions: (action: WorkspaceSidebarOverlayAction) => void
+  globalTabsWorkspace: GlobalTabsWorkspaceSummary | null
+  globalTabs: WorkspaceTab[]
+  activeGlobalTabId: string | null
+  channel: BroadcastChannel | null
+}) {
+  const [previewed, setPreviewed] = useState(false)
+
+  useEffect(() => {
+    if (!channel) return
+    const onMessage = (event: MessageEvent<WorkspaceSidebarOverlayAction | WorkspaceSidebarOverlayCommand>) => {
+      const message = event.data
+      if (message.type === 'set-previewed') {
+        setPreviewed(message.previewed)
+      }
+    }
+    channel.addEventListener('message', onMessage)
+    return () => channel.removeEventListener('message', onMessage)
+  }, [channel])
+
+  return (
+    <div className="fixed inset-0 overflow-hidden bg-transparent text-neutral-100">
+      <div
+        className={`absolute left-0 top-0 z-50 h-screen max-h-screen shadow-2xl transition-transform duration-200 ease-out ${previewed ? 'translate-x-0' : '-translate-x-full'}`}
+        onPointerLeave={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          const stillInside = event.clientX >= rect.left
+            && event.clientX <= rect.right
+            && event.clientY >= rect.top
+            && event.clientY <= rect.bottom
+          if (stillInside) return
+          actions({ type: 'hide-preview' })
+        }}
+        onClickCapture={(event) => {
+          const target = event.target instanceof Element ? event.target : null
+          const link = target?.closest('a[href]')
+          if (!(link instanceof HTMLAnchorElement)) return
+          const url = new URL(link.href)
+          if (url.pathname === '/settings') {
+            event.preventDefault()
+            event.stopPropagation()
+            actions({ type: 'navigate-settings' })
+            return
+          }
+          const workspaceMatch = url.pathname.match(/^\/w\/([^/]+)$/)
+          const clickedWorkspaceId = workspaceMatch?.[1]
+          if (clickedWorkspaceId) {
+            event.preventDefault()
+            event.stopPropagation()
+            actions({ type: 'navigate-workspace', workspaceId: decodeURIComponent(clickedWorkspaceId) })
+          }
+        }}
+      >
+        <WorkspaceSidebar
+          dispatchWorkspaceState={dispatchWorkspaceState}
+          onHide={() => actions({ type: 'hide-sidebar' })}
+          onNewWorkspaceIntent={() => actions({ type: 'new-workspace' })}
+          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTabId }}
+          onSelectGlobalTab={(tabId) => actions({ type: 'select-global-tab', tabId })}
+          onLeaveGlobalTabs={() => actions({ type: 'leave-global-tabs' })}
+          onCloseGlobalTab={(tabId) => actions({ type: 'close-global-tab', tabId })}
+        />
+      </div>
+    </div>
   )
 }
 
