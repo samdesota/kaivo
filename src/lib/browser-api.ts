@@ -120,6 +120,7 @@ type DesktopWindowLike = Window & {
       getAgentBrowserConnections?: () => Promise<{ browserTabIds: string[] }>
       disconnectAgentBrowser?: (input: { browserTabId: string }) => Promise<unknown>
       registerBrowserTabFocusOwner?: (input: { browserTabId: string }) => void
+      logBrowserDiagnostics?: (input: { action: string; paneId?: string; browserTabId?: string; slot?: string; url?: string }) => Promise<unknown>
       onBrowserTabFocus?: (handler: (input: BrowserTabFocus) => void) => () => void
       focusOverlay?: (input: { overlayId: string }) => Promise<unknown>
       registerOverlayOwner?: (input: { overlayId: string }) => Promise<unknown>
@@ -173,8 +174,10 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
         windowId,
         placement: { slot: paneSlotName(input.paneId) },
         active: true,
+        ownerKey: paneSlotName(input.paneId),
       }))
       console.info('[browser-pane] createTab resolved', { paneId: input.paneId, windowId, browserTabId: record.id, slot: paneSlotName(input.paneId) })
+      void logBrowserDiagnostics(win, { action: 'createTab resolved', paneId: input.paneId, browserTabId: record.id, slot: paneSlotName(input.paneId), url: input.url })
       return { browserTabId: record.id, favicon: record.favicon }
     },
 
@@ -191,6 +194,7 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const activated = await trackBrowserCommand('tabs.setActive', { browserTabId: input.browserTabId }, () => webframe.trpc.tabs.setActive.mutate({ tabId: input.browserTabId, windowId }))
       assertTabFound(activated, input.browserTabId)
       console.info('[browser-pane] attachTab resolved', { paneId: input.paneId, windowId, browserTabId: input.browserTabId, slot: paneSlotName(input.paneId) })
+      void logBrowserDiagnostics(win, { action: 'attachTab resolved', paneId: input.paneId, browserTabId: input.browserTabId, slot: paneSlotName(input.paneId) })
     },
 
     async focusTab(input) {
@@ -286,6 +290,7 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       console.info('[browser-pane] setSlot requested', { seq, paneId: input.paneId, slot: paneSlotName(input.paneId), rect: input.rect, slotCount: slots.size })
       await trackBrowserCommand('windows.setSlots', { paneId: input.paneId, rect: input.rect }, setSlots)
       console.info('[browser-pane] setSlot resolved', { seq, paneId: input.paneId, slot: paneSlotName(input.paneId), rect: input.rect, slotCount: slots.size })
+      void logBrowserDiagnostics(win, { action: 'setSlot resolved', paneId: input.paneId, slot: paneSlotName(input.paneId) })
     },
 
     async createDetachedOverlay(input) {
@@ -404,6 +409,17 @@ function isTabNotFoundResult(result: unknown): result is { ok: false; code: 'TAB
   return typeof result === 'object' && result !== null && 'ok' in result && 'code' in result
     && result.ok === false
     && result.code === 'TAB_NOT_FOUND'
+}
+
+async function logBrowserDiagnostics(win: BrowserWindowLike | undefined, input: { action: string; paneId?: string; browserTabId?: string; slot?: string; url?: string }): Promise<void> {
+  const desktop = win as DesktopWindowLike | undefined
+  if (!desktop?.cloudCodeDesktop?.logBrowserDiagnostics) return
+  try {
+    const diagnostics = await desktop.cloudCodeDesktop.logBrowserDiagnostics(input)
+    console.info('[browser-pane] native diagnostics', diagnostics)
+  } catch (error) {
+    console.info('[browser-pane] native diagnostics failed', { action: input.action, paneId: input.paneId, browserTabId: input.browserTabId, message: error instanceof Error ? error.message : String(error) })
+  }
 }
 
 async function trackBrowserCommand<T>(name: string, ctx: Record<string, unknown>, run: () => Promise<T>): Promise<T> {

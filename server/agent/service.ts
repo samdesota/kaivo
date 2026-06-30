@@ -60,6 +60,11 @@ export class AgentError extends Error {
   }
 }
 
+function isMissingPermissionRequestError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+  return /permission request not found/i.test(message)
+}
+
 export interface AgentSessionSummary {
   id: string
   sandboxId: string
@@ -799,13 +804,16 @@ class AgentService {
   }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient(row.sandboxId)
-    await client.postSessionIdPermissionsPermissionId({
-      path: { id: row.opencodeSessionId, permissionID: input.permissionId },
-      body: { response: input.response },
-      throwOnError: true,
-    })
-    const pendingMap = this.pending.get(row.opencodeSessionId)
-    pendingMap?.delete(input.permissionId)
+    try {
+      await client.postSessionIdPermissionsPermissionId({
+        path: { id: row.opencodeSessionId, permissionID: input.permissionId },
+        body: { response: input.response },
+        throwOnError: true,
+      })
+    } catch (err) {
+      if (!isMissingPermissionRequestError(err)) throw err
+    }
+    this.clearPermissionRequest(row.sandboxId, row.opencodeSessionId, input.permissionId)
   }
 
   /** Subscribe to forwarded OpenCode events for a specific session. */
@@ -1133,6 +1141,24 @@ class AgentService {
         .where(eq(agentSessions.id, row.id))
     } catch (err) {
       logger.warn({ err, id: row.id }, 'transcript insert failed')
+    }
+  }
+
+  private clearPermissionRequest(sandboxId: string, opencodeSessionId: string, permissionId: string): void {
+    this.pending.get(opencodeSessionId)?.delete(permissionId)
+    const st = this.subs.get(sandboxId)
+    if (!st) return
+    const evt: TranscriptEvent = {
+      type: 'permission.replied',
+      sessionId: opencodeSessionId,
+      payload: { sessionID: opencodeSessionId, permissionID: permissionId },
+    }
+    for (const l of st.listeners) {
+      try {
+        l(evt)
+      } catch (err) {
+        logger.warn({ err }, 'transcript listener threw')
+      }
     }
   }
 

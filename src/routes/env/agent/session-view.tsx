@@ -38,6 +38,7 @@ interface SessionSummary {
   status: string
   title?: string | null
   workspaceId?: string | null
+  workingDir?: string | null
 }
 
 export function AgentSessionView({
@@ -186,6 +187,7 @@ export function AgentSessionView({
           <SessionPane
             key={sessionId}
             sessionId={sessionId}
+            workingDir={activeSession?.workingDir ?? undefined}
             workspaceId={workspaceId}
             onWorkspaceAutoName={workspaceId ? (message) => maybeAutoNameWorkspace.mutateAsync({
               id: workspaceId,
@@ -449,6 +451,7 @@ function AgentConnectivityMenu() {
 
 function SessionPane({
   sessionId,
+  workingDir,
   workspaceId,
   onWorkspaceAutoName,
   onOpenPane,
@@ -456,6 +459,7 @@ function SessionPane({
   footerTrailing,
 }: {
   sessionId: string
+  workingDir?: string
   workspaceId?: string
   onWorkspaceAutoName?: (message: string) => Promise<unknown>
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
@@ -633,6 +637,7 @@ function SessionPane({
                         part={part}
                         role={role}
                         sessionId={sessionId}
+                        workingDir={workingDir}
                         onOpenShell={onOpenPane}
                         childTranscript={childTranscript}
                       />

@@ -71,6 +71,7 @@ describe('browser API adapter', () => {
       windowId: 'window-1',
       placement: { slot: paneSlotName('pane-1') },
       active: true,
+      ownerKey: paneSlotName('pane-1'),
     })
 
     await api.attachTab({ paneId: 'pane-1', browserTabId: 'tab-1' })

@@ -28,11 +28,13 @@ interface ToolState {
 export function ToolPart({
   part,
   sessionId,
+  workingDir,
   onOpenShell,
   childTranscript,
 }: {
   part: Part
   sessionId: string
+  workingDir?: string
   onOpenShell?: (content: PaneContent) => void
   childTranscript?: TranscriptState
 }) {
@@ -63,6 +65,7 @@ export function ToolPart({
       <ApplyPatchToolPart
         partId={part.id}
         state={state}
+        workingDir={workingDir}
         onOpenShell={onOpenShell}
       />
     )
@@ -81,10 +84,12 @@ export function ToolPart({
 
 function ApplyPatchToolPart({
   state,
+  workingDir,
   onOpenShell,
 }: {
   partId: string
   state: ToolState
+  workingDir?: string
   onOpenShell?: (content: PaneContent) => void
 }) {
   const patchText = typeof state.input?.patchText === 'string' ? state.input.patchText : ''
@@ -92,7 +97,7 @@ function ApplyPatchToolPart({
   return (
     <div className="text-xs">
       {patchText ? (
-        <DiffView diff={patchText} onOpenFile={(path) => onOpenShell?.({ type: 'file', path })} />
+        <DiffView diff={patchText} onOpenFile={(path) => onOpenShell?.({ type: 'file', path: resolvePatchFilePath(path, workingDir), absolute: true })} />
       ) : (
         <div className="text-[11px] text-help">
           {state.status === 'pending' ? 'Waiting for patch…' : 'No patch available.'}
@@ -105,6 +110,12 @@ function ApplyPatchToolPart({
       )}
     </div>
   )
+}
+
+function resolvePatchFilePath(filePath: string, workingDir?: string): string {
+  if (filePath.startsWith('/')) return filePath
+  if (!workingDir) return filePath
+  return `${workingDir.replace(/\/+$/, '')}/${filePath.replace(/^\/+/, '')}`
 }
 
 function durationMs(state: ToolState): number | null {

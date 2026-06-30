@@ -102,6 +102,11 @@ function errorMessage(err: unknown): string {
   return 'OpenAI OAuth failed'
 }
 
+function isMissingPermissionRequestError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+  return /permission request not found/i.test(message)
+}
+
 function extractSessionErrorMessage(payload: Record<string, unknown>): string {
   const raw = (payload as { message?: unknown; error?: unknown }).message ?? (payload as { error?: unknown }).error
   if (typeof raw === 'string' && raw.trim()) return raw.trim()
@@ -1081,13 +1086,17 @@ class AgentService {
   }): Promise<void> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
     const targetOpencodeSessionId = this.findPermissionSession(row.opencodeSessionId, input.permissionId) ?? row.opencodeSessionId
-    await client.postSessionIdPermissionsPermissionId({
-      path: { id: targetOpencodeSessionId, permissionID: input.permissionId },
-      body: { response: input.response },
-      ...dirOpts,
-      throwOnError: true,
-    })
-    this.pending.get(targetOpencodeSessionId)?.delete(input.permissionId)
+    try {
+      await client.postSessionIdPermissionsPermissionId({
+        path: { id: targetOpencodeSessionId, permissionID: input.permissionId },
+        body: { response: input.response },
+        ...dirOpts,
+        throwOnError: true,
+      })
+    } catch (err) {
+      if (!isMissingPermissionRequestError(err)) throw err
+    }
+    this.clearPermissionRequest(row.opencodeSessionId, targetOpencodeSessionId, input.permissionId)
     this.upsertAgentRuntime(row)
   }
 
@@ -1837,6 +1846,22 @@ class AgentService {
       if (this.pending.get(id)?.has(permissionId)) return id
     }
     return null
+  }
+
+  private clearPermissionRequest(
+    rootOpencodeSessionId: string,
+    opencodeSessionId: string,
+    permissionId: string,
+  ): void {
+    this.pending.get(opencodeSessionId)?.delete(permissionId)
+    this.blockingNotificationKeys.delete(`${this.resolveRootOpencodeSessionId(opencodeSessionId)}:permission:${opencodeSessionId}:${permissionId}`)
+    this.emitTranscriptEvent(opencodeSessionId, 'permission.replied', {
+      sessionID: opencodeSessionId,
+      permissionID: permissionId,
+    })
+    for (const id of this.relatedOpencodeSessionIds(rootOpencodeSessionId)) {
+      if (id !== opencodeSessionId) this.pending.get(id)?.delete(permissionId)
+    }
   }
 
   private deletePendingQuestion(rootOpencodeSessionId: string, requestId: string): void {

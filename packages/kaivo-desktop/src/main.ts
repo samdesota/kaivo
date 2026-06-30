@@ -359,6 +359,71 @@ function findBrowserTabIdForWebContents(contents: WebContents): string | null {
   return caller?.kind === 'tab' && caller.tabId ? caller.tabId : null
 }
 
+type NativeViewSnapshot = {
+  windowId: string
+  children: Array<{
+    index: number
+    webContentsId?: number
+    bounds?: { x: number; y: number; width: number; height: number }
+    browserTabId?: string | null
+    url?: string
+  }>
+}
+
+type BrowserDiagnosticsSlot = { name: string; rect?: unknown }
+type BrowserDiagnosticsWindow = { id: string; slots?: BrowserDiagnosticsSlot[] }
+type BrowserDiagnosticsTab = { id: string; [key: string]: unknown }
+
+function getNativeViewSnapshots(): NativeViewSnapshot[] {
+  return webframeApp?.windows.list().map((window) => {
+    const contentView = window.electronWindow.contentView as unknown as {
+      children?: Array<{
+        getBounds?: () => { x: number; y: number; width: number; height: number }
+        webContents?: WebContents
+      }>
+    }
+    return {
+      windowId: window.id,
+      children: (contentView.children ?? []).map((child, index) => ({
+        index,
+        webContentsId: child.webContents?.id,
+        bounds: child.getBounds?.(),
+        browserTabId: child.webContents ? findBrowserTabIdForWebContents(child.webContents) : null,
+        url: child.webContents && !child.webContents.isDestroyed() ? safeWebContentsUrl(child.webContents) : undefined,
+      })),
+    }
+  }) ?? []
+}
+
+async function getBrowserDiagnostics(input: { action: string; paneId?: string; browserTabId?: string; slot?: string; url?: string }): Promise<Record<string, unknown>> {
+  const windowInfo = webframeApp ? await webframeApp.caller.windows.list() as BrowserDiagnosticsWindow[] : []
+  const tabRecords = webframeApp ? await webframeApp.caller.tabs.list() as BrowserDiagnosticsTab[] : []
+  const matchingSlots = input.slot
+    ? windowInfo.flatMap((window) => (window.slots ?? []).filter((slot) => slot.name === input.slot).map((slot) => ({ windowId: window.id, slot })))
+    : []
+  const matchingTab = input.browserTabId
+    ? tabRecords.find((tab) => tab.id === input.browserTabId) ?? null
+    : null
+  const nativeViews = getNativeViewSnapshots()
+  const matchingNativeViews = input.browserTabId
+    ? nativeViews.flatMap((window) => window.children.filter((child) => child.browserTabId === input.browserTabId).map((child) => ({ windowId: window.windowId, child })))
+    : []
+
+  return {
+    action: input.action,
+    paneId: input.paneId,
+    browserTabId: input.browserTabId,
+    slot: input.slot,
+    url: input.url,
+    windowCount: windowInfo.length,
+    tabCount: tabRecords.length,
+    nativeViewCount: nativeViews.reduce((count, window) => count + window.children.length, 0),
+    matchingSlots,
+    matchingTab,
+    matchingNativeViews,
+  }
+}
+
 function findOverlayWebContents(overlayId: string): WebContents | null {
   const bridge = webframeApp?._debug.bridge as unknown as {
     callerForWebContents?: (contents: WebContents) => { kind: string; overlayId?: string }
@@ -450,6 +515,17 @@ function installIpcHandlers(): void {
     if (!input.browserTabId) return
     if (!chromeWebContentsIds.has(event.sender.id)) return
     browserTabFocusOwners.set(input.browserTabId, event.sender.id)
+  })
+  ipcMain.handle('kaivo/browser/log-diagnostics', async (_event, input: { action?: string; paneId?: string; browserTabId?: string; slot?: string; url?: string }) => {
+    const diagnostics = await getBrowserDiagnostics({
+      action: input.action ?? 'unknown',
+      paneId: input.paneId,
+      browserTabId: input.browserTabId,
+      slot: input.slot,
+      url: input.url,
+    })
+    writeLog('main', 'info', 'browser diagnostics', diagnostics)
+    return diagnostics
   })
   ipcMain.handle('kaivo/services/restart-terminal', async () => {
     if (!serviceSupervisor) throw new Error('desktop service supervisor unavailable')
@@ -609,23 +685,7 @@ async function main(): Promise<void> {
       getState: async () => {
         const windowInfo = webframeApp ? await webframeApp.caller.windows.list() : []
         const tabRecords = webframeApp ? await webframeApp.caller.tabs.list() : []
-        const nativeViews =
-          webframeApp?.windows.list().map((window) => {
-            const contentView = window.electronWindow.contentView as unknown as {
-              children?: Array<{
-                getBounds?: () => { x: number; y: number; width: number; height: number }
-                webContents?: { id: number }
-              }>
-            }
-            return {
-              windowId: window.id,
-              children: (contentView.children ?? []).map((child, index) => ({
-                index,
-                webContentsId: child.webContents?.id,
-                bounds: child.getBounds?.(),
-              })),
-            }
-          }) ?? []
+        const nativeViews = getNativeViewSnapshots()
         return {
           config,
           windowIds: webframeApp?.windows.list().map((window) => window.id) ?? [],

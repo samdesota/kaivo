@@ -33,6 +33,8 @@ const opencodeMessagesData = vi.hoisted(() => [] as Array<{
 }>)
 const opencodeStatusData = vi.hoisted(() => new Map<string, { type: string; message?: string }>())
 const opencodeAbortCalls = vi.hoisted(() => [] as string[])
+const opencodePermissionCalls = vi.hoisted(() => [] as Array<{ sessionId: string; permissionId: string; response: string }>)
+const opencodePermissionError = vi.hoisted(() => ({ value: null as Error | null }))
 
 function resetState() {
   agentRows.length = 0
@@ -41,6 +43,8 @@ function resetState() {
   opencodeMessagesData.length = 0
   opencodeStatusData.clear()
   opencodeAbortCalls.length = 0
+  opencodePermissionCalls.length = 0
+  opencodePermissionError.value = null
   opencodeSessionSeq = 0
   createAgentNotificationMock.mockReset()
 }
@@ -172,6 +176,16 @@ vi.mock('@opencode-ai/sdk', () => ({
         opencodeStatusData.delete(path.id)
       },
       promptAsync: async () => undefined,
+    },
+    postSessionIdPermissionsPermissionId: async ({
+      path,
+      body,
+    }: {
+      path: { id: string; permissionID: string }
+      body: { response: string }
+    }) => {
+      opencodePermissionCalls.push({ sessionId: path.id, permissionId: path.permissionID, response: body.response })
+      if (opencodePermissionError.value) throw opencodePermissionError.value
     },
   }),
 }))
@@ -469,6 +483,41 @@ describe('agent service workspace sessions', () => {
       kind: 'permission',
       title: 'Blocking task',
       summary: 'bash: npm test',
+    })
+  })
+
+  it('clears stale permissions when opencode no longer has the request', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a', title: 'Stale permission task' })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'permission.updated',
+      properties: {
+        id: 'permission-1',
+        sessionID: session.opencodeSessionId,
+        permission: 'bash',
+        pattern: 'npm test',
+      },
+    })
+
+    expect((await agentService.sessionStatus({ sessionId: session.id })).pendingApprovals).toHaveLength(1)
+    opencodePermissionError.value = new Error('Permission request not found: permission-1')
+
+    await agentService.sessionRespond({
+      sessionId: session.id,
+      permissionId: 'permission-1',
+      response: 'reject',
+    })
+
+    expect(opencodePermissionCalls).toEqual([
+      { sessionId: session.opencodeSessionId, permissionId: 'permission-1', response: 'reject' },
+    ])
+    expect((await agentService.sessionStatus({ sessionId: session.id })).pendingApprovals).toEqual([])
+    const replay = await agentService.transcriptReplay(session.id, 0)
+    expect(replay.map((evt) => evt.type)).toEqual(['permission.updated', 'permission.replied'])
+    expect(replay[1]?.payload).toMatchObject({
+      sessionID: session.opencodeSessionId,
+      permissionID: 'permission-1',
     })
   })
 

@@ -11,12 +11,14 @@ export function PartRenderer({
   part,
   role,
   sessionId,
+  workingDir,
   onOpenShell,
   childTranscript,
 }: {
   part: Part
   role: string
   sessionId: string
+  workingDir?: string
   onOpenShell?: (content: PaneContent) => void
   childTranscript?: TranscriptState
 }) {
@@ -36,6 +38,7 @@ export function PartRenderer({
         <ToolPart
           part={part}
           sessionId={sessionId}
+          workingDir={workingDir}
           onOpenShell={onOpenShell}
           childTranscript={childTranscript}
         />

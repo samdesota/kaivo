@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   getAgentBrowserConnections: () => ipcRenderer.invoke('kaivo/browser/agent-connections'),
   disconnectAgentBrowser: (input: { browserTabId: string }) => ipcRenderer.invoke('kaivo/browser/disconnect-agent', input),
   registerBrowserTabFocusOwner: (input: { browserTabId: string }) => ipcRenderer.send('kaivo/browser/register-tab-focus-owner', input),
+  logBrowserDiagnostics: (input: { action: string; paneId?: string; browserTabId?: string; slot?: string; url?: string }) => ipcRenderer.invoke('kaivo/browser/log-diagnostics', input),
   onBrowserTabFocus: (handler: (input: { browserTabId: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, input: { browserTabId: string }) => handler(input)
     ipcRenderer.on('kaivo/browser-tab-focused', listener)
