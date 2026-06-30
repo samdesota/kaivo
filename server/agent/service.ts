@@ -158,6 +158,7 @@ class AgentService {
   private pending = new Map<string, Map<string, PendingApproval>>() // opencodeSessionId -> permissionId -> req
   private pendingQuestions = new Map<string, Map<string, PendingQuestion>>() // opencodeSessionId -> requestId -> question
   private seqCounters = new Map<string, number>() // sessionId (ours) -> next seq
+  private userAbortedOpencodeSessions = new Set<string>()
   /**
    * Reverse-index: child opencode sessionID → parent opencode sessionID.
    * Populated from `session.created` / `session.updated` events whose
@@ -791,10 +792,16 @@ class AgentService {
   async sessionAbort(input: { sessionId: string }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
     const client = await this.getClient(row.sandboxId)
-    await client.session.abort({
-      path: { id: row.opencodeSessionId },
-      throwOnError: true,
-    })
+    this.userAbortedOpencodeSessions.add(row.opencodeSessionId)
+    try {
+      await client.session.abort({
+        path: { id: row.opencodeSessionId },
+        throwOnError: true,
+      })
+    } catch (err) {
+      this.userAbortedOpencodeSessions.delete(row.opencodeSessionId)
+      throw err
+    }
   }
 
   async sessionRespond(input: {
@@ -1036,6 +1043,10 @@ class AgentService {
     }
 
     if (!ocSessionId) return
+    if (type === 'message.part.updated' || type === 'session.idle') this.userAbortedOpencodeSessions.delete(ocSessionId)
+    if (type === 'session.error' && this.userAbortedOpencodeSessions.delete(ocSessionId)) {
+      type = 'session.idle'
+    }
 
     // Track pending approvals so sessionStatus can surface them.
     if (type === 'permission.updated') {

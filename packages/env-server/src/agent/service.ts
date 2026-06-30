@@ -261,6 +261,7 @@ class AgentService {
   private sessionModels = new Map<string, SessionModelSelection>()
   private contextLimitCache = new Map<string, ModelLimit>()
   private runningOpencodeSessions = new Set<string>()
+  private userAbortedOpencodeSessions = new Set<string>()
   private queuedFollowUps = new Map<string, QueuedFollowUp[]>()
   private blockingNotificationKeys = new Set<string>()
   private surfacedStatusErrors = new Map<string, string>()
@@ -1072,11 +1073,17 @@ class AgentService {
   async sessionAbort(input: { sessionId: string }): Promise<void> {
     const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
     this.queuedFollowUps.delete(row.opencodeSessionId)
-    await client.session.abort({
-      path: { id: row.opencodeSessionId },
-      ...dirOpts,
-      throwOnError: true,
-    })
+    this.userAbortedOpencodeSessions.add(row.opencodeSessionId)
+    try {
+      await client.session.abort({
+        path: { id: row.opencodeSessionId },
+        ...dirOpts,
+        throwOnError: true,
+      })
+    } catch (err) {
+      this.userAbortedOpencodeSessions.delete(row.opencodeSessionId)
+      throw err
+    }
   }
 
   async sessionRespond(input: {
@@ -1370,6 +1377,10 @@ class AgentService {
     }
 
     if (!ocSessionId) return
+    if (type === 'session.busy' || type === 'session.idle') this.userAbortedOpencodeSessions.delete(ocSessionId)
+    if (type === 'session.error' && this.userAbortedOpencodeSessions.delete(ocSessionId)) {
+      type = 'session.idle'
+    }
     const runtimeRunning =
       type === 'session.busy' || type === 'message.part.updated'
         ? true

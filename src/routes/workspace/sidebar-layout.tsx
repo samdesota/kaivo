@@ -69,7 +69,7 @@ export function WorkspaceSidebarLayout({
     <div className="relative flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
       {hidden ? (
         <div
-          className="relative z-40 h-screen w-2 shrink-0"
+          className="absolute left-0 top-0 z-40 h-screen w-2"
           onPointerEnter={() => {
             onShowPreview()
           }}

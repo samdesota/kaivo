@@ -119,9 +119,11 @@ export function SessionTabs({
         onResort={workspaceId ? (ids) => void reorderWorkspaceAgentTabs({ workspaceId, sessionIds: ids }) : undefined}
         focused={focused}
       />
-      {!workspaceId && <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />}
-      {archived.length > 0 && (
-        <ClosedDropdown archived={archived} onReopen={onReopen} />
+      {!workspaceId && (
+        <>
+          <NewSessionPopover workspaceId={workspaceId} onCreated={onSelect} onOpenNewChat={onOpenNewChat} />
+          {archived.length > 0 && <ClosedDropdown archived={archived} onReopen={onReopen} />}
+        </>
       )}
     </div>
   )

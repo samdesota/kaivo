@@ -45,7 +45,6 @@ import { paneTabIconForType, TabIconView } from '../components/tab-icon'
 import { ShellChrome } from './env/shell/shell-chrome'
 import { EnvContextProvider } from './env/env-context'
 import { AgentSessionView } from './env/agent/session-view'
-import { NewSessionPopover } from './env/agent/session-tabs'
 import type { UniversalMenuChatBootstrap, UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuInitialScope, UniversalMenuOpenTarget, UniversalMenuWorkspaceBootstrap, UniversalMenuWorkspaceBootstrapRequest } from './env/universal-menu/universal-menu'
 import { emptyFileEditorState, type FileEditorState } from './env/file-editor-state'
 import { ShellTabContent } from './env/tabs/shell-tab'
@@ -894,6 +893,7 @@ function WorkspaceShell({
           workspaceId={globalTabsWorkspace.id}
           tab={activeGlobalTab}
           tabs={globalTabs}
+          showTabStrip={sidebarHidden}
           onActiveTabFallback={(tabId) => showGlobalTab(tabId)}
         />
       ) : (
@@ -1895,11 +1895,13 @@ function GlobalBrowserTabPane({
   workspaceId,
   tab,
   tabs,
+  showTabStrip,
   onActiveTabFallback,
 }: {
   workspaceId: string
   tab: WorkspaceTab
   tabs: WorkspaceTab[]
+  showTabStrip: boolean
   onActiveTabFallback: (tabId: string | null) => void
 }) {
   const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
@@ -1908,11 +1910,30 @@ function GlobalBrowserTabPane({
   const bookmarksStore = useBookmarksStore()
   const upsertResource = trpc.workspace.upsertResource.useMutation()
   const upsertFavicon = trpc.favicon.cacheFromUrl.useMutation()
-  const faviconOrigin = tab.type === 'browser' ? faviconOriginForUrl(tab.url) : null
-  const faviconCache = trpc.favicon.getByOrigins.useQuery(
-    { origins: faviconOrigin ? [faviconOrigin] : [] },
-    { enabled: Boolean(faviconOrigin), staleTime: 60_000 },
+  const browserTabs = useMemo(
+    () => tabs.filter((candidate): candidate is Extract<WorkspaceTab, { type: 'browser' }> => candidate.type === 'browser'),
+    [tabs],
   )
+  const faviconOrigins = useMemo(() => Array.from(new Set(
+    (showTabStrip ? browserTabs : [tab])
+      .map((candidate) => candidate.type === 'browser' ? faviconOriginForUrl(candidate.url) : null)
+      .filter((origin): origin is string => Boolean(origin)),
+  )), [browserTabs, showTabStrip, tab])
+  const faviconCache = trpc.favicon.getByOrigins.useQuery(
+    { origins: faviconOrigins },
+    { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
+  )
+  const faviconRecords = (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>
+  const tabStripItems = useMemo<BorderedTabItem[]>(() => browserTabs.map((candidate) => {
+    const label = globalTabLabel(candidate)
+    return {
+      id: candidate.id,
+      label,
+      title: label,
+      closeTitle: `Close ${label}`,
+      icon: browserTabIconForUrl({ url: candidate.url, records: faviconRecords, liveDataUrls: liveFaviconDataUrls }),
+    }
+  }), [browserTabs, faviconRecords, liveFaviconDataUrls])
 
   tabsRef.current = tabs
 
@@ -1969,30 +1990,52 @@ function GlobalBrowserTabPane({
   }, [onActiveTabFallback, tabs, upsertResource, workspaceId])
 
   return (
-    <section className="h-screen max-h-screen min-w-0 flex-1 overflow-hidden bg-neutral-975 text-neutral-500" aria-label="Global browser tab">
-      <WorkspaceTabContent
-        key={`${workspaceId}:${tab.id}`}
-        workspaceId={workspaceId}
-        tab={tab}
-        onClose={() => {
-          closeWorkspaceTab(tab, {
-            type: 'closeTab',
-            closeTab: (tabId) => void closeWorkspaceTabCommand({ workspaceId, tabId, activateFallback: false }),
-            onActiveTabClosed: () => onActiveTabFallback(nextGlobalTabIdAfterClose(tabs, tab.id)),
-          })
-        }}
-        onBrowserTabId={(browserTabId) => dispatchGlobalWorkspaceState({ type: 'setBrowserTabId', tabId: tab.id, browserTabId })}
-        onUrlChange={(url) => dispatchGlobalWorkspaceState({ type: 'setTabUrl', tabId: tab.id, url })}
-        onTitleChange={(title) => dispatchGlobalWorkspaceState({ type: 'setTabTitle', tabId: tab.id, title: truncateTabTitle(title) })}
-        onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
-        bookmarks={bookmarksStore.bookmarks}
-        faviconDataUrl={tab.type === 'browser'
-          ? (liveFaviconDataUrls[faviconOriginForUrl(tab.url) ?? ''] ?? ((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(tab.url) ?? '']?.dataUrl ?? null)
-          : null}
-        faviconUrl={tab.type === 'browser'
-          ? (((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(tab.url) ?? '']?.iconUrl ?? null)
-          : null}
-      />
+    <section className="flex h-screen max-h-screen min-w-0 flex-1 flex-col overflow-hidden bg-neutral-975 text-neutral-500" aria-label="Global browser tab">
+      {showTabStrip ? (
+        <div className="relative z-10 flex min-h-8 shrink-0 items-stretch border-b border-neutral-800 bg-neutral-950 text-neutral-400">
+          <BorderedTabStrip
+            items={tabStripItems}
+            activeId={tab.id}
+            focused
+            onSelect={onActiveTabFallback}
+            onClose={(tabId) => {
+              const closingTab = browserTabs.find((candidate) => candidate.id === tabId)
+              if (!closingTab) return
+              closeWorkspaceTab(closingTab, {
+                type: 'closeTab',
+                closeTab: (closingTabId) => void closeWorkspaceTabCommand({ workspaceId, tabId: closingTabId, activateFallback: false }),
+                onActiveTabClosed: tabId === tab.id ? () => onActiveTabFallback(nextGlobalTabIdAfterClose(tabs, tab.id)) : undefined,
+              })
+            }}
+            onResort={(tabIds) => void reorderWorkspaceTabs({ workspaceId, tabIds })}
+          />
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <WorkspaceTabContent
+          key={`${workspaceId}:${tab.id}`}
+          workspaceId={workspaceId}
+          tab={tab}
+          onClose={() => {
+            closeWorkspaceTab(tab, {
+              type: 'closeTab',
+              closeTab: (tabId) => void closeWorkspaceTabCommand({ workspaceId, tabId, activateFallback: false }),
+              onActiveTabClosed: () => onActiveTabFallback(nextGlobalTabIdAfterClose(tabs, tab.id)),
+            })
+          }}
+          onBrowserTabId={(browserTabId) => dispatchGlobalWorkspaceState({ type: 'setBrowserTabId', tabId: tab.id, browserTabId })}
+          onUrlChange={(url) => dispatchGlobalWorkspaceState({ type: 'setTabUrl', tabId: tab.id, url })}
+          onTitleChange={(title) => dispatchGlobalWorkspaceState({ type: 'setTabTitle', tabId: tab.id, title: truncateTabTitle(title) })}
+          onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
+          bookmarks={bookmarksStore.bookmarks}
+          faviconDataUrl={tab.type === 'browser'
+            ? (liveFaviconDataUrls[faviconOriginForUrl(tab.url) ?? ''] ?? faviconRecords[faviconOriginForUrl(tab.url) ?? '']?.dataUrl ?? null)
+            : null}
+          faviconUrl={tab.type === 'browser'
+            ? (faviconRecords[faviconOriginForUrl(tab.url) ?? '']?.iconUrl ?? null)
+            : null}
+        />
+      </div>
     </section>
   )
 }
@@ -2530,12 +2573,6 @@ function WorkspaceAgentPane({
       <ChevronLeft className="h-3 w-3" aria-hidden="true" />
     </button>
   )
-  const agentHeaderTrailing = (newChat: { openNewChat: () => Promise<void>; setSessionId: (id: string) => void; workspaceId?: string } | null) => (
-    <div className="flex shrink-0 items-center gap-1">
-      {newChat?.workspaceId && <NewSessionPopover workspaceId={newChat.workspaceId} onCreated={newChat.setSessionId} onOpenNewChat={newChat.openNewChat} />}
-      {collapseButton}
-    </div>
-  )
   if (!ctx.localEnvTarget?.available) {
     return (
       <AgentPaneFrame onFocusTabs={onFocusTabs}>
@@ -2568,7 +2605,6 @@ function WorkspaceAgentPane({
           onSessionListChange={onSessionListChange}
           onOpenPane={openPane}
           onOpenPaneRefreshHint={() => undefined}
-          headerTrailing={agentHeaderTrailing}
           tabsFocused={focused}
           closeActiveTabSignal={closeActiveTabSignal}
           onOpenNewChat={async () => {
@@ -2771,7 +2807,7 @@ function WorkspaceTabPane({
       <WorkspaceEnvTargetProvider>
         <WorkspaceShellTabTitleSync tabs={ctx.uiState.workspaceTabs} dispatchWorkspaceState={dispatchWorkspaceState} />
       </WorkspaceEnvTargetProvider>
-      <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
+      <div className="flex min-h-8 flex-none items-stretch border-b border-neutral-800 bg-neutral-975">
         {canUseEnvTabs ? (
           <WorkspaceEnvTargetProvider>
             <WorkspaceShellTabStrip

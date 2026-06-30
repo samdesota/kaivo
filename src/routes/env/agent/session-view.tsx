@@ -177,6 +177,7 @@ export function AgentSessionView({
           workspaceId={workspaceId}
           sessionId={sessionId}
           onSelect={(id) => setSessionId(id)}
+          onOpenNewChat={openNewChat}
           focused={tabsFocused}
           closeActiveSignal={closeActiveTabSignal}
         />

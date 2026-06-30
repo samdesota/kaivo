@@ -341,6 +341,25 @@ describe('agent service workspace sessions', () => {
     })
   })
 
+  it('does not surface user aborts as transcript errors', async () => {
+    const { agentService } = await import('./service.js')
+
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    await agentService.sessionAbort({ sessionId: session.id })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: session.opencodeSessionId,
+        message: 'aborted',
+        time: { created: 123 },
+      },
+    })
+
+    const replay = await agentService.transcriptReplay(session.id, 0)
+    expect(replay.map((evt) => evt.type)).toEqual(['session.idle'])
+    expect(createAgentNotificationMock).not.toHaveBeenCalled()
+  })
+
   it('projects persisted session errors into canonical session messages only for the matching session', async () => {
     const { agentService } = await import('./service.js')
 

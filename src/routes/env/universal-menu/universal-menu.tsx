@@ -96,6 +96,8 @@ interface AgentSessionRow {
   id: string
   workingDir: string | null
   title?: string | null
+  status?: string
+  lastActivityAt?: Date | string
 }
 
 interface FolderBrowseDir {
@@ -294,6 +296,7 @@ export function UniversalMenu({
   const [detailsWorkspaceMode, setDetailsWorkspaceMode] = useState<NewAgentChatWorkspaceMode>('new')
   const [detailsWorkspaceId, setDetailsWorkspaceId] = useState<string | undefined>(workspaceId)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const [closedChatsOpen, setClosedChatsOpen] = useState(false)
   const newWorkspaceIntent = intent === 'new-workspace'
   const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -318,6 +321,7 @@ export function UniversalMenu({
   const localWorkspaceTree = useWorkspaceSidebarTree()
   const envUtils = envTrpc.useUtils()
   const startChat = envTrpc.agent.sessionStart.useMutation()
+  const reopenChat = envTrpc.agent.sessionReopen.useMutation()
   const disposeShell = envTrpc.shell.dispose.useMutation()
   const cloneConfig = envTrpc.repo.cloneConfig.useMutation()
   const createDirectory = envTrpc.fs.createDirectory.useMutation()
@@ -373,6 +377,7 @@ export function UniversalMenu({
     setDetailsWorkspaceMode('new')
     setDetailsWorkspaceId(workspaceId)
     setActionMenuOpen(false)
+    setClosedChatsOpen(false)
   }, [initialIntent, initialScope, open, workspaceId])
 
   useLayoutEffect(() => {
@@ -418,15 +423,37 @@ export function UniversalMenu({
       })
     }
 
-    out.push(
-      {
+    if (workspaceId) {
+      const archivedCount = ((sessions.data as AgentSessionRow[] | undefined) ?? []).filter((session) => session.status === 'archived').length
+      out.push({
+        id: 'action:closed-chats',
+        kind: 'action',
+        label: 'Closed chats',
+        detail: archivedCount > 0 ? `${archivedCount} previous chat${archivedCount === 1 ? '' : 's'}` : 'No closed chats',
+        haystack: 'closed chats previous archived reopen agent chat history',
+        keepOpen: true,
+        run: () => {
+          setClosedChatsOpen(true)
+          setQuery('')
+          setActive(0)
+          setMouseMoved(false)
+          setActionMenuOpen(false)
+        },
+      })
+    }
+
+    if (workspaceId) {
+      out.push({
         id: 'action:toggle-agent-pane',
         kind: 'action',
-        label: 'Collapse agent pane',
+        label: 'Collapse agent chat',
         haystack: 'collapse expand toggle agent pane chat',
         disabled: !onToggleAgentPane,
         run: () => onToggleAgentPane?.(),
-      },
+      })
+    }
+
+    out.push(
       {
         id: 'action:toggle-sidebar',
         kind: 'action',
@@ -445,7 +472,7 @@ export function UniversalMenu({
       },
     )
     return out
-  }, [activeCwd, enterScope, hasActiveTab, onCloseTab, onCreateShell, onOpenSettings, onToggleAgentPane, onToggleSidebar])
+  }, [activeCwd, enterScope, hasActiveTab, onCloseTab, onCreateShell, onOpenSettings, onToggleAgentPane, onToggleSidebar, sessions.data, workspaceId])
 
   const newWorkspaceSections = useMemo(() => {
     const configs = [...((repoConfigs.data as RepoConfigRow[] | undefined) ?? [])]
@@ -480,7 +507,32 @@ export function UniversalMenu({
   const newWorkspaceCount = newWorkspaceSections.reduce((sum, section) => sum + section.results.length, 0)
   const newWorkspaceResults = useMemo(() => newWorkspaceSections.flatMap((section) => section.results), [newWorkspaceSections])
 
+  const closedChatResults = useMemo(() => ((sessions.data as AgentSessionRow[] | undefined) ?? [])
+    .filter((session) => session.status === 'archived')
+    .map((session): UniversalMenuResult => {
+      const label = session.title ?? session.id.slice(-8)
+      return {
+        id: `closed-chat:${session.id}`,
+        kind: 'action',
+        label,
+        detail: session.lastActivityAt ? new Date(session.lastActivityAt).toLocaleDateString() : undefined,
+        badge: 'closed',
+        haystack: `closed chat previous archived ${label} ${session.id}`,
+        disabled: !workspaceId,
+        run: async () => {
+          await reopenChat.mutateAsync({ sessionId: session.id })
+          await envUtils.agent.sessionList.invalidate(workspaceId ? { workspaceId } : undefined)
+          onCreatedChat?.(session.id, workspaceId)
+        },
+      }
+    }), [envUtils.agent.sessionList, onCreatedChat, reopenChat, sessions.data, workspaceId])
+
   const visibleResults = useMemo(() => {
+    if (closedChatsOpen) {
+      const filter = query.trim().toLowerCase()
+      if (!filter) return closedChatResults
+      return closedChatResults.filter((result) => result.haystack.toLowerCase().includes(filter))
+    }
     if (scope?.definition.id === 'open-folder') {
       const next = openFolderScopeResults({
         data: folderBrowse.data as FolderBrowseData | undefined,
@@ -588,7 +640,7 @@ export function UniversalMenu({
       query,
       openContent: (content) => onOpenContent?.(content, newWorkspaceIntent ? 'global' : initialOpenTarget),
     })
-  }, [bookmarksStore.bookmarks, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, initialOpenTarget, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, closedChatResults, closedChatsOpen, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, initialOpenTarget, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -647,12 +699,12 @@ export function UniversalMenu({
       })
     }
     const shellResults = [...shellMap.values()]
-
     return [
       { id: 'folders', label: 'Recent workspace folders', results: [...folderMap.values()] },
       { id: 'shells', label: 'Shells', results: shellResults },
+      { id: 'closed-chats', label: 'Closed chats', results: closedChatResults.slice(0, 5) },
     ].filter((section) => section.results.length > 0)
-  }, [contextItems, disposeShell, envUtils.shell.list, faviconCache.data, homePath, onCreateChat, onOpenContent, sessions.data, shells.data, workspaceId])
+  }, [closedChatResults, contextItems, disposeShell, envUtils.shell.list, faviconCache.data, homePath, onCreateChat, onOpenContent, sessions.data, shells.data, workspaceId])
 
   const contextualCount = contextualSections.reduce((sum, section) => sum + section.results.length, 0)
   const contextualResults = useMemo(() => contextualSections.flatMap((section) => section.results), [contextualSections])
@@ -662,15 +714,15 @@ export function UniversalMenu({
     : ''
 
   useEffect(() => {
-    if (!scope && !query.trim()) return
+    if (!scope && !query.trim() && !closedChatsOpen) return
     if (active >= visibleResults.length) setActive(0)
-  }, [active, query, scope, visibleResults.length])
+  }, [active, closedChatsOpen, query, scope, visibleResults.length])
 
   useEffect(() => {
-    if (scope || query.trim()) return
+    if (scope || query.trim() || closedChatsOpen) return
     const length = newWorkspaceIntent ? newWorkspaceResults.length : contextualResults.length
     if (active >= length) setActive(0)
-  }, [active, contextualResults.length, newWorkspaceIntent, newWorkspaceResults.length, query, scope])
+  }, [active, closedChatsOpen, contextualResults.length, newWorkspaceIntent, newWorkspaceResults.length, query, scope])
 
   useEffect(() => {
     if (scope?.definition.id !== 'open-folder') return
@@ -718,9 +770,14 @@ export function UniversalMenu({
         exitScope()
         return
       }
+      if (event.key === 'Backspace' && closedChatsOpen && query.length === 0) {
+        event.preventDefault()
+        exitClosedChats()
+        return
+      }
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        const length = scope || query.trim() ? visibleResults.length : newWorkspaceIntent ? newWorkspaceResults.length : contextualResults.length
+        const length = scope || query.trim() || closedChatsOpen ? visibleResults.length : newWorkspaceIntent ? newWorkspaceResults.length : contextualResults.length
         setActionMenuOpen(false)
         setActive((value) => Math.min(Math.max(length - 1, 0), value + 1))
         return
@@ -734,7 +791,7 @@ export function UniversalMenu({
       if (event.key === 'Enter') {
         event.preventDefault()
         if (!scope && !query.trim() && newWorkspaceIntent) void pickNewWorkspace(active)
-        else if (!scope && !query.trim()) void pickContextual(active, { shiftKey: event.shiftKey })
+        else if (!scope && !query.trim() && !closedChatsOpen) void pickContextual(active, { shiftKey: event.shiftKey })
         else void pick(active, { shiftKey: event.shiftKey })
         return
       }
@@ -753,7 +810,7 @@ export function UniversalMenu({
   if (!open) return null
 
   function setInputValue(value: string) {
-    if (!scope) {
+    if (!scope && !closedChatsOpen) {
       if (isPathLikeInput(value) && resolveBrowserAddress(value).kind !== 'url') {
         startTransition(() => enterScope(openFolderScope, value))
         return
@@ -908,6 +965,10 @@ export function UniversalMenu({
   }
 
   function goBackOrClose() {
+    if (closedChatsOpen) {
+      exitClosedChats()
+      return
+    }
     if (scope) {
       exitScope()
       return
@@ -924,8 +985,16 @@ export function UniversalMenu({
     setActionMenuOpen(false)
   }
 
-  const placeholder = scope ? `Search ${scope.definition.label.toLowerCase()}…` : newWorkspaceIntent ? 'Search folders or repo configs' : 'Search commands'
-  const resultCount = scope || query.trim() ? visibleResults.length : newWorkspaceIntent ? newWorkspaceCount : contextualCount
+  function exitClosedChats() {
+    setClosedChatsOpen(false)
+    setQuery('')
+    setActive(0)
+    setMouseMoved(false)
+    setActionMenuOpen(false)
+  }
+
+  const placeholder = closedChatsOpen ? 'Search closed chats…' : scope ? `Search ${scope.definition.label.toLowerCase()}…` : newWorkspaceIntent ? 'Search folders or repo configs' : 'Search commands'
+  const resultCount = scope || query.trim() || closedChatsOpen ? visibleResults.length : newWorkspaceIntent ? newWorkspaceCount : contextualCount
   const footerHints = currentScopeController?.footerHints ?? []
   const showActionHint = selectedResultActions().length > 0
   const selectedConfig = detailsSelection?.type === 'repoConfig' ? (repoConfigs.data as RepoConfigRow[] | undefined)?.find((config) => config.id === detailsSelection.configId) : null
@@ -1004,13 +1073,14 @@ export function UniversalMenu({
           <span>↵ {scope?.definition.id === 'open-folder' ? 'open/create' : 'open'}</span>
           {footerHints.map((hint) => <span key={hint}>{hint}</span>)}
           {showActionHint && <span>⌥ actions</span>}
-          <span>esc {scope ? 'back' : 'close'}</span>
+          <span>esc {scope || closedChatsOpen ? 'back' : 'close'}</span>
           <span className="ml-auto">{resultCount} result{resultCount === 1 ? '' : 's'}</span>
         </>
       )}
     >
       <div className="bg-neutral-950 px-3 py-3">
         <div className="flex w-full items-center gap-2 rounded-md border border-neutral-800 bg-neutral-975 px-3 py-2 focus-within:border-neutral-600">
+          {closedChatsOpen && <span className="shrink-0 rounded bg-neutral-900 px-1.5 py-0.5 text-[11px] text-neutral-400">Closed chats</span>}
           {scope && <span className="shrink-0 rounded bg-neutral-900 px-1.5 py-0.5 text-[11px] text-neutral-400">{scope.definition.label}</span>}
           <input
             ref={inputRef}
@@ -1023,9 +1093,9 @@ export function UniversalMenu({
             className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none"
           />
         </div>
-        {!scope && !query.trim() && !newWorkspaceIntent && <UniversalMenuScopeButtons scopes={scopes} onEnter={(definition) => enterScope(definition, '')} />}
+        {!closedChatsOpen && !scope && !query.trim() && !newWorkspaceIntent && <UniversalMenuScopeButtons scopes={scopes} onEnter={(definition) => enterScope(definition, '')} />}
       </div>
-      {!scope && !query.trim() && newWorkspaceIntent ? (
+      {!closedChatsOpen && !scope && !query.trim() && newWorkspaceIntent ? (
         <UniversalMenuContextView
           sections={newWorkspaceSections}
           activeIndex={active}
@@ -1042,7 +1112,7 @@ export function UniversalMenu({
             void Promise.resolve(result.run())
           }}
         />
-      ) : !scope && !query.trim() ? (
+      ) : !closedChatsOpen && !scope && !query.trim() ? (
         <UniversalMenuContextView
           sections={contextualSections}
           activeIndex={active}

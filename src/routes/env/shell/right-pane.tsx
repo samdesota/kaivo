@@ -89,7 +89,7 @@ export function RightPane({ state, dispatch, workspaceId }: RightPaneProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-neutral-975" onClick={() => setContextMenu(null)}>
-      <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
+      <div className="flex min-h-8 flex-none items-stretch border-b border-neutral-800 bg-neutral-975">
         <BorderedTabStrip
           items={tabItems}
           activeId={state.activeTabId}

@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent, ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import {
   DndContext,
   KeyboardSensor,
@@ -11,13 +11,15 @@ import {
 import {
   SortableContext,
   arrayMove,
-  horizontalListSortingStrategy,
+  rectSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { cn } from '../lib/utils'
 import { TabIconView, type TabIcon } from './tab-icon'
+
+const MIN_TAB_WIDTH = 140
 
 export interface BorderedTabItem {
   id: string
@@ -50,7 +52,20 @@ export function BorderedTabStrip({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
   const ids = items.map((item) => item.id)
+  const columnCount = useMemo(() => balancedTabColumnCount(items.length, containerWidth), [containerWidth, items.length])
+
+  useLayoutEffect(() => {
+    const node = containerRef.current
+    if (!node) return
+    const update = () => setContainerWidth(node.getBoundingClientRect().width)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   function handleDragEnd(event: DragEndEvent) {
     const overId = event.over?.id
@@ -63,19 +78,23 @@ export function BorderedTabStrip({
 
   const content = (
     <div
+      ref={containerRef}
       role="tablist"
       className={cn(
-        'no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden whitespace-nowrap',
+        'grid min-w-0 flex-1 items-stretch overflow-hidden whitespace-normal',
         className,
       )}
+      style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(${MIN_TAB_WIDTH}px, 1fr))` }}
     >
-      {items.map((item) => (
+      {items.map((item, itemIndex) => (
         <BorderedTab
           key={item.id}
           item={item}
           active={item.id === activeId}
           focused={focused}
           sortable={Boolean(onResort)}
+          first={itemIndex === 0}
+          last={itemIndex === items.length - 1}
           onSelect={onSelect}
           onClose={onClose}
           onContextMenu={onContextMenu}
@@ -87,12 +106,19 @@ export function BorderedTabStrip({
   if (!onResort || items.length < 2) return content
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} autoScroll={false} onDragEnd={handleDragEnd}>
+      <SortableContext items={ids} strategy={rectSortingStrategy}>
         {content}
       </SortableContext>
     </DndContext>
   )
+}
+
+function balancedTabColumnCount(itemCount: number, containerWidth: number): number {
+  if (itemCount <= 0) return 1
+  const maxPerRow = Math.max(1, Math.floor(containerWidth / MIN_TAB_WIDTH) || itemCount)
+  const rowCount = Math.ceil(itemCount / maxPerRow)
+  return Math.ceil(itemCount / rowCount)
 }
 
 function BorderedTab({
@@ -100,6 +126,8 @@ function BorderedTab({
   active,
   focused,
   sortable,
+  first,
+  last,
   onSelect,
   onClose,
   onContextMenu,
@@ -108,6 +136,8 @@ function BorderedTab({
   active: boolean
   focused: boolean
   sortable: boolean
+  first: boolean
+  last: boolean
   onSelect: (id: string) => void
   onClose?: (id: string) => void
   onContextMenu?: (id: string, event: MouseEvent) => void
@@ -127,7 +157,9 @@ function BorderedTab({
       aria-selected={active}
       onContextMenu={onContextMenu ? (event) => onContextMenu(item.id, event) : undefined}
       className={cn(
-        'group relative flex min-w-[100px] max-w-[250px] shrink-0 touch-none items-stretch border-l border-neutral-800 transition-colors first:border-l-0 last:border-r',
+        'group relative flex min-w-0 touch-none items-stretch border-l border-neutral-800 transition-colors',
+        first && 'border-l-0',
+        last && 'border-r',
         active ? 'bg-highlight text-neutral-200' : 'text-neutral-400 hover:bg-highlight hover:text-neutral-200',
         isDragging && 'z-20 opacity-80 shadow-lg',
       )}
