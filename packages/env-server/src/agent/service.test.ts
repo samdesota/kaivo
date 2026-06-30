@@ -34,6 +34,7 @@ const opencodeMessagesData = vi.hoisted(() => [] as Array<{
 const opencodeStatusData = vi.hoisted(() => new Map<string, { type: string; message?: string }>())
 const opencodeAbortCalls = vi.hoisted(() => [] as string[])
 const opencodePermissionCalls = vi.hoisted(() => [] as Array<{ sessionId: string; permissionId: string; response: string }>)
+const opencodePermissionFetchCalls = vi.hoisted(() => [] as Array<{ url: string; reply: string }>)
 const opencodePermissionError = vi.hoisted(() => ({ value: null as Error | null }))
 
 function resetState() {
@@ -44,6 +45,7 @@ function resetState() {
   opencodeStatusData.clear()
   opencodeAbortCalls.length = 0
   opencodePermissionCalls.length = 0
+  opencodePermissionFetchCalls.length = 0
   opencodePermissionError.value = null
   opencodeSessionSeq = 0
   createAgentNotificationMock.mockReset()
@@ -219,6 +221,18 @@ vi.mock('../logger.js', () => ({
 
 beforeEach(() => {
   resetState()
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/permission/')) {
+      const body = init?.body ? JSON.parse(String(init.body)) as { reply?: string } : {}
+      opencodePermissionFetchCalls.push({ url, reply: body.reply ?? '' })
+      if (opencodePermissionError.value) {
+        return new Response(opencodePermissionError.value.message, { status: 404 })
+      }
+      return new Response('true', { status: 200 })
+    }
+    return new Response('{}', { status: 200 })
+  }))
   vi.resetModules()
 })
 
@@ -509,9 +523,9 @@ describe('agent service workspace sessions', () => {
       response: 'reject',
     })
 
-    expect(opencodePermissionCalls).toEqual([
-      { sessionId: session.opencodeSessionId, permissionId: 'permission-1', response: 'reject' },
-    ])
+    expect(opencodePermissionFetchCalls).toHaveLength(1)
+    expect(opencodePermissionFetchCalls[0]?.url).toContain('/permission/permission-1/reply')
+    expect(opencodePermissionFetchCalls[0]?.reply).toBe('reject')
     expect((await agentService.sessionStatus({ sessionId: session.id })).pendingApprovals).toEqual([])
     const replay = await agentService.transcriptReplay(session.id, 0)
     expect(replay.map((evt) => evt.type)).toEqual(['permission.updated', 'permission.replied'])
@@ -519,6 +533,33 @@ describe('agent service workspace sessions', () => {
       sessionID: session.opencodeSessionId,
       permissionID: 'permission-1',
     })
+  })
+
+  it('clears pending permissions from requestID reply events', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a', title: 'Permission reply task' })
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'permission.updated',
+      properties: {
+        id: 'permission-1',
+        sessionID: session.opencodeSessionId,
+        permission: 'bash',
+        pattern: 'npm test',
+      },
+    })
+    expect((await agentService.sessionStatus({ sessionId: session.id })).pendingApprovals).toHaveLength(1)
+
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'permission.replied',
+      properties: {
+        sessionID: session.opencodeSessionId,
+        requestID: 'permission-1',
+        reply: 'once',
+      },
+    })
+
+    expect((await agentService.sessionStatus({ sessionId: session.id })).pendingApprovals).toEqual([])
   })
 
   it('updates agent runtime realtime rows from session and pending events', async () => {

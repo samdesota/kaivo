@@ -220,10 +220,11 @@ export function applyEvent(
       return { ...state, permissions }
     }
     case 'permission.replied': {
-      const p = evt.payload as { permissionID?: string }
-      if (!p.permissionID) return state
+      const p = evt.payload as { permissionID?: string; requestID?: string }
+      const permissionId = p.permissionID ?? p.requestID
+      if (!permissionId) return state
       const permissions = new Map(state.permissions)
-      permissions.delete(p.permissionID)
+      permissions.delete(permissionId)
       return { ...state, permissions }
     }
     case 'question.asked': {

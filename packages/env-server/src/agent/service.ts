@@ -1084,14 +1084,12 @@ class AgentService {
     permissionId: string
     response: 'once' | 'always' | 'reject'
   }): Promise<void> {
-    const { row, client, dirOpts } = await this.sessionContext(input.sessionId)
+    const { row, fetch } = await this.sessionContext(input.sessionId)
     const targetOpencodeSessionId = this.findPermissionSession(row.opencodeSessionId, input.permissionId) ?? row.opencodeSessionId
     try {
-      await client.postSessionIdPermissionsPermissionId({
-        path: { id: targetOpencodeSessionId, permissionID: input.permissionId },
-        body: { response: input.response },
-        ...dirOpts,
-        throwOnError: true,
+      await fetch(`/permission/${encodeURIComponent(input.permissionId)}/reply`, {
+        method: 'POST',
+        body: JSON.stringify({ reply: input.response }),
       })
     } catch (err) {
       if (!isMissingPermissionRequestError(err)) throw err
@@ -1423,9 +1421,10 @@ class AgentService {
       const rootOpencodeSessionId = this.resolveRootOpencodeSessionId(ocSessionId)
       void this.createBlockingNotification(rootOpencodeSessionId, `permission:${ocSessionId}:${p.id}`, 'permission', 'Approval required', title)
     } else if (type === 'permission.replied') {
-      const p = props as { permissionID?: string }
-      if (p.permissionID) this.pending.get(ocSessionId)?.delete(p.permissionID)
-      if (p.permissionID) this.blockingNotificationKeys.delete(`${this.resolveRootOpencodeSessionId(ocSessionId)}:permission:${ocSessionId}:${p.permissionID}`)
+      const p = props as { permissionID?: string; requestID?: string }
+      const permissionId = p.permissionID ?? p.requestID
+      if (permissionId) this.pending.get(ocSessionId)?.delete(permissionId)
+      if (permissionId) this.blockingNotificationKeys.delete(`${this.resolveRootOpencodeSessionId(ocSessionId)}:permission:${ocSessionId}:${permissionId}`)
     } else if (type === 'question.asked') {
       const q = props as unknown as {
         id?: string

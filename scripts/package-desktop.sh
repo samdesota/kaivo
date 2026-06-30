@@ -83,6 +83,15 @@ install_runtime_deps() {
   rsync -a --delete "$cache_dir/node_modules/" "$runtime_dir/node_modules/"
 }
 
+install_desktop_deps_if_needed() {
+  if [ -d "$desktop_dir/node_modules" ]; then
+    echo "==> reusing desktop dependencies"
+  else
+    echo "==> installing desktop dependencies"
+    (cd "$desktop_dir" && npm install --no-audit --no-fund)
+  fi
+}
+
 for arg in "$@"; do
   case "$arg" in
     --install)
@@ -105,7 +114,7 @@ run_job client_pid "client-spa" bash -lc "cd '$repo_root' && npx vite build"
 run_job app_server_pid "app-server-build" bash -lc "cd '$repo_root' && npx tsup"
 run_job env_server_pid "env-server-build" bash -lc "cd '$repo_root/packages/env-server' && npm run build"
 run_job opencode_plugin_pid "opencode-plugin-build" bash -lc "cd '$repo_root/packages/opencode-plugin' && npm run build"
-run_job desktop_pid "desktop-build" bash -lc "cd '$desktop_dir' && npm install --no-audit --no-fund --silent && npm run build"
+run_job desktop_pid "desktop-build" bash -lc "$(declare -f install_desktop_deps_if_needed); desktop_dir='$desktop_dir'; install_desktop_deps_if_needed && cd '$desktop_dir' && npm run build"
 
 # runtime package.json with only server-side deps
 node --input-type=module -e "
@@ -187,6 +196,7 @@ echo "==> packaging electron app"
   --ignore='^/src($|/)' \
   --ignore='^/dist/.*\.map$' \
   --ignore='^/\.kaivo($|/)' \
+  --ignore='^/node_modules/@samdesota/webframe/tmp($|/)' \
   --ignore='^/release($|/)' && \
   node scripts/sign-macos-app.cjs release/Kaivo-darwin-arm64/Kaivo.app)
 

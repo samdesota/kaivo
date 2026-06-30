@@ -803,12 +803,10 @@ class AgentService {
     response: 'once' | 'always' | 'reject'
   }): Promise<void> {
     const row = await this.requireSession(input.sessionId)
-    const client = await this.getClient(row.sandboxId)
     try {
-      await client.postSessionIdPermissionsPermissionId({
-        path: { id: row.opencodeSessionId, permissionID: input.permissionId },
-        body: { response: input.response },
-        throwOnError: true,
+      await this.opencodeFetch(row.sandboxId, `/permission/${encodeURIComponent(input.permissionId)}/reply`, {
+        method: 'POST',
+        body: JSON.stringify({ reply: input.response }),
       })
     } catch (err) {
       if (!isMissingPermissionRequestError(err)) throw err
@@ -1063,8 +1061,9 @@ class AgentService {
         createdAt: p.time?.created ?? Date.now(),
       })
     } else if (type === 'permission.replied') {
-      const p = props as { permissionID?: string }
-      if (p.permissionID) this.pending.get(ocSessionId)?.delete(p.permissionID)
+      const p = props as { permissionID?: string; requestID?: string }
+      const permissionId = p.permissionID ?? p.requestID
+      if (permissionId) this.pending.get(ocSessionId)?.delete(permissionId)
     } else if (type === 'question.asked') {
       const q = props as unknown as {
         id?: string
