@@ -12,9 +12,11 @@ export type WorkspaceSidebarOverlayAction =
 
 export type WorkspaceSidebarOverlayCommand =
   | { type: 'set-previewed'; previewed: boolean }
+  | { type: 'set-active-global-tab'; tabId: string | null }
 
 export type WorkspaceSidebarOverlaySession = {
   attach(input: { sidebarWidth?: number }): Promise<void>
+  update(input: { globalTabId: string | null }): void
   detach(): void
   close(): void
 }
@@ -87,6 +89,11 @@ export async function openWorkspaceSidebarOverlay(input: {
     channel.postMessage({ type: 'set-previewed', previewed: true } satisfies WorkspaceSidebarOverlayCommand)
   }
 
+  function update(next: { globalTabId: string | null }) {
+    if (closed) return
+    channel.postMessage({ type: 'set-active-global-tab', tabId: next.globalTabId } satisfies WorkspaceSidebarOverlayCommand)
+  }
+
   function detach() {
     if (closed || !attached) return
     attached = false
@@ -109,5 +116,5 @@ export async function openWorkspaceSidebarOverlay(input: {
     if (event.data.type === 'hide-preview' || event.data.type === 'hide-sidebar') detach()
   }
 
-  return { attach, detach, close }
+  return { attach, update, detach, close }
 }

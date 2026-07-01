@@ -956,6 +956,11 @@ function WorkspaceSidebarOverlayContent({
   channel: BroadcastChannel | null
 }) {
   const [previewed, setPreviewed] = useState(false)
+  const [liveActiveGlobalTabId, setLiveActiveGlobalTabId] = useState(activeGlobalTabId)
+
+  useEffect(() => {
+    setLiveActiveGlobalTabId(activeGlobalTabId)
+  }, [activeGlobalTabId])
 
   useEffect(() => {
     if (!channel) return
@@ -963,6 +968,9 @@ function WorkspaceSidebarOverlayContent({
       const message = event.data
       if (message.type === 'set-previewed') {
         setPreviewed(message.previewed)
+      }
+      if (message.type === 'set-active-global-tab') {
+        setLiveActiveGlobalTabId(message.tabId)
       }
     }
     channel.addEventListener('message', onMessage)
@@ -1006,7 +1014,7 @@ function WorkspaceSidebarOverlayContent({
           dispatchWorkspaceState={dispatchWorkspaceState}
           onHide={() => actions({ type: 'hide-sidebar' })}
           onNewWorkspaceIntent={() => actions({ type: 'new-workspace' })}
-          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTabId }}
+          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: liveActiveGlobalTabId }}
           onSelectGlobalTab={(tabId) => actions({ type: 'select-global-tab', tabId })}
           onLeaveGlobalTabs={() => actions({ type: 'leave-global-tabs' })}
           onCloseGlobalTab={(tabId) => actions({ type: 'close-global-tab', tabId })}

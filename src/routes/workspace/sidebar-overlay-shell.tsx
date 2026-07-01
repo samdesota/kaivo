@@ -49,6 +49,7 @@ export function WorkspaceSidebarOverlayShell() {
         return
       }
       sessionRef.current = session
+      if (targetRef.current) session?.update({ globalTabId: targetRef.current.globalTabId })
       if (targetRef.current?.previewed) void session?.attach({ sidebarWidth: targetRef.current.sidebarWidth })
     }).catch((error) => {
       creatingRef.current = false
@@ -62,9 +63,10 @@ export function WorkspaceSidebarOverlayShell() {
 
   useEffect(() => {
     if (!target?.hidden || !sessionRef.current) return
+    sessionRef.current.update({ globalTabId: target.globalTabId })
     if (target.previewed) void sessionRef.current.attach({ sidebarWidth: target.sidebarWidth })
     else sessionRef.current.detach()
-  }, [target?.hidden, target?.previewed, target?.sidebarWidth])
+  }, [target?.globalTabId, target?.hidden, target?.previewed, target?.sidebarWidth])
 
   useEffect(() => {
     return () => {
