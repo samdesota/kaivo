@@ -258,6 +258,38 @@ export async function createDirectory(parentPath: string, name: string): Promise
   return { name: trimmed, path: target }
 }
 
+export async function revealFile(
+  filePath: string,
+  opts: { absolute?: boolean } = {},
+): Promise<void> {
+  const abs = opts.absolute ? requireAbsolute(filePath) : resolveWorkspacePath(filePath)
+  let stat
+  try {
+    stat = await fs.stat(abs)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new FsError('not_found', 'file not found')
+    }
+    throw err
+  }
+  if (!stat.isFile()) throw new FsError('not_readable', 'not a regular file')
+
+  const command = process.platform === 'darwin'
+    ? { bin: 'open', args: ['-R', abs] }
+    : process.platform === 'win32'
+      ? { bin: 'explorer.exe', args: ['/select,', abs] }
+      : { bin: 'xdg-open', args: [path.dirname(abs)] }
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command.bin, command.args, { stdio: 'ignore', detached: true })
+    child.on('error', reject)
+    child.on('spawn', () => {
+      child.unref()
+      resolve()
+    })
+  })
+}
+
 function requireAbsolute(p: string): string {
   if (!path.isAbsolute(p)) {
     throw new FsError('not_readable', 'absolute path required when absolute=true')

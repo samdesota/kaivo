@@ -10,7 +10,7 @@ type ReadState = {
   isLoading: boolean
   error: Error | null
   data: {
-    content: string
+    content: string | null
     mtime: string
     binary: boolean
     tooLarge: boolean
@@ -21,6 +21,7 @@ type ReadState = {
 
 let readState: ReadState
 const writeMutateAsync = vi.hoisted(() => vi.fn())
+const revealMutate = vi.hoisted(() => vi.fn())
 const watchHandlers = vi.hoisted(() => [] as Array<(evt: { type: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'; path: string }) => void>)
 
 vi.mock('@uiw/react-codemirror', () => ({
@@ -37,6 +38,7 @@ vi.mock('../../src/env-trpc', () => ({
   envTrpc: {
     fs: {
       read: { useQuery: () => readState },
+      reveal: { useMutation: () => ({ isPending: false, mutate: revealMutate, error: null }) },
       write: { useMutation: () => ({ isPending: false, mutateAsync: writeMutateAsync }) },
       watch: {
         useSubscription: (
@@ -89,6 +91,7 @@ beforeEach(() => {
     refetch: vi.fn(),
   }
   writeMutateAsync.mockReset()
+  revealMutate.mockReset()
   watchHandlers.length = 0
 })
 
@@ -123,6 +126,36 @@ describe('FileViewer render-time freshness', () => {
     const images = screen.getAllByRole('img') as HTMLImageElement[]
     expect(images[0].src).toBe('http://env.test/fs/raw?path=%2Ftmp%2Fdocs%2Fimages%2Fpic.png&absolute=true&token=secret-token')
     expect(images[1].src).toBe('https://example.test/pic.png')
+  })
+
+  it('previews binary images through the env raw-file endpoint', async () => {
+    readState.data = {
+      content: null,
+      mtime: '2026-05-07T00:00:01.000Z',
+      binary: true,
+      tooLarge: false,
+      size: 2048,
+    }
+
+    renderViewer({ path: '/tmp/docs/pic.png', env: true })
+
+    expect((screen.getByRole('img') as HTMLImageElement).src).toBe('http://env.test/fs/raw?path=%2Ftmp%2Fdocs%2Fpic.png&absolute=true&token=secret-token')
+  })
+
+  it('shows Finder action for unsupported binary files', async () => {
+    readState.data = {
+      content: null,
+      mtime: '2026-05-07T00:00:01.000Z',
+      binary: true,
+      tooLarge: false,
+      size: 2048,
+    }
+
+    renderViewer({ path: '/tmp/docs/archive.bin', env: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Show in Finder' }))
+
+    expect(screen.getByText('Preview not available')).toBeTruthy()
+    expect(revealMutate).toHaveBeenCalledWith({ path: '/tmp/docs/archive.bin', absolute: true })
   })
 
   it('captures fs.read mtime when the first local edit starts', async () => {

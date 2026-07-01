@@ -5,7 +5,7 @@ import { EditorView } from '@codemirror/view'
 import { oneDark } from '@codemirror/theme-one-dark'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Eye, FileText } from 'lucide-react'
+import { Eye, FileText, FolderOpen } from 'lucide-react'
 import type { ReactNode, WheelEvent } from 'react'
 import { envTrpc } from '../../env-trpc'
 import { resolveEnvUrl } from '../../lib/env-client'
@@ -48,6 +48,7 @@ export function FileViewer({
   const envContext = useOptionalEnv()
   const queryClient = useQueryClient()
   const write = envTrpc.fs.write.useMutation()
+  const reveal = envTrpc.fs.reveal.useMutation()
 
   const [localEditorState, setLocalEditorState] = useState<FileEditorState>(emptyFileEditorState)
   const [writeError, setWriteError] = useState<string | null>(null)
@@ -140,9 +141,33 @@ export function FileViewer({
     )
   }
   if (data.binary) {
+    const rawFileUrl = envContext ? createRawFileUrl(`${resolveEnvUrl(envContext.env)}/fs/raw`, path, Boolean(absolute), envContext.envToken) : null
+    const previewKind = previewKindForPath(path)
+    if (rawFileUrl && previewKind) {
+      return (
+        <div className="flex h-full flex-col bg-neutral-975">
+          <BinaryFilePreview kind={previewKind} url={rawFileUrl} path={path} />
+          <FileViewerBar
+            path={path}
+            dirty={false}
+            writeError={reveal.error ? extractTrpcMessage(reveal.error) : null}
+            isSaving={false}
+            onSave={() => {}}
+            onReveal={() => reveal.mutate({ path, absolute })}
+            isRevealing={reveal.isPending}
+          />
+        </div>
+      )
+    }
     return (
-      <div className="h-full bg-neutral-975 p-4 text-sm text-ui-default">
-        Binary file ({formatBytes(data.size ?? 0)}). Preview not supported.
+      <div className="flex h-full flex-col bg-neutral-975">
+        <UnsupportedFileState
+          path={path}
+          size={data.size ?? 0}
+          revealError={reveal.error ? extractTrpcMessage(reveal.error) : null}
+          isRevealing={reveal.isPending}
+          onReveal={() => reveal.mutate({ path, absolute })}
+        />
       </div>
     )
   }
@@ -206,6 +231,8 @@ function FileViewerBar({
   onSave,
   markdownMode,
   onMarkdownModeChange,
+  onReveal,
+  isRevealing,
 }: {
   path: string
   dirty: boolean
@@ -214,6 +241,8 @@ function FileViewerBar({
   onSave: () => void
   markdownMode?: 'preview' | 'text'
   onMarkdownModeChange?: (mode: 'preview' | 'text') => void
+  onReveal?: () => void
+  isRevealing?: boolean
 }) {
   const nextMarkdownMode = markdownMode === 'preview' ? 'text' : 'preview'
   const ToggleIcon = markdownMode === 'preview' ? FileText : Eye
@@ -222,6 +251,18 @@ function FileViewerBar({
       <span className="truncate text-ui-default">{path}</span>
       <div className="flex items-center gap-2">
         {writeError && <span className="text-red-400">{writeError}</span>}
+        {onReveal && (
+          <button
+            onClick={onReveal}
+            disabled={isRevealing}
+            className="flex h-6 items-center gap-1 rounded px-2 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 disabled:opacity-50"
+            title="Show in Finder"
+            aria-label="Show in Finder"
+          >
+            <FolderOpen size={14} />
+            <span>Finder</span>
+          </button>
+        )}
         {markdownMode && onMarkdownModeChange && (
           <button
             onClick={() => onMarkdownModeChange(nextMarkdownMode)}
@@ -241,6 +282,112 @@ function FileViewerBar({
             {isSaving ? 'Saving…' : 'Save'}
           </button>
         )}
+      </div>
+    </div>
+  )
+}
+
+type PreviewKind = 'image' | 'pdf' | 'docx'
+
+function previewKindForPath(path: string): PreviewKind | null {
+  if (/\.(apng|avif|gif|jpe?g|png|svg|webp)$/i.test(path)) return 'image'
+  if (/\.pdf$/i.test(path)) return 'pdf'
+  if (/\.docx$/i.test(path)) return 'docx'
+  return null
+}
+
+function BinaryFilePreview({ kind, url, path }: { kind: PreviewKind; url: string; path: string }) {
+  if (kind === 'image') {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-neutral-950 p-6">
+        <img src={url} alt={path} className="max-h-full max-w-full rounded border border-neutral-800 object-contain shadow-2xl shadow-black/30" />
+      </div>
+    )
+  }
+  if (kind === 'pdf') {
+    return <iframe src={url} title={path} className="min-h-0 flex-1 border-0 bg-neutral-950" />
+  }
+  return <DocxPreview url={url} />
+}
+
+function DocxPreview({ url }: { url: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+    setError(null)
+    if (containerRef.current) containerRef.current.innerHTML = ''
+
+    async function renderDocx() {
+      try {
+        const [{ renderAsync }, response] = await Promise.all([
+          import('docx-preview'),
+          fetch(url, { signal: controller.signal }),
+        ])
+        if (!response.ok) throw new Error(`Unable to load document (${response.status})`)
+        const buffer = await response.arrayBuffer()
+        if (cancelled || !containerRef.current) return
+        await renderAsync(buffer, containerRef.current, undefined, {
+          className: 'kaivo-docx-preview',
+          inWrapper: false,
+          ignoreWidth: false,
+          ignoreHeight: false,
+        })
+      } catch (err) {
+        if (!cancelled && (err as { name?: string }).name !== 'AbortError') {
+          setError(err instanceof Error ? err.message : 'Unable to preview DOCX file')
+        }
+      }
+    }
+
+    void renderDocx()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [url])
+
+  if (error) {
+    return <div className="min-h-0 flex-1 overflow-auto p-6 text-sm text-red-300">{error}</div>
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto bg-neutral-900 p-6">
+      <div ref={containerRef} className="mx-auto w-fit max-w-full bg-white text-black shadow-2xl shadow-black/40 [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-0 [&_section.docx]:max-w-full" />
+    </div>
+  )
+}
+
+function UnsupportedFileState({
+  path,
+  size,
+  revealError,
+  isRevealing,
+  onReveal,
+}: {
+  path: string
+  size: number
+  revealError: string | null
+  isRevealing: boolean
+  onReveal: () => void
+}) {
+  return (
+    <div className="flex h-full items-center justify-center p-6 text-sm text-ui-default">
+      <div className="max-w-sm rounded-lg border border-neutral-800 bg-neutral-950/60 p-5 text-center shadow-xl shadow-black/20">
+        <div className="font-medium text-content-strong">Preview not available</div>
+        <div className="mt-2 text-ui-muted">{path} is a binary file ({formatBytes(size)}) and this file type is not supported yet.</div>
+        <button
+          type="button"
+          onClick={onReveal}
+          disabled={isRevealing}
+          className="mt-4 inline-flex items-center gap-2 rounded-md border border-neutral-700 px-3 py-1.5 text-content-default hover:bg-neutral-900 hover:text-content-strong disabled:opacity-50"
+        >
+          <FolderOpen size={15} />
+          {isRevealing ? 'Opening…' : 'Show in Finder'}
+        </button>
+        {revealError && <div className="mt-3 text-red-300">{revealError}</div>}
       </div>
     </div>
   )
@@ -341,9 +488,13 @@ function resolveMarkdownImageSrc(
 ): string | undefined {
   if (!src || isExternalMarkdownUrl(src) || !rawFileBaseUrl || !envToken) return src
   const imagePath = resolveMarkdownRelativePath(markdownPath, src)
+  return createRawFileUrl(rawFileBaseUrl, imagePath, markdownAbsolute && imagePath.startsWith('/'), envToken)
+}
+
+function createRawFileUrl(rawFileBaseUrl: string, path: string, absolute: boolean, envToken: string): string {
   const url = new URL(rawFileBaseUrl)
-  url.searchParams.set('path', imagePath)
-  url.searchParams.set('absolute', String(markdownAbsolute && imagePath.startsWith('/')))
+  url.searchParams.set('path', path)
+  url.searchParams.set('absolute', String(absolute))
   url.searchParams.set('token', envToken)
   return url.toString()
 }

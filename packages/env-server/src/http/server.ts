@@ -219,9 +219,11 @@ function contentTypeForPath(filePath: string): string {
     case 'gif': return 'image/gif'
     case 'jpg':
     case 'jpeg': return 'image/jpeg'
+    case 'pdf': return 'application/pdf'
     case 'png': return 'image/png'
     case 'svg': return 'image/svg+xml'
     case 'webp': return 'image/webp'
+    case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     default: return 'application/octet-stream'
   }
 }

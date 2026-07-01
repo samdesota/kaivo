@@ -9,6 +9,7 @@ import {
   createDirectory,
   listDirectory,
   readFile,
+  revealFile,
   searchGitTrackedFiles,
   watchFilePath,
   watchWorkspace,
@@ -70,6 +71,22 @@ export const fsRouter = router({
     .mutation(async ({ input }) => {
       try {
         await writeFile(input.path, input.content, { absolute: input.absolute })
+        return { ok: true as const }
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
+  reveal: authedProcedure
+    .input(
+      z.object({
+        path: z.string().min(1).max(2048),
+        absolute: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        await revealFile(input.path, { absolute: input.absolute })
         return { ok: true as const }
       } catch (err) {
         throw toTrpcError(err)
