@@ -5,6 +5,7 @@ import {
   globalChildTabFromWindowTabCreated,
   globalTabFromPaneContent,
   globalTabUpsertInput,
+  universalMenuIntentForTabShortcut,
   GlobalTabsSidebarSection,
   nextGlobalTabIdAfterClose,
   universalMenuOpenTargetForShortcut,
@@ -94,6 +95,11 @@ describe('global tabs sidebar', () => {
     expect(universalMenuOpenTargetForShortcut(true, false)).toBe('global')
     expect(universalMenuOpenTargetForShortcut(false, true)).toBe('global')
     expect(universalMenuOpenTargetForShortcut(false, false)).toBe('workspace')
+  })
+
+  it('maps shifted tab shortcut to global intent', () => {
+    expect(universalMenuIntentForTabShortcut(true)).toBe('global')
+    expect(universalMenuIntentForTabShortcut(false)).toBe('default')
   })
 
   it('creates global browser tab data from browser pane content only', () => {

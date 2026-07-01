@@ -8,7 +8,7 @@ import { paneTabIconForType, TabIconView, type TabIcon } from '../../../componen
 import { envTrpc } from '../../../env-trpc'
 import { trpc } from '../../../trpc'
 import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../../../lib/favicon-cache'
-import { matchBookmarks, resolveBrowserAddress } from '../../../lib/browser-navigation'
+import { buildWebSearchUrl, matchBookmarks, resolveBrowserAddress } from '../../../lib/browser-navigation'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
 import { defaultWorkspaceName, resolveWorkspaceName, type NewAgentChatSelection, type NewAgentChatWorkspaceMode } from '../agent/new-agent-chat-state'
@@ -64,7 +64,7 @@ export interface UniversalMenuContextItem {
   content: PaneContent
 }
 
-export type UniversalMenuInitialIntent = 'default' | 'new-workspace'
+export type UniversalMenuInitialIntent = 'default' | 'global'
 export type UniversalMenuInitialScope = 'web'
 export type UniversalMenuOpenTarget = 'workspace' | 'global'
 
@@ -297,7 +297,7 @@ export function UniversalMenu({
   const [detailsWorkspaceId, setDetailsWorkspaceId] = useState<string | undefined>(workspaceId)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [closedChatsOpen, setClosedChatsOpen] = useState(false)
-  const newWorkspaceIntent = intent === 'new-workspace'
+  const globalIntent = intent === 'global'
   const previousFileSystemResultsRef = useRef<UniversalMenuResult[]>([])
   const inputRef = useRef<HTMLInputElement | null>(null)
   const folderProbe = envTrpc.fs.browseHome.useQuery(
@@ -313,8 +313,8 @@ export function UniversalMenu({
     enabled: open && !!workspaceId,
     staleTime: 5_000,
   })
-  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined, { enabled: open && (scope?.definition.id === 'recent-folders' || newWorkspaceIntent), staleTime: 5_000 })
-  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open && (scope?.definition.id === 'work-trees' || !!detailsSelection || newWorkspaceIntent), staleTime: 5_000 })
+  const recentFolders = envTrpc.repo.listRecentFolders.useQuery(undefined, { enabled: open && (scope?.definition.id === 'recent-folders' || globalIntent), staleTime: 5_000 })
+  const repoConfigs = envTrpc.repo.listConfigs.useQuery(undefined, { enabled: open && (scope?.definition.id === 'work-trees' || !!detailsSelection || globalIntent), staleTime: 5_000 })
   const worktrees = envTrpc.repo.listWorktrees.useQuery(undefined, { enabled: open && scope?.definition.id === 'work-trees', staleTime: 5_000 })
   const shells = envTrpc.shell.list.useQuery(workspaceId ? { workspaceId } : undefined, { enabled: open && !!workspaceId && (scope?.definition.id === 'shells' || (!scope && !query.trim())), staleTime: 5_000 })
   const workspaceTree = trpc.workspace.listTree.useQuery(undefined, { enabled: open && scope?.definition.id === 'workspaces', staleTime: 15_000 })
@@ -396,7 +396,8 @@ export function UniversalMenu({
   }, [open, scope?.definition.id])
 
   const commandResults = useMemo<UniversalMenuResult[]>(() => {
-    const out: UniversalMenuResult[] = scopes.map((definition) => ({
+    const commandScopes = globalIntent ? scopes.filter((definition) => definition.id === 'web' || definition.id === 'workspaces') : scopes
+    const out: UniversalMenuResult[] = commandScopes.map((definition) => ({
       id: `scope:${definition.id}`,
       kind: 'scope',
       label: definition.label,
@@ -404,6 +405,28 @@ export function UniversalMenu({
       haystack: `${definition.label} ${definition.detail} ${definition.key}`,
       run: () => enterScope(definition, ''),
     }))
+
+    if (globalIntent) {
+      out.push(
+        {
+          id: 'action:toggle-sidebar',
+          kind: 'action',
+          label: 'Collapse sidebar',
+          haystack: 'collapse expand toggle sidebar workspace navigation',
+          disabled: !onToggleSidebar,
+          run: () => onToggleSidebar?.(),
+        },
+        {
+          id: 'action:settings',
+          kind: 'action',
+          label: 'Settings',
+          haystack: 'settings preferences configuration providers credentials',
+          disabled: !onOpenSettings,
+          run: () => onOpenSettings?.(),
+        },
+      )
+      return out
+    }
 
     out.push({
       id: 'action:new-shell',
@@ -472,7 +495,7 @@ export function UniversalMenu({
       },
     )
     return out
-  }, [activeCwd, enterScope, hasActiveTab, onCloseTab, onCreateShell, onOpenSettings, onToggleAgentPane, onToggleSidebar, sessions.data, workspaceId])
+  }, [activeCwd, enterScope, globalIntent, hasActiveTab, onCloseTab, onCreateShell, onOpenSettings, onToggleAgentPane, onToggleSidebar, sessions.data, workspaceId])
 
   const newWorkspaceSections = useMemo(() => {
     const configs = [...((repoConfigs.data as RepoConfigRow[] | undefined) ?? [])]
@@ -541,7 +564,7 @@ export function UniversalMenu({
         filter: folderBrowsePlan ? folderBrowsePlan.filter : query,
         workspaceId,
         startChat: async (path) => {
-          if (newWorkspaceIntent || !workspaceId) {
+          if (globalIntent || !workspaceId) {
             openDetails({ type: 'folder', path })
             return
           }
@@ -571,7 +594,7 @@ export function UniversalMenu({
         workspaceId,
         openNewWorkspaceChat: (path) => openDetails({ type: 'folder', path }),
         startChat: async (path) => {
-          if (newWorkspaceIntent || !workspaceId) {
+          if (globalIntent || !workspaceId) {
             openDetails({ type: 'folder', path })
             return
           }
@@ -614,7 +637,7 @@ export function UniversalMenu({
         bookmarks: bookmarksStore.bookmarks,
         query,
         faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
-        openContent: (content) => onOpenContent?.(content, newWorkspaceIntent ? 'global' : initialOpenTarget),
+        openContent: (content) => onOpenContent?.(content, globalIntent ? 'global' : initialOpenTarget),
       })
     }
     if (scope?.definition.id === 'workspaces') {
@@ -625,22 +648,22 @@ export function UniversalMenu({
     }
     if (scope) return placeholderScopeResults(scope.definition)
     const trimmed = query.trim().toLowerCase()
-    if (newWorkspaceIntent) {
-      return newWorkspaceResults
+    if (!trimmed) return []
+    const globalWorkspaceResults = globalIntent
+      ? newWorkspaceResults
         .map((result) => ({ result, score: fuzzyScore(result.haystack.toLowerCase(), trimmed) }))
         .filter((entry) => entry.score > 0)
         .sort((a, b) => b.score - a.score)
         .map((entry) => entry.result)
-    }
-    if (!trimmed) return []
+      : []
     return normalSearchResults({
       bookmarks: bookmarksStore.bookmarks,
-      commandResults,
+      commandResults: [...globalWorkspaceResults, ...commandResults],
       faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
       query,
-      openContent: (content) => onOpenContent?.(content, newWorkspaceIntent ? 'global' : initialOpenTarget),
+      openContent: (content) => onOpenContent?.(content, globalIntent ? 'global' : initialOpenTarget),
     })
-  }, [bookmarksStore.bookmarks, closedChatResults, closedChatsOpen, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, homePath, initialOpenTarget, newWorkspaceIntent, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
+  }, [bookmarksStore.bookmarks, closedChatResults, closedChatsOpen, commandResults, contextItems, createDirectory, disposeShell, envUtils.fs.browseHome, envUtils.shell.list, faviconCache.data, fileRoots, folderBrowse.data, folderBrowse.error, folderBrowse.isLoading, folderBrowsePlan, gitFiles.data, gitFiles.error, gitFiles.isLoading, globalIntent, homePath, initialOpenTarget, newWorkspaceResults, onCreateChat, onOpenContent, onSwitchWorkspace, query, recentFolders.data, recentFolders.error, recentFolders.isLoading, repoConfigs.data, repoConfigs.error, repoConfigs.isLoading, scope, shells.data, shells.error, shells.isLoading, workspaceId, workspaceTree.data, workspaceTree.error, workspaceTree.isLoading, worktrees.data, worktrees.error, worktrees.isLoading])
 
   const contextualSections = useMemo(() => {
     const folderMap = new Map<string, UniversalMenuResult>()
@@ -720,9 +743,9 @@ export function UniversalMenu({
 
   useEffect(() => {
     if (scope || query.trim() || closedChatsOpen) return
-    const length = newWorkspaceIntent ? newWorkspaceResults.length : contextualResults.length
+    const length = globalIntent ? newWorkspaceResults.length : contextualResults.length
     if (active >= length) setActive(0)
-  }, [active, closedChatsOpen, contextualResults.length, newWorkspaceIntent, newWorkspaceResults.length, query, scope])
+  }, [active, closedChatsOpen, contextualResults.length, globalIntent, newWorkspaceResults.length, query, scope])
 
   useEffect(() => {
     if (scope?.definition.id !== 'open-folder') return
@@ -759,7 +782,7 @@ export function UniversalMenu({
       }
       if (event.key === 'Tab' && !detailsSelection) {
         event.preventDefault()
-        setIntent((current) => current === 'new-workspace' ? 'default' : 'new-workspace')
+        setIntent((current) => current === 'global' ? 'default' : 'global')
         setActive(0)
         setMouseMoved(false)
         setActionMenuOpen(false)
@@ -777,7 +800,7 @@ export function UniversalMenu({
       }
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        const length = scope || query.trim() || closedChatsOpen ? visibleResults.length : newWorkspaceIntent ? newWorkspaceResults.length : contextualResults.length
+        const length = scope || query.trim() || closedChatsOpen ? visibleResults.length : globalIntent ? newWorkspaceResults.length : contextualResults.length
         setActionMenuOpen(false)
         setActive((value) => Math.min(Math.max(length - 1, 0), value + 1))
         return
@@ -790,7 +813,7 @@ export function UniversalMenu({
       }
       if (event.key === 'Enter') {
         event.preventDefault()
-        if (!scope && !query.trim() && newWorkspaceIntent) void pickNewWorkspace(active)
+        if (!scope && !query.trim() && globalIntent) void pickNewWorkspace(active)
         else if (!scope && !query.trim() && !closedChatsOpen) void pickContextual(active, { shiftKey: event.shiftKey })
         else void pick(active, { shiftKey: event.shiftKey })
         return
@@ -845,7 +868,7 @@ export function UniversalMenu({
   }
 
   function selectedResultActions(): UniversalMenuResultAction[] {
-    const result = !scope && !query.trim() && newWorkspaceIntent
+    const result = !scope && !query.trim() && globalIntent
       ? newWorkspaceResults[active]
       : !scope && !query.trim()
         ? contextualResults[active]
@@ -856,13 +879,13 @@ export function UniversalMenu({
   async function pick(index: number, event?: { shiftKey?: boolean }) {
     const result = visibleResults[index]
     if (!result || result.disabled) return
-    if ((newWorkspaceIntent || event?.shiftKey) && result.alternateRun) {
+    if ((globalIntent || event?.shiftKey) && result.alternateRun) {
       await result.alternateRun()
       return
     }
     await result.run()
     if (result.keepOpen) return
-    if (newWorkspaceIntent) return
+    if (globalIntent && result.id.startsWith('new-workspace-')) return
     onClose()
   }
 
@@ -910,7 +933,7 @@ export function UniversalMenu({
     if (!detailsSelection) return
     console.info('[universal-menu] create details submit', {
       selectionType: detailsSelection.type,
-      newWorkspaceIntent,
+      globalIntent,
       workspaceId,
     })
     setDetailsError(null)
@@ -993,8 +1016,8 @@ export function UniversalMenu({
     setActionMenuOpen(false)
   }
 
-  const placeholder = closedChatsOpen ? 'Search closed chats…' : scope ? `Search ${scope.definition.label.toLowerCase()}…` : newWorkspaceIntent ? 'Search folders or repo configs' : 'Search commands'
-  const resultCount = scope || query.trim() || closedChatsOpen ? visibleResults.length : newWorkspaceIntent ? newWorkspaceCount : contextualCount
+  const placeholder = closedChatsOpen ? 'Search closed chats…' : scope ? `Search ${scope.definition.label.toLowerCase()}…` : globalIntent ? 'Search web, bookmarks, folders, or commands' : 'Search commands'
+  const resultCount = scope || query.trim() || closedChatsOpen ? visibleResults.length : globalIntent ? newWorkspaceCount : contextualCount
   const footerHints = currentScopeController?.footerHints ?? []
   const showActionHint = selectedResultActions().length > 0
   const selectedConfig = detailsSelection?.type === 'repoConfig' ? (repoConfigs.data as RepoConfigRow[] | undefined)?.find((config) => config.id === detailsSelection.configId) : null
@@ -1093,9 +1116,9 @@ export function UniversalMenu({
             className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 placeholder:text-placeholder focus:outline-none"
           />
         </div>
-        {!closedChatsOpen && !scope && !query.trim() && !newWorkspaceIntent && <UniversalMenuScopeButtons scopes={scopes} onEnter={(definition) => enterScope(definition, '')} />}
+        {!closedChatsOpen && !scope && !query.trim() && !globalIntent && <UniversalMenuScopeButtons scopes={scopes} onEnter={(definition) => enterScope(definition, '')} />}
       </div>
-      {!closedChatsOpen && !scope && !query.trim() && newWorkspaceIntent ? (
+      {!closedChatsOpen && !scope && !query.trim() && globalIntent ? (
         <UniversalMenuContextView
           sections={newWorkspaceSections}
           activeIndex={active}
@@ -1801,6 +1824,19 @@ function normalSearchResults({
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.result))
+
+  if (trimmed) {
+    const searchUrl = buildWebSearchUrl(trimmed)
+    rows.push({
+      id: `normal-web-search:${trimmed}`,
+      kind: 'browser-tab',
+      label: `Web search "${trimmed}"`,
+      detail: searchUrl,
+      icon: paneTabIconForType('browser'),
+      haystack: trimmed,
+      run: () => openContent({ type: 'browser', url: searchUrl }),
+    })
+  }
 
   return rows
 }

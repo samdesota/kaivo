@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   },
   browseInputs: [] as Array<{ path?: string }>,
   startChat: vi.fn(async () => ({ id: 'session-new' })),
+  reopenChat: vi.fn(async () => ({ ok: true })),
   createDirectory: vi.fn(async ({ parentPath, name }: { parentPath: string; name: string }) => ({ name, path: `${parentPath}/${name}` })),
   createShell: vi.fn(async () => ({ id: 'shell-new' })),
   disposeShell: vi.fn(async () => ({ ok: true })),
@@ -53,6 +54,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/env-trpc', () => ({
   envTrpc: {
     useUtils: () => ({
+      agent: { sessionList: { invalidate: vi.fn(async () => undefined) } },
       shell: { list: { invalidate: vi.fn(async () => undefined) } },
       fs: { browseHome: { invalidate: vi.fn(async () => undefined) } },
     }),
@@ -62,6 +64,9 @@ vi.mock('../../src/env-trpc', () => ({
       },
       sessionStart: {
         useMutation: () => ({ mutateAsync: mocks.startChat, isPending: false }),
+      },
+      sessionReopen: {
+        useMutation: () => ({ mutateAsync: mocks.reopenChat, isPending: false }),
       },
     },
     fs: {
@@ -158,6 +163,7 @@ beforeEach(() => {
   }
   mocks.browseInputs = []
   mocks.startChat.mockClear()
+  mocks.reopenChat.mockClear()
   mocks.createDirectory.mockClear()
   mocks.createShell.mockClear()
   mocks.disposeShell.mockClear()
@@ -599,6 +605,31 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'workspace')
   })
 
+  it('shows web search as the last top-level fallback for URL-like queries', () => {
+    const onOpenContent = vi.fn()
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab={false}
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: 'google.com' } })
+
+    const buttons = Array.from(screen.getByTestId('universal-menu-results').querySelectorAll('button'))
+    const labels = buttons.map((button) => button.textContent ?? '')
+    expect(labels[0]).toContain('google.comhttps://google.com')
+    expect(labels.at(-1)).toContain('Web search "google.com"')
+
+    fireEvent.click(buttons.at(-1)!)
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://www.google.com/search?q=google.com' }, 'workspace')
+  })
+
   it('opens directly into the web scope when requested', () => {
     const onOpenContent = vi.fn()
     render(
@@ -620,14 +651,14 @@ describe('UniversalMenu baseline shell', () => {
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'workspace')
   })
 
-  it('targets web submissions globally in new workspace intent mode', () => {
+  it('targets web submissions globally in global intent mode', () => {
     const onOpenContent = vi.fn()
     render(
       <UniversalMenu
         open
         workspaceId="workspace-1"
         hasActiveTab={false}
-        initialIntent="new-workspace"
+        initialIntent="global"
         onOpenContent={onOpenContent}
         onClose={vi.fn()}
         onCloseTab={vi.fn()}
@@ -639,6 +670,35 @@ describe('UniversalMenu baseline shell', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://google.com' }, 'global')
+  })
+
+  it('shows bookmarks and global-safe commands in global intent mode', () => {
+    const onOpenContent = vi.fn()
+    const now = new Date('2026-05-16T00:00:00Z')
+    mocks.bookmarks = [
+      { id: 'bookmark-docs', title: 'Docs', url: 'https://example.com/docs', normalizedUrl: 'https://example.com/docs', origin: 'https://example.com', faviconDataUrl: null, faviconUrl: null, createdAt: now, updatedAt: now },
+    ]
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        hasActiveTab
+        initialIntent="global"
+        onOpenContent={onOpenContent}
+        onClose={vi.fn()}
+        onCloseTab={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Universal menu search')
+    fireEvent.change(input, { target: { value: 'docs' } })
+
+    expect(screen.getByRole('button', { name: /Docsexample\.com/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /New shell/ })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Docsexample\.com/ }))
+    expect(onOpenContent).toHaveBeenCalledWith({ type: 'browser', url: 'https://example.com/docs' }, 'global')
   })
 
   it('targets web submissions globally when opened with a global initial target', () => {

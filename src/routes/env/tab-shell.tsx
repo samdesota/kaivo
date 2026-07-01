@@ -43,7 +43,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
 
   const hasTabs = state.tabs.length > 0
 
-  async function openCommandPalette(initialIntent: 'default' | 'new-workspace' = 'default') {
+  async function openCommandPalette(initialIntent: 'default' | 'global' = 'default') {
     console.info('[universal-menu] open from env shell', { initialIntent, envId: envContext.env.id })
     const result = await openUniversalMenuOverlay({
       env: envContext.env,
@@ -79,7 +79,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
-        void openCommandPalette(e.shiftKey ? 'new-workspace' : 'default')
+        void openCommandPalette(e.shiftKey ? 'global' : 'default')
       }
     }
     window.addEventListener('keydown', onKey)

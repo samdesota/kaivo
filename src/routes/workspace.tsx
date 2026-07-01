@@ -781,7 +781,7 @@ function WorkspaceShell({
   const handleSidebarOverlayAction = useCallback((action: WorkspaceSidebarOverlayAction) => {
     if (action.type === 'hide-preview') hideSidebarPreview()
     if (action.type === 'hide-sidebar') setSidebarHiddenExplicit(true)
-    if (action.type === 'new-workspace') void openCommandPalette({ initialIntent: 'new-workspace' })
+    if (action.type === 'new-workspace') void openCommandPalette({ initialIntent: 'global' })
     if (action.type === 'navigate-workspace') void navigate({ to: '/w/$workspaceId', params: { workspaceId: action.workspaceId }, search: { chat: undefined, tab: undefined } })
     if (action.type === 'navigate-settings') void navigate({ to: '/settings' })
     if (action.type === 'select-global-tab') showGlobalTab(action.tabId)
@@ -822,6 +822,7 @@ function WorkspaceShell({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
         e.preventDefault()
         void openCommandPalette({
+          initialIntent: universalMenuIntentForTabShortcut(e.shiftKey),
           initialOpenTarget: universalMenuOpenTargetForShortcut(e.shiftKey, globalTabsMode),
         })
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
@@ -870,7 +871,7 @@ function WorkspaceShell({
         <WorkspaceSidebar
           dispatchWorkspaceState={dispatchWorkspaceState}
           onHide={() => setSidebarHiddenExplicit(true)}
-          onNewWorkspaceIntent={() => void openCommandPalette({ initialIntent: 'new-workspace' })}
+          onNewWorkspaceIntent={() => void openCommandPalette({ initialIntent: 'global' })}
           globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTab?.id ?? null }}
           onSelectGlobalTab={(tabId) => showGlobalTab(tabId)}
           onLeaveGlobalTabs={() => void navigate({ to: '/w/$workspaceId', params: { workspaceId: ctx.workspace.id }, search: { chat: undefined, tab: undefined } })}
@@ -1866,6 +1867,10 @@ export function nextGlobalTabIdAfterClose(tabs: WorkspaceTab[], closingTabId: st
 
 export function universalMenuOpenTargetForShortcut(shiftKey: boolean, globalTabsMode: boolean): UniversalMenuOpenTarget {
   return shiftKey || globalTabsMode ? 'global' : 'workspace'
+}
+
+export function universalMenuIntentForTabShortcut(shiftKey: boolean): UniversalMenuInitialIntent {
+  return shiftKey ? 'global' : 'default'
 }
 
 export function globalTabFromPaneContent(content: PaneContent, options?: { title?: string }): Extract<WorkspaceTab, { type: 'browser' }> | null {
