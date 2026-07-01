@@ -11,8 +11,9 @@ import { COLOR_HUE_BOUNDS, COLOR_SATURATION_BOUNDS, FONT_SIZE_BOUNDS, useFontSiz
 import { AGENT_NOTIFICATION_SOUND_PRESETS, playAgentNotificationSound, useAgentNotificationSoundPrefs } from '../lib/agent-notification-sounds'
 import { RepoConfigCreateButton, RepoConfigsManager } from './repo-config-manager'
 import { SettingsPanel } from './settings/panel'
+import { OnePasswordSection } from './settings/onepassword'
 
-type SettingsPageId = 'agent' | 'repos' | 'terminal' | 'appearance'
+type SettingsPageId = 'agent' | 'repos' | 'onepassword' | 'terminal' | 'appearance'
 
 type DesktopSettingsWindow = Window & {
   cloudCodeDesktop?: {
@@ -23,6 +24,7 @@ type DesktopSettingsWindow = Window & {
 const SETTINGS_PAGES: { id: SettingsPageId; label: string; description: string }[] = [
   { id: 'agent', label: 'Agent', description: 'Models, providers, and agent credentials.' },
   { id: 'repos', label: 'Repos', description: 'Repository templates and GitHub integration.' },
+  { id: 'onepassword', label: '1Password', description: 'Browser extension support for desktop panes.' },
   { id: 'terminal', label: 'Terminal', description: 'Local terminal daemon controls.' },
   { id: 'appearance', label: 'Appearance', description: 'Local interface preferences.' },
 ]
@@ -219,6 +221,7 @@ export function SettingsPage() {
               </SettingsPanel>
             </>
           )}
+          {activePage === 'onepassword' && <OnePasswordSection />}
           {activePage === 'terminal' && <TerminalSection />}
           {activePage === 'appearance' && <AppearanceSection />}
         </div>
@@ -228,7 +231,7 @@ export function SettingsPage() {
 }
 
 function parseSettingsPage(page: string | undefined): SettingsPageId {
-  return page === 'repos' || page === 'terminal' || page === 'appearance' ? page : 'agent'
+  return page === 'repos' || page === 'onepassword' || page === 'terminal' || page === 'appearance' ? page : 'agent'
 }
 
 function TerminalSection() {

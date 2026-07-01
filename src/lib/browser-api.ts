@@ -44,6 +44,7 @@ export type BrowserApi = {
   forward(input: { browserTabId: string }): Promise<void>
   reload(input: { browserTabId: string; ignoreCache?: boolean }): Promise<void>
   openDevTools(input: { browserTabId: string }): Promise<void>
+  openOnePassword(input: { browserTabId: string }): Promise<void>
   findInPage(input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }): Promise<void>
   stopFindInPage(input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }): Promise<void>
   setZoom(input: { browserTabId: string; level: number }): Promise<{ zoomLevel: number }>
@@ -113,6 +114,7 @@ type BrowserWindowLike = Window & { webframe?: WebframeGlobal }
 type DesktopWindowLike = Window & {
   cloudCodeDesktop?: {
       openBrowserDevTools?: (input: { browserTabId: string }) => Promise<unknown>
+      triggerOnePassword?: (input?: { browserTabId?: string }) => Promise<unknown>
       findInBrowserPage?: (input: { browserTabId: string; text: string; forward?: boolean; findNext?: boolean }) => Promise<unknown>
       stopBrowserFindInPage?: (input: { browserTabId: string; action?: 'clearSelection' | 'keepSelection' | 'activateSelection' }) => Promise<unknown>
       setBrowserZoom?: (input: { browserTabId: string; level: number }) => Promise<{ zoomLevel: number }>
@@ -234,6 +236,12 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const desktop = win as DesktopWindowLike | undefined
       if (!desktop?.cloudCodeDesktop?.openBrowserDevTools) throw new Error('browser devtools unavailable')
       await desktop.cloudCodeDesktop.openBrowserDevTools({ browserTabId: input.browserTabId })
+    },
+
+    async openOnePassword(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      if (!desktop?.cloudCodeDesktop?.triggerOnePassword) throw new Error('1Password unavailable')
+      await desktop.cloudCodeDesktop.triggerOnePassword({ browserTabId: input.browserTabId })
     },
 
     async findInPage(input) {

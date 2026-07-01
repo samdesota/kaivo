@@ -50,4 +50,9 @@ contextBridge.exposeInMainWorld('cloudCodeDesktop', {
   registerOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/register-overlay-owner', input),
   unregisterOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/unregister-overlay-owner', input),
   restartTerminalService: () => ipcRenderer.invoke('kaivo/services/restart-terminal'),
+  getOnePasswordStatus: () => ipcRenderer.invoke('kaivo/onepassword/status'),
+  installOnePassword: () => ipcRenderer.invoke('kaivo/onepassword/install'),
+  resetOnePasswordConfig: () => ipcRenderer.invoke('kaivo/onepassword/reset'),
+  saveOnePasswordConfig: (input: { extensionPath: string; nativeHostManifestPath?: string }) => ipcRenderer.invoke('kaivo/onepassword/save-config', input),
+  triggerOnePassword: (input?: { browserTabId?: string }) => ipcRenderer.invoke('kaivo/onepassword/trigger', input),
 })
