@@ -25,6 +25,11 @@ interface BrowserPaneProps {
 
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 }
 type BrowserSlotRect = typeof HIDDEN_RECT
+type PendingBrowserTabCreate = {
+  key: string
+  promise: ReturnType<typeof browserApi.createTab>
+  consumers: number
+}
 
 function browserSlotRectForElement(slot: HTMLElement, active: boolean): BrowserSlotRect {
   if (!active) return HIDDEN_RECT
@@ -61,6 +66,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   const attachedTabKeyRef = useRef<string | null>(null)
   const focusedTabKeyRef = useRef<string | null>(null)
   const slotReadyRef = useRef<Promise<void>>(Promise.resolve())
+  const pendingCreateRef = useRef<PendingBrowserTabCreate | null>(null)
   const findQueryRef = useRef('')
   const zoomLevelRef = useRef(0)
   const [address, setAddress] = useState(url ?? '')
@@ -74,7 +80,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   const [findMatch, setFindMatch] = useState<{ active: number; total: number } | null>(null)
   const [zoomLevel, setZoomLevel] = useState(0)
 
-  browserTabIdRef.current = browserTabId
+  if (browserTabId) browserTabIdRef.current = browserTabId
   onBrowserTabIdRef.current = onBrowserTabId
   onUrlChangeRef.current = onUrlChange
   onTitleChangeRef.current = onTitleChange
@@ -143,6 +149,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
 
     async function ensureTab() {
       await slotReadyRef.current
+      if (cancelled) return
       const existingTabId = browserTabIdRef.current
       if (existingTabId) {
         const tabKey = `${existingTabId}:${paneId}`
@@ -165,9 +172,34 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
         }
       }
 
-      const tab = await browserApi.createTab({ paneId, url })
+      const createKey = `${paneId}\0${url ?? ''}`
+      let createRequest = pendingCreateRef.current
+      if (!createRequest || createRequest.key !== createKey) {
+        const request: PendingBrowserTabCreate = {
+          key: createKey,
+          promise: browserApi.createTab({ paneId, url }),
+          consumers: 0,
+        }
+        createRequest = request
+        pendingCreateRef.current = request
+        void request.promise.then(
+          () => {
+            if (pendingCreateRef.current === request) pendingCreateRef.current = null
+          },
+          () => {
+            if (pendingCreateRef.current === request) pendingCreateRef.current = null
+          },
+        )
+      }
+
+      createRequest.consumers += 1
+      const tab = await createRequest.promise.finally(() => {
+        createRequest.consumers -= 1
+      })
       if (cancelled) {
-        await browserApi.closeTab({ browserTabId: tab.browserTabId })
+        if (closeOnUnmount && createRequest.consumers === 0 && browserTabIdRef.current !== tab.browserTabId) {
+          await browserApi.closeTab({ browserTabId: tab.browserTabId })
+        }
         return
       }
       createdTabIdRef.current = tab.browserTabId
@@ -181,7 +213,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
     return () => {
       cancelled = true
     }
-  }, [active, browserTabId, paneId, url])
+  }, [active, browserTabId, closeOnUnmount, paneId, url])
 
   useEffect(() => {
     if (!browserApi.isAvailable()) return
