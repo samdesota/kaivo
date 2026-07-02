@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, ipcMain, Menu, session as electronSession, webContents as electronWebContents, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, screen, session as electronSession, webContents as electronWebContents, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
 import { desktopBrowserSocketPath, readOrCreateDesktopAuthToken } from './instance-runtime'
@@ -20,6 +20,9 @@ const trackedWebContentsIds = new Set<number>()
 const devToolsWindows = new Map<number, BrowserWindow>()
 const browserTabFocusOwners = new Map<string, number>()
 const overlayOwners = new Map<number, Set<string>>()
+type SidebarZone = { width: number; wasInside: boolean; pendingLeftTimer: NodeJS.Timeout | null }
+const sidebarZones = new Map<number, SidebarZone>()
+let sidebarZoneTimer: NodeJS.Timeout | null = null
 
 type WindowBounds = { x?: number; y?: number; width: number; height: number }
 
@@ -80,6 +83,8 @@ function trackWebContents(contents: WebContents): void {
     if (isMainFrame && !isInPlace) closeOwnedOverlays(contents.id, 'owner navigation')
   })
   contents.on('destroyed', () => {
+    deleteSidebarZone(contents.id)
+    updateSidebarZoneTimer()
     closeOwnedOverlays(contents.id, 'owner destroyed')
   })
   contents.on('before-mouse-event', (_event, mouse) => {
@@ -132,6 +137,113 @@ function trackWebContents(contents: WebContents): void {
   contents.on('unresponsive', () => {
     writeLog('crash', 'error', 'renderer-unresponsive', { webContentsId: contents.id })
   })
+}
+
+function updateSidebarZone(ownerWebContentsId: number, input: { enabled?: boolean; width?: number }): void {
+  if (!input.enabled) {
+    deleteSidebarZone(ownerWebContentsId)
+    updateSidebarZoneTimer()
+    return
+  }
+  const contents = electronWebContents.fromId(ownerWebContentsId)
+  const win = contents && !contents.isDestroyed()
+    ? (contents as WebContents & { getOwnerBrowserWindow?: () => BrowserWindow | null }).getOwnerBrowserWindow?.()
+    : null
+  const width = Math.max(1, Math.round(input.width ?? 256))
+  const existing = sidebarZones.get(ownerWebContentsId)
+  if (existing?.pendingLeftTimer) clearTimeout(existing.pendingLeftTimer)
+  sidebarZones.set(ownerWebContentsId, { width, wasInside: isCursorInsideSidebarZone(win ?? null, width), pendingLeftTimer: null })
+  updateSidebarZoneTimer()
+}
+
+function deleteSidebarZone(ownerWebContentsId: number): void {
+  const zone = sidebarZones.get(ownerWebContentsId)
+  if (zone?.pendingLeftTimer) clearTimeout(zone.pendingLeftTimer)
+  sidebarZones.delete(ownerWebContentsId)
+}
+
+function updateSidebarZoneTimer(): void {
+  if (sidebarZones.size > 0 && sidebarZoneTimer === null) {
+    sidebarZoneTimer = setInterval(checkSidebarZones, 50)
+    return
+  }
+  if (sidebarZones.size === 0 && sidebarZoneTimer !== null) {
+    clearInterval(sidebarZoneTimer)
+    sidebarZoneTimer = null
+  }
+}
+
+function checkSidebarZones(): void {
+  for (const [ownerWebContentsId, zone] of sidebarZones) {
+    const contents = electronWebContents.fromId(ownerWebContentsId)
+    if (!contents || contents.isDestroyed()) {
+      sidebarZones.delete(ownerWebContentsId)
+      continue
+    }
+    const win = (contents as WebContents & { getOwnerBrowserWindow?: () => BrowserWindow | null }).getOwnerBrowserWindow?.()
+    const point = screen.getCursorScreenPoint()
+    const bounds = win && !win.isDestroyed() ? win.getBounds() : null
+    const insideWindow = !!bounds
+      && point.x >= bounds.x
+      && point.x <= bounds.x + bounds.width
+      && point.y >= bounds.y
+      && point.y <= bounds.y + bounds.height
+    const inside = isCursorInsideSidebarZoneBounds(bounds, zone.width, point)
+
+    if (zone.pendingLeftTimer && insideWindow) {
+      clearTimeout(zone.pendingLeftTimer)
+      zone.pendingLeftTimer = null
+    }
+
+    if (zone.wasInside && !inside) {
+      if (bounds && point.x < bounds.x) {
+        zone.wasInside = false
+        if (!zone.pendingLeftTimer) {
+          zone.pendingLeftTimer = setTimeout(() => {
+            const latest = sidebarZones.get(ownerWebContentsId)
+            if (!latest) return
+            latest.pendingLeftTimer = null
+            const latestContents = electronWebContents.fromId(ownerWebContentsId)
+            const latestWin = latestContents && !latestContents.isDestroyed()
+              ? (latestContents as WebContents & { getOwnerBrowserWindow?: () => BrowserWindow | null }).getOwnerBrowserWindow?.()
+              : null
+            const latestPoint = screen.getCursorScreenPoint()
+            const latestBounds = latestWin && !latestWin.isDestroyed() ? latestWin.getBounds() : null
+            const backInsideWindow = !!latestBounds
+              && latestPoint.x >= latestBounds.x
+              && latestPoint.x <= latestBounds.x + latestBounds.width
+              && latestPoint.y >= latestBounds.y
+              && latestPoint.y <= latestBounds.y + latestBounds.height
+            if (backInsideWindow) return
+            latestContents?.send('kaivo/sidebar-zone-left')
+          }, 300)
+        }
+        continue
+      }
+      contents.send('kaivo/sidebar-zone-left')
+      zone.wasInside = false
+      continue
+    }
+    zone.wasInside = inside
+  }
+  updateSidebarZoneTimer()
+}
+
+function isCursorInsideSidebarZone(win: BrowserWindow | null, width: number): boolean {
+  if (!win || win.isDestroyed()) return false
+  return isCursorInsideSidebarZoneBounds(win.getBounds(), width, screen.getCursorScreenPoint())
+}
+
+function isCursorInsideSidebarZoneBounds(
+  bounds: Electron.Rectangle | null,
+  width: number,
+  point: Electron.Point,
+): boolean {
+  if (!bounds) return false
+  return point.x >= bounds.x
+    && point.x <= bounds.x + width
+    && point.y >= bounds.y
+    && point.y <= bounds.y + bounds.height
 }
 
 function registerOverlayOwner(ownerWebContentsId: number, overlayId: string): void {
@@ -509,6 +621,11 @@ function installIpcHandlers(): void {
   ipcMain.handle('kaivo/browser/unregister-overlay-owner', (event, input: { overlayId?: string }) => {
     if (!input.overlayId) throw new Error('overlayId is required')
     unregisterOverlayOwner(event.sender.id, input.overlayId)
+    return { ok: true as const }
+  })
+  ipcMain.handle('kaivo/sidebar-zone/update', (event, input: { enabled?: boolean; width?: number }) => {
+    if (!chromeWebContentsIds.has(event.sender.id)) throw new Error('sidebar zone owner must be a chrome webContents')
+    updateSidebarZone(event.sender.id, input)
     return { ok: true as const }
   })
   ipcMain.on('kaivo/browser/register-tab-focus-owner', (event, input: { browserTabId?: string }) => {

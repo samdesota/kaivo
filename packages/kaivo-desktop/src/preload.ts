@@ -46,6 +46,12 @@ contextBridge.exposeInMainWorld('cloudCodeDesktop', {
     ipcRenderer.on('kaivo/browser-tab-focused', listener)
     return () => ipcRenderer.removeListener('kaivo/browser-tab-focused', listener)
   },
+  updateSidebarZone: (input: { enabled: boolean; width?: number }) => ipcRenderer.invoke('kaivo/sidebar-zone/update', input),
+  onSidebarZoneLeft: (handler: () => void) => {
+    const listener = () => handler()
+    ipcRenderer.on('kaivo/sidebar-zone-left', listener)
+    return () => ipcRenderer.removeListener('kaivo/sidebar-zone-left', listener)
+  },
   focusOverlay: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/focus-overlay', input),
   registerOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/register-overlay-owner', input),
   unregisterOverlayOwner: (input: { overlayId: string }) => ipcRenderer.invoke('kaivo/browser/unregister-overlay-owner', input),

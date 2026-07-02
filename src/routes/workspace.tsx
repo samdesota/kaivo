@@ -74,6 +74,7 @@ import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/ope
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
 import { useWorkspaceSidebarLayoutState, WorkspaceSidebarLayout } from './workspace/sidebar-layout'
 import { clearWorkspaceSidebarOverlayTarget, setWorkspaceSidebarOverlayTarget, type WorkspaceSidebarOverlayAction, type WorkspaceSidebarOverlayCommand } from './workspace/sidebar-overlay-controller'
+import { WorkspaceSidebarBridgeStateSource, useWorkspaceSidebarState, type GlobalTabDestination, type GlobalTabsWorkspaceSummary, type WorkspaceSidebarChatRollup, type WorkspaceSidebarStateSnapshot } from './workspace/sidebar-state'
 import { useAgentNotificationsStore, type AgentNotificationRecord } from './workspace/notifications-store'
 import { useAgentRuntimeStore } from './workspace/agent-runtime-store'
 import {
@@ -94,17 +95,6 @@ import { clientLogger } from '../lib/client-logger'
 
 type WorkspaceUiDispatch = (action: WorkspaceUiAction) => void
 
-type GlobalTabsWorkspaceSummary = {
-  id: string
-  name: string
-}
-
-type GlobalTabDestination = {
-  workspace: GlobalTabsWorkspaceSummary | null
-  tabs: WorkspaceTab[]
-  activeTabId: string | null
-}
-
 type WorkspaceSummary = WorkspaceRecord
 
 const WORKSPACE_SIDEBAR_WIDTH_KEY = 'kaivo.workspaceSidebarWidth'
@@ -116,6 +106,7 @@ const LEGACY_WORKSPACE_CHAT_READ_KEY = 'cloud-code.workspaceChatReadAt'
 const WORKSPACE_BOOTSTRAP_EVENT = 'kaivo.workspaceBootstrapChanged'
 const PENDING_SHELL_ID_PREFIX = '__pending-shell:'
 const workspaceLog = clientLogger.diagnostic('workspace')
+const EMPTY_GLOBAL_TABS_DESTINATION: GlobalTabDestination = { workspace: null, tabs: [], activeTabId: null }
 
 type EnvShellCreateClient = {
   shell: {
@@ -269,12 +260,12 @@ export function GlobalTabsPage() {
 
 export function WorkspaceSidebarOverlayPage() {
   const search = useSearch({ from: '/internal/workspace-sidebar-overlay' })
-  const workspaceId = search.workspaceId
   const channelName = search.channel
   const overlayChannel = useMemo(() => {
     if (!channelName) return null
     return new BroadcastChannel(channelName)
   }, [channelName])
+  const sidebarSource = useMemo(() => new WorkspaceSidebarBridgeStateSource(), [])
   const postAction = useCallback((action: WorkspaceSidebarOverlayAction) => {
     overlayChannel?.postMessage(action)
   }, [overlayChannel])
@@ -283,25 +274,38 @@ export function WorkspaceSidebarOverlayPage() {
     document.documentElement.classList.add('overlay-layer-document')
     document.body.classList.add('overlay-layer-document')
     document.getElementById('root')?.classList.add('overlay-layer-document')
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
+    document.getElementById('root')?.style.setProperty('overflow', 'hidden')
     return () => {
       document.documentElement.classList.remove('overlay-layer-document')
       document.body.classList.remove('overlay-layer-document')
       document.getElementById('root')?.classList.remove('overlay-layer-document')
+      document.documentElement.style.overflow = ''
+      document.body.style.overflow = ''
+      document.getElementById('root')?.style.removeProperty('overflow')
       overlayChannel?.close()
     }
   }, [overlayChannel])
 
-  if (!workspaceId || !overlayChannel) return <div className="min-h-screen bg-transparent" />
+  useEffect(() => {
+    if (!overlayChannel) return
+    const onMessage = (event: MessageEvent<WorkspaceSidebarOverlayAction | WorkspaceSidebarOverlayCommand>) => {
+      const message = event.data
+      if (message.type === 'set-state') sidebarSource.update(message.state)
+    }
+    overlayChannel.addEventListener('message', onMessage)
+    overlayChannel.postMessage({ type: 'request-state' } satisfies WorkspaceSidebarOverlayAction)
+    return () => overlayChannel.removeEventListener('message', onMessage)
+  }, [overlayChannel, sidebarSource])
+
+  if (!overlayChannel) return <div className="min-h-screen bg-transparent" />
 
   return (
-    <WorkspaceRoutePage
-      workspaceId={workspaceId}
-      search={{ chat: undefined, tab: undefined }}
-      syncWorkspaceSearch={false}
-      globalTabsMode={Boolean(search.globalTabId)}
-      globalTabsActiveTabId={search.globalTabId ?? null}
-      sidebarOverlayActions={postAction}
-      sidebarOverlayChannel={overlayChannel}
+    <WorkspaceSidebarOverlayContent
+      actions={postAction}
+      source={sidebarSource}
+      channel={overlayChannel}
     />
   )
 }
@@ -483,6 +487,7 @@ function WorkspaceShell({
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertResource = trpc.workspace.upsertResource.useMutation()
   const getOrCreateGlobalTabsWorkspace = trpc.workspace.getOrCreateGlobalTabsWorkspace.useMutation()
+  const notifications = useAgentNotificationsStore()
   const {
     hidden: sidebarHidden,
     previewed: sidebarPreviewed,
@@ -496,11 +501,19 @@ function WorkspaceShell({
   const [focusedTabGroup, setFocusedTabGroup] = useState<'agent' | 'workspace'>('agent')
   const [closeAgentTabSignal, setCloseAgentTabSignal] = useState(0)
   const [globalTabsWorkspace, setGlobalTabsWorkspace] = useState<GlobalTabsWorkspaceSummary | null>(null)
+  const sidebarOverlayStateRef = useRef<WorkspaceSidebarStateSnapshot | null>(null)
+  const sidebarOverlayTargetRef = useRef<Parameters<typeof setWorkspaceSidebarOverlayTarget>[0] | null>(null)
   const agentCollapsed = ctx.uiState.agentCollapsed
-  const globalTabs = useWorkspaceTabs(globalTabsWorkspace?.id ?? '__global-tabs-pending__').filter((tab) => tab.type === 'browser')
+  const globalWorkspaceTabs = useWorkspaceTabs(globalTabsWorkspace?.id ?? '__global-tabs-pending__')
+  const globalTabs = useMemo(() => globalWorkspaceTabs.filter((tab) => tab.type === 'browser'), [globalWorkspaceTabs])
   const activeGlobalTab = globalTabsMode
     ? (globalTabs.find((tab) => tab.id === globalTabsActiveTabId) ?? globalTabs[0] ?? null)
     : null
+  const sidebarGlobalTabsDestination = useMemo<GlobalTabDestination>(() => ({
+    workspace: globalTabsWorkspace,
+    tabs: globalTabs,
+    activeTabId: activeGlobalTab?.id ?? null,
+  }), [activeGlobalTab?.id, globalTabs, globalTabsWorkspace])
   const showGlobalTab = useCallback((tabId: string | null) => {
     void navigate({ to: '/tabs', search: { tab: tabId ?? undefined } })
   }, [navigate])
@@ -779,13 +792,26 @@ function WorkspaceShell({
   }, [bootstrapWorkspace, closeActiveTab, createWorkspaceChat, ctx.localEnvTarget, ctx.uiState.activeAgentSessionId, ctx.uiState.workspaceTabs, ctx.workspace.folderId, ctx.workspace.id, ctx.workspace.name, navigate, openGlobalPane, openPane, openPendingShellPane, selectCreatedChat, toggleAgentCollapsed, toggleSidebarHidden])
 
   const handleSidebarOverlayAction = useCallback((action: WorkspaceSidebarOverlayAction) => {
+    if (action.type === 'show-preview') showSidebarPreview()
     if (action.type === 'hide-preview') hideSidebarPreview()
     if (action.type === 'hide-sidebar') setSidebarHiddenExplicit(true)
     if (action.type === 'new-workspace') void openCommandPalette({ initialIntent: 'global' })
-    if (action.type === 'navigate-workspace') void navigate({ to: '/w/$workspaceId', params: { workspaceId: action.workspaceId }, search: { chat: undefined, tab: undefined } })
-    if (action.type === 'navigate-settings') void navigate({ to: '/settings' })
-    if (action.type === 'select-global-tab') showGlobalTab(action.tabId)
-    if (action.type === 'leave-global-tabs') void navigate({ to: '/w/$workspaceId', params: { workspaceId: ctx.workspace.id }, search: { chat: undefined, tab: undefined } })
+    if (action.type === 'navigate-workspace') {
+      hideSidebarPreview()
+      void navigate({ to: '/w/$workspaceId', params: { workspaceId: action.workspaceId }, search: { chat: undefined, tab: undefined } })
+    }
+    if (action.type === 'navigate-settings') {
+      hideSidebarPreview()
+      void navigate({ to: '/settings' })
+    }
+    if (action.type === 'select-global-tab') {
+      hideSidebarPreview()
+      showGlobalTab(action.tabId)
+    }
+    if (action.type === 'leave-global-tabs') {
+      hideSidebarPreview()
+      void navigate({ to: '/w/$workspaceId', params: { workspaceId: ctx.workspace.id }, search: { chat: undefined, tab: undefined } })
+    }
     if (action.type === 'close-global-tab') {
       const tab = globalTabs.find((candidate) => candidate.id === action.tabId)
       if (!tab || !globalTabsWorkspace) return
@@ -797,7 +823,33 @@ function WorkspaceShell({
           : undefined,
       })
     }
-  }, [activeGlobalTab?.id, ctx.workspace.id, globalTabs, globalTabsWorkspace, hideSidebarPreview, navigate, openCommandPalette, setSidebarHiddenExplicit, showGlobalTab])
+    if (action.type === 'dismiss-notification') notifications.dismiss(action.notificationId)
+    if (action.type === 'clear-notifications') action.notificationIds.forEach((notificationId) => notifications.dismiss(notificationId))
+    if (action.type === 'open-notification') {
+      const notification = sidebarOverlayStateRef.current?.notifications.find((candidate) => candidate.id === action.notificationId)
+      if (!notification) return
+      hideSidebarPreview()
+      notifications.dismiss(notification.id)
+      if (notification.workspaceId === ctx.workspace.id) {
+        dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: notification.sessionId })
+      }
+      void navigate({
+        to: '/w/$workspaceId',
+        params: { workspaceId: notification.workspaceId },
+        search: { chat: notification.sessionId, tab: undefined },
+      })
+    }
+    if (action.type === 'mark-workspace-chats-read') markWorkspaceChatsRead(action.workspaceId)
+  }, [activeGlobalTab?.id, ctx.workspace.id, dispatchWorkspaceState, globalTabs, globalTabsWorkspace, hideSidebarPreview, navigate, notifications, openCommandPalette, setSidebarHiddenExplicit, showGlobalTab, showSidebarPreview])
+
+  const handleSidebarStateSnapshot = useCallback((state: WorkspaceSidebarStateSnapshot) => {
+    sidebarOverlayStateRef.current = state
+    const target = sidebarOverlayTargetRef.current
+    if (!target) return
+    const nextTarget = { ...target, sidebarState: state }
+    sidebarOverlayTargetRef.current = nextTarget
+    setWorkspaceSidebarOverlayTarget(nextTarget)
+  }, [])
 
   useEffect(() => {
     if (sidebarOverlayActions) return
@@ -807,15 +859,35 @@ function WorkspaceShell({
       workspaceId: ctx.workspace.id,
       globalTabId: activeGlobalTab?.id ?? null,
       sidebarWidth: readWorkspaceSidebarWidth(),
+      sidebarState: sidebarOverlayStateRef.current,
       onAction: handleSidebarOverlayAction,
     }
+    sidebarOverlayTargetRef.current = target
     setWorkspaceSidebarOverlayTarget(target)
-    return () => clearWorkspaceSidebarOverlayTarget(target)
+    return () => {
+      if (sidebarOverlayTargetRef.current === target) sidebarOverlayTargetRef.current = null
+      clearWorkspaceSidebarOverlayTarget(target)
+    }
   }, [activeGlobalTab?.id, ctx.workspace.id, handleSidebarOverlayAction, sidebarHidden, sidebarOverlayActions, sidebarPreviewed])
 
   useEffect(() => {
     prewarmOverlayLayer()
   }, [])
+
+  useEffect(() => {
+    if (!browserApi.isAvailable()) return
+    void browserApi.updateSidebarZone({ enabled: sidebarHidden && sidebarPreviewed, width: readWorkspaceSidebarWidth() })
+    return () => {
+      void browserApi.updateSidebarZone({ enabled: false })
+    }
+  }, [sidebarHidden, sidebarPreviewed])
+
+  useEffect(() => {
+    if (!browserApi.isAvailable()) return
+    return browserApi.onSidebarZoneLeft(() => {
+      hideSidebarPreview()
+    })
+  }, [hideSidebarPreview])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -845,26 +917,24 @@ function WorkspaceShell({
   }, [closeActiveTab, focusedTabGroup, globalTabsMode, openCommandPalette, toggleAgentCollapsed, toggleCombinedPanes, toggleSidebarHidden])
 
   if (sidebarOverlayActions) {
-    return (
-      <WorkspaceSidebarOverlayContent
-        dispatchWorkspaceState={dispatchWorkspaceState}
-        actions={sidebarOverlayActions}
-        globalTabsWorkspace={globalTabsWorkspace}
-        globalTabs={globalTabs}
-        activeGlobalTabId={activeGlobalTab?.id ?? null}
-        channel={sidebarOverlayChannel ?? null}
-      />
-    )
+    return <div className="min-h-screen bg-transparent" />
   }
 
   return (
     <>
+    {sidebarHidden ? (
+      <WorkspaceSidebarSnapshotPublisher
+        globalTabsDestination={sidebarGlobalTabsDestination}
+        onStateSnapshot={handleSidebarStateSnapshot}
+      />
+    ) : null}
     <WorkspaceEnvTargetProvider>
       <WorkspaceBootstrapRunner dispatchWorkspaceState={dispatchWorkspaceState} appQueryClient={queryClient} />
     </WorkspaceEnvTargetProvider>
     <WorkspaceSidebarLayout
       hidden={sidebarHidden}
       previewed={sidebarPreviewed}
+      showInlineHoverTarget={!browserApi.isAvailable()}
       onShowPreview={showSidebarPreview}
       onHidePreview={hideSidebarPreview}
       sidebar={(
@@ -872,7 +942,7 @@ function WorkspaceShell({
           dispatchWorkspaceState={dispatchWorkspaceState}
           onHide={() => setSidebarHiddenExplicit(true)}
           onNewWorkspaceIntent={() => void openCommandPalette({ initialIntent: 'global' })}
-          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: activeGlobalTab?.id ?? null }}
+          globalTabsDestination={sidebarGlobalTabsDestination}
           onSelectGlobalTab={(tabId) => showGlobalTab(tabId)}
           onLeaveGlobalTabs={() => void navigate({ to: '/w/$workspaceId', params: { workspaceId: ctx.workspace.id }, search: { chat: undefined, tab: undefined } })}
           onCloseGlobalTab={(tabId) => {
@@ -886,6 +956,7 @@ function WorkspaceShell({
                 : undefined,
             })
           }}
+          onStateSnapshot={handleSidebarStateSnapshot}
         />
       )}
     >
@@ -942,26 +1013,20 @@ function WorkspaceShell({
 }
 
 function WorkspaceSidebarOverlayContent({
-  dispatchWorkspaceState,
   actions,
-  globalTabsWorkspace,
-  globalTabs,
-  activeGlobalTabId,
+  source,
   channel,
 }: {
-  dispatchWorkspaceState: WorkspaceUiDispatch
   actions: (action: WorkspaceSidebarOverlayAction) => void
-  globalTabsWorkspace: GlobalTabsWorkspaceSummary | null
-  globalTabs: WorkspaceTab[]
-  activeGlobalTabId: string | null
+  source: WorkspaceSidebarBridgeStateSource
   channel: BroadcastChannel | null
 }) {
   const [previewed, setPreviewed] = useState(false)
-  const [liveActiveGlobalTabId, setLiveActiveGlobalTabId] = useState(activeGlobalTabId)
-
-  useEffect(() => {
-    setLiveActiveGlobalTabId(activeGlobalTabId)
-  }, [activeGlobalTabId])
+  const [hoverArmed, setHoverArmed] = useState(true)
+  const [hoverVisible, setHoverVisible] = useState(false)
+  const sidebarState = useWorkspaceSidebarState(source)
+  const previousPreviewedRef = useRef(false)
+  const hoverRearmTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!channel) return
@@ -969,28 +1034,61 @@ function WorkspaceSidebarOverlayContent({
       const message = event.data
       if (message.type === 'set-previewed') {
         setPreviewed(message.previewed)
-      }
-      if (message.type === 'set-active-global-tab') {
-        setLiveActiveGlobalTabId(message.tabId)
+      } else if (message.type === 'set-hover-visible') {
+        setHoverVisible(message.visible)
       }
     }
     channel.addEventListener('message', onMessage)
     return () => channel.removeEventListener('message', onMessage)
   }, [channel])
 
+  useEffect(() => {
+    if (hoverRearmTimerRef.current !== null) {
+      window.clearTimeout(hoverRearmTimerRef.current)
+      hoverRearmTimerRef.current = null
+    }
+    const wasPreviewed = previousPreviewedRef.current
+    previousPreviewedRef.current = previewed
+    if (previewed) {
+      setHoverArmed(true)
+    } else if (wasPreviewed) {
+      setHoverArmed(false)
+      hoverRearmTimerRef.current = window.setTimeout(() => {
+        hoverRearmTimerRef.current = null
+        setHoverArmed(true)
+      }, 300)
+    }
+    return () => {
+      if (hoverRearmTimerRef.current !== null) {
+        window.clearTimeout(hoverRearmTimerRef.current)
+        hoverRearmTimerRef.current = null
+      }
+    }
+  }, [previewed])
+
   return (
-    <div className="fixed inset-0 overflow-hidden bg-transparent text-neutral-100">
+    <div className="fixed inset-0 overflow-hidden overscroll-none bg-transparent text-neutral-100">
+      {!previewed && hoverVisible ? (
+        <div
+          className="h-[100px] w-2 rounded-r-full border-y border-r border-white/10 bg-white/20 shadow-lg backdrop-blur-sm transition-colors hover:bg-white/30"
+          onPointerEnter={() => {
+            if (!hoverArmed) {
+              return
+            }
+            actions({ type: 'show-preview' })
+          }}
+          onPointerMove={() => {
+            if (!hoverArmed) return
+            actions({ type: 'show-preview' })
+          }}
+          onFocus={() => actions({ type: 'show-preview' })}
+          aria-label="Show sidebar"
+          role="button"
+          tabIndex={0}
+        />
+      ) : null}
       <div
-        className={`absolute left-0 top-0 z-50 h-screen max-h-screen shadow-2xl transition-transform duration-200 ease-out ${previewed ? 'translate-x-0' : '-translate-x-full'}`}
-        onPointerLeave={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect()
-          const stillInside = event.clientX >= rect.left
-            && event.clientX <= rect.right
-            && event.clientY >= rect.top
-            && event.clientY <= rect.bottom
-          if (stillInside) return
-          actions({ type: 'hide-preview' })
-        }}
+        className={`absolute left-0 top-0 z-50 h-screen max-h-screen overflow-hidden overscroll-none shadow-2xl transition-transform duration-200 ease-out ${previewed ? 'translate-x-0' : '-translate-x-full'}`}
         onClickCapture={(event) => {
           const target = event.target instanceof Element ? event.target : null
           const link = target?.closest('a[href]')
@@ -1011,15 +1109,21 @@ function WorkspaceSidebarOverlayContent({
           }
         }}
       >
-        <WorkspaceSidebar
-          dispatchWorkspaceState={dispatchWorkspaceState}
-          onHide={() => actions({ type: 'hide-sidebar' })}
-          onNewWorkspaceIntent={() => actions({ type: 'new-workspace' })}
-          globalTabsDestination={{ workspace: globalTabsWorkspace, tabs: globalTabs, activeTabId: liveActiveGlobalTabId }}
-          onSelectGlobalTab={(tabId) => actions({ type: 'select-global-tab', tabId })}
-          onLeaveGlobalTabs={() => actions({ type: 'leave-global-tabs' })}
-          onCloseGlobalTab={(tabId) => actions({ type: 'close-global-tab', tabId })}
-        />
+        {sidebarState ? (
+          <WorkspaceSidebarView
+            state={sidebarState}
+            dispatchWorkspaceState={() => undefined}
+            onHide={() => actions({ type: 'hide-sidebar' })}
+            onNewWorkspaceIntent={() => actions({ type: 'new-workspace' })}
+            onSelectGlobalTab={(tabId) => actions({ type: 'select-global-tab', tabId })}
+            onLeaveGlobalTabs={() => actions({ type: 'leave-global-tabs' })}
+            onCloseGlobalTab={(tabId) => actions({ type: 'close-global-tab', tabId })}
+            onDismissNotification={(notificationId) => actions({ type: 'dismiss-notification', notificationId })}
+            onClearNotifications={(notificationIds) => actions({ type: 'clear-notifications', notificationIds })}
+            onOpenNotification={(notificationId) => actions({ type: 'open-notification', notificationId })}
+            suppressScrollbars
+          />
+        ) : null}
       </div>
     </div>
   )
@@ -1146,6 +1250,7 @@ export function WorkspaceSidebar({
   onSelectGlobalTab,
   onLeaveGlobalTabs,
   onCloseGlobalTab,
+  onStateSnapshot,
 }: {
   dispatchWorkspaceState: WorkspaceUiDispatch
   onHide: () => void
@@ -1154,14 +1259,270 @@ export function WorkspaceSidebar({
   onSelectGlobalTab?: (tabId: string) => void
   onLeaveGlobalTabs?: () => void
   onCloseGlobalTab?: (tabId: string) => void
+  onStateSnapshot?: (state: WorkspaceSidebarStateSnapshot) => void
 }) {
   const ctx = useWorkspaceContext()
-  const navigate = useNavigate()
-  const trpcUtils = trpc.useUtils()
   const nodes = useWorkspaceSidebarTree()
   const workspaces = useVisibleWorkspaces()
   const resourcesStore = useWorkspaceResourcesStore()
+  const notifications = useAgentNotificationsStore()
+  const navigate = useNavigate()
+  const trpcUtils = trpc.useUtils()
   const deleteResource = trpc.workspace.deleteResource.useMutation()
+  const [chatReadVersion, setChatReadVersion] = useState(0)
+  const [chatRollups, setChatRollups] = useState<Record<string, WorkspaceSidebarChatRollup>>({})
+  const globalDestination = globalTabsDestination ?? EMPTY_GLOBAL_TABS_DESTINATION
+  const localEnvAvailable = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
+  const workspaceIds = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces])
+  const [soundPrefs] = useAgentNotificationSoundPrefs()
+  const seenNotificationIds = useRef<Set<string>>(new Set())
+  const initializedSoundNotifications = useRef(false)
+  const activeNotificationIds = notifications.records
+    .filter((notification) => notification.sessionId === ctx.uiState.activeAgentSessionId)
+    .map((notification) => notification.id)
+    .join('\0')
+
+  useEffect(() => {
+    if (!ctx.uiState.activeAgentSessionId) return
+    markWorkspaceChatsRead(ctx.workspace.id)
+    setChatReadVersion((version) => version + 1)
+  }, [ctx.uiState.activeAgentSessionId, ctx.workspace.id])
+
+  useEffect(() => {
+    if (!initializedSoundNotifications.current) {
+      seenNotificationIds.current = new Set(notifications.records.map((notification) => notification.id))
+      initializedSoundNotifications.current = true
+      return
+    }
+    for (const notification of notifications.records) {
+      if (seenNotificationIds.current.has(notification.id)) continue
+      seenNotificationIds.current.add(notification.id)
+      if (shouldPlayAgentFinishedSound(notification, ctx.workspace.id, ctx.uiState.activeAgentSessionId)) {
+        void playAgentNotificationSound(readAgentNotificationSoundPrefs().soundId).catch(() => undefined)
+      }
+    }
+  }, [ctx.uiState.activeAgentSessionId, ctx.workspace.id, notifications.records, soundPrefs])
+
+  useEffect(() => {
+    if (ctx.uiState.activeAgentSessionId && activeNotificationIds) void notifications.dismissForSession(ctx.uiState.activeAgentSessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.uiState.activeAgentSessionId, activeNotificationIds])
+
+  const updateChatRollup = useCallback((workspaceId: string, rollup: WorkspaceSidebarChatRollup) => {
+    setChatRollups((current) => {
+      const previous = current[workspaceId]
+      if (previous
+        && previous.hasData === rollup.hasData
+        && previous.chatCount === rollup.chatCount
+        && previous.runningCount === rollup.runningCount
+        && previous.pendingAttentionCount === rollup.pendingAttentionCount
+        && previous.newResponseCount === rollup.newResponseCount) return current
+      return { ...current, [workspaceId]: rollup }
+    })
+  }, [])
+
+  const closeWorkspaceFromSidebar = useCallback(async (workspaceId: string, archivingWorkspaceIds: Set<string>) => {
+    const next = await nextWorkspaceAfterArchive(workspaceId, workspaces, ctx.localEnvTarget, archivingWorkspaceIds)
+    if (workspaceId === ctx.workspace.id) {
+      if (next) {
+        await navigate({
+          to: '/w/$workspaceId',
+          params: { workspaceId: next.id },
+          search: { chat: undefined, tab: undefined },
+          replace: true,
+        })
+      } else {
+        await navigate({ to: '/', replace: true })
+      }
+    }
+    const tabs = await trpcUtils.workspace.listTabs.fetch({ workspaceId }).catch(() => [])
+    await closeNativeBrowserTabsForWorkspace(tabs)
+    await archiveWorkspace(workspaceId, { optimistic: false })
+    for (const resource of resourcesStore.records.filter((record) => record.workspaceId === workspaceId)) {
+      await deleteResource.mutateAsync({ id: resource.id }).catch(() => undefined)
+    }
+  }, [ctx.localEnvTarget, ctx.workspace.id, deleteResource, navigate, resourcesStore.records, trpcUtils.workspace.listTabs, workspaces])
+
+  const state = useMemo<WorkspaceSidebarStateSnapshot>(() => ({
+    currentWorkspaceId: ctx.workspace.id,
+    activeSessionId: ctx.uiState.activeAgentSessionId,
+    localEnvAvailable,
+    nodes,
+    workspaces,
+    resources: resourcesStore.records,
+    globalTabsDestination: globalDestination,
+    chatRollups,
+    notifications: notifications.records,
+  }), [chatRollups, ctx.uiState.activeAgentSessionId, ctx.workspace.id, globalDestination, localEnvAvailable, nodes, notifications.records, resourcesStore.records, workspaces])
+
+  useEffect(() => {
+    onStateSnapshot?.(state)
+  }, [onStateSnapshot, state])
+
+  return (
+    <>
+      {localEnvAvailable && workspaceIds.map((workspaceId) => (
+        <WorkspaceAgentEnvProvider key={workspaceId}>
+          <WorkspaceSidebarChatRollupProbe
+            workspaceId={workspaceId}
+            active={workspaceSidebarRowActive(workspaceId, ctx.workspace.id, globalDestination.activeTabId)}
+            activeSessionId={ctx.uiState.activeAgentSessionId}
+            readVersion={chatReadVersion}
+            onMarkRead={() => setChatReadVersion((version) => version + 1)}
+            onRollup={(rollup) => updateChatRollup(workspaceId, rollup)}
+          />
+        </WorkspaceAgentEnvProvider>
+      ))}
+      <WorkspaceSidebarView
+        state={state}
+        dispatchWorkspaceState={dispatchWorkspaceState}
+        onHide={onHide}
+        onNewWorkspaceIntent={onNewWorkspaceIntent}
+        onSelectGlobalTab={onSelectGlobalTab}
+        onLeaveGlobalTabs={onLeaveGlobalTabs}
+        onCloseGlobalTab={onCloseGlobalTab}
+        localEnvTarget={ctx.localEnvTarget}
+        onDismissNotification={(notificationId) => notifications.dismiss(notificationId)}
+        onClearNotifications={(notificationIds) => notificationIds.forEach((notificationId) => notifications.dismiss(notificationId))}
+        onCloseWorkspace={closeWorkspaceFromSidebar}
+      />
+    </>
+  )
+}
+
+function WorkspaceSidebarSnapshotPublisher({
+  globalTabsDestination,
+  onStateSnapshot,
+}: {
+  globalTabsDestination: GlobalTabDestination
+  onStateSnapshot: (state: WorkspaceSidebarStateSnapshot) => void
+}) {
+  const ctx = useWorkspaceContext()
+  const nodes = useWorkspaceSidebarTree()
+  const workspaces = useVisibleWorkspaces()
+  const resourcesStore = useWorkspaceResourcesStore()
+  const notifications = useAgentNotificationsStore()
+  const [chatReadVersion, setChatReadVersion] = useState(0)
+  const [chatRollups, setChatRollups] = useState<Record<string, WorkspaceSidebarChatRollup>>({})
+  const localEnvAvailable = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
+  const workspaceIds = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces])
+  const [soundPrefs] = useAgentNotificationSoundPrefs()
+  const seenNotificationIds = useRef<Set<string>>(new Set())
+  const initializedSoundNotifications = useRef(false)
+  const activeNotificationIds = notifications.records
+    .filter((notification) => notification.sessionId === ctx.uiState.activeAgentSessionId)
+    .map((notification) => notification.id)
+    .join('\0')
+
+  useEffect(() => {
+    if (!ctx.uiState.activeAgentSessionId) return
+    markWorkspaceChatsRead(ctx.workspace.id)
+    setChatReadVersion((version) => version + 1)
+  }, [ctx.uiState.activeAgentSessionId, ctx.workspace.id])
+
+  useEffect(() => {
+    if (!initializedSoundNotifications.current) {
+      seenNotificationIds.current = new Set(notifications.records.map((notification) => notification.id))
+      initializedSoundNotifications.current = true
+      return
+    }
+    for (const notification of notifications.records) {
+      if (seenNotificationIds.current.has(notification.id)) continue
+      seenNotificationIds.current.add(notification.id)
+      if (shouldPlayAgentFinishedSound(notification, ctx.workspace.id, ctx.uiState.activeAgentSessionId)) {
+        void playAgentNotificationSound(readAgentNotificationSoundPrefs().soundId).catch(() => undefined)
+      }
+    }
+  }, [ctx.uiState.activeAgentSessionId, ctx.workspace.id, notifications.records, soundPrefs])
+
+  useEffect(() => {
+    if (ctx.uiState.activeAgentSessionId && activeNotificationIds) void notifications.dismissForSession(ctx.uiState.activeAgentSessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.uiState.activeAgentSessionId, activeNotificationIds])
+
+  const updateChatRollup = useCallback((workspaceId: string, rollup: WorkspaceSidebarChatRollup) => {
+    setChatRollups((current) => {
+      const previous = current[workspaceId]
+      if (previous
+        && previous.hasData === rollup.hasData
+        && previous.chatCount === rollup.chatCount
+        && previous.runningCount === rollup.runningCount
+        && previous.pendingAttentionCount === rollup.pendingAttentionCount
+        && previous.newResponseCount === rollup.newResponseCount) return current
+      return { ...current, [workspaceId]: rollup }
+    })
+  }, [])
+
+  const state = useMemo<WorkspaceSidebarStateSnapshot>(() => ({
+    currentWorkspaceId: ctx.workspace.id,
+    activeSessionId: ctx.uiState.activeAgentSessionId,
+    localEnvAvailable,
+    nodes,
+    workspaces,
+    resources: resourcesStore.records,
+    globalTabsDestination,
+    chatRollups,
+    notifications: notifications.records,
+  }), [chatRollups, ctx.uiState.activeAgentSessionId, ctx.workspace.id, globalTabsDestination, localEnvAvailable, nodes, notifications.records, resourcesStore.records, workspaces])
+
+  useEffect(() => {
+    onStateSnapshot(state)
+  }, [onStateSnapshot, state])
+
+  return (
+    <>
+      {localEnvAvailable && workspaceIds.map((workspaceId) => (
+        <WorkspaceAgentEnvProvider key={workspaceId}>
+          <WorkspaceSidebarChatRollupProbe
+            workspaceId={workspaceId}
+            active={workspaceSidebarRowActive(workspaceId, ctx.workspace.id, globalTabsDestination.activeTabId)}
+            activeSessionId={ctx.uiState.activeAgentSessionId}
+            readVersion={chatReadVersion}
+            onMarkRead={() => setChatReadVersion((version) => version + 1)}
+            onRollup={(rollup) => updateChatRollup(workspaceId, rollup)}
+          />
+        </WorkspaceAgentEnvProvider>
+      ))}
+    </>
+  )
+}
+
+function WorkspaceSidebarView({
+  state,
+  dispatchWorkspaceState,
+  onHide,
+  onNewWorkspaceIntent,
+  onSelectGlobalTab,
+  onLeaveGlobalTabs,
+  onCloseGlobalTab,
+  localEnvTarget = null,
+  onDismissNotification,
+  onClearNotifications,
+  onOpenNotification,
+  onCloseWorkspace,
+  suppressScrollbars = false,
+}: {
+  state: WorkspaceSidebarStateSnapshot
+  dispatchWorkspaceState: WorkspaceUiDispatch
+  onHide: () => void
+  onNewWorkspaceIntent: () => void
+  onSelectGlobalTab?: (tabId: string) => void
+  onLeaveGlobalTabs?: () => void
+  onCloseGlobalTab?: (tabId: string) => void
+  localEnvTarget?: WorkspaceEnvTarget | null
+  onDismissNotification?: (notificationId: string) => void
+  onClearNotifications?: (notificationIds: string[]) => void
+  onOpenNotification?: (notificationId: string) => void
+  onCloseWorkspace?: (workspaceId: string, archivingWorkspaceIds: Set<string>) => Promise<void>
+  suppressScrollbars?: boolean
+}) {
+  const navigate = useNavigate()
+  const nodes = state.nodes
+  const workspaces = state.workspaces
+  const resources = state.resources
+  const globalTabsDestination = state.globalTabsDestination
+  const currentWorkspaceId = state.currentWorkspaceId
+  const activeSessionId = state.activeSessionId
   const [edit, dispatchEdit] = useReducer(renameEditReducer, idleRenameEditState)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
@@ -1171,7 +1532,6 @@ export function WorkspaceSidebar({
   const [selectedDndIds, setSelectedDndIds] = useState<Set<string>>(() => new Set())
   const [archivingWorkspaceIds, setArchivingWorkspaceIds] = useState<Set<string>>(() => new Set())
   const [sidebarWidth, setSidebarWidth] = useState(() => readWorkspaceSidebarWidth())
-  const [chatReadVersion, setChatReadVersion] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const selectedDndIdsRef = useRef<Set<string>>(new Set())
   const lastSelectedDndIdRef = useRef<string | null>(null)
@@ -1187,12 +1547,6 @@ export function WorkspaceSidebar({
     }
   }, [edit.editingId])
 
-  useEffect(() => {
-    if (!ctx.uiState.activeAgentSessionId) return
-    markWorkspaceChatsRead(ctx.workspace.id)
-    setChatReadVersion((version) => version + 1)
-  }, [ctx.uiState.activeAgentSessionId, ctx.workspace.id])
-
   async function saveRename() {
     if (!edit.editingId) return
     const nextName = nextRenameValue(edit)
@@ -1206,29 +1560,12 @@ export function WorkspaceSidebar({
     dispatchEdit({ type: 'saved' })
   }
 
-  async function closeWorkspace(workspaceId: string, workspaces: WorkspaceSummary[]) {
+  async function closeWorkspace(workspaceId: string) {
+    if (!onCloseWorkspace) return
     if (archivingWorkspaceIds.has(workspaceId)) return
     setArchivingWorkspaceIds((current) => new Set(current).add(workspaceId))
-    const next = await nextWorkspaceAfterArchive(workspaceId, workspaces, ctx.localEnvTarget, archivingWorkspaceIds)
-    if (workspaceId === ctx.workspace.id) {
-      if (next) {
-        await navigate({
-          to: '/w/$workspaceId',
-          params: { workspaceId: next.id },
-          search: { chat: undefined, tab: undefined },
-          replace: true,
-        })
-      } else {
-        await navigate({ to: '/', replace: true })
-      }
-    }
     try {
-      const tabs = await trpcUtils.workspace.listTabs.fetch({ workspaceId }).catch(() => [])
-      await closeNativeBrowserTabsForWorkspace(tabs)
-      await archiveWorkspace(workspaceId, { optimistic: false })
-      for (const resource of resourcesStore.records.filter((record) => record.workspaceId === workspaceId)) {
-        await deleteResource.mutateAsync({ id: resource.id }).catch(() => undefined)
-      }
+      await onCloseWorkspace(workspaceId, archivingWorkspaceIds)
     } catch (error) {
       setArchivingWorkspaceIds((current) => {
         const nextIds = new Set(current)
@@ -1312,7 +1649,7 @@ export function WorkspaceSidebar({
     setCreatingFolder(true)
     const effectiveSelection = new Set(selectedDndIdsRef.current)
     try {
-      effectiveSelection.add(sidebarDndId('workspace', ctx.workspace.id))
+      effectiveSelection.add(sidebarDndId('workspace', currentWorkspaceId))
       const selectedRows = flatRows.filter((row) => effectiveSelection.has(sidebarDndId(row.kind, row.id)))
       const movableRows = selectedRows.filter((row) => !selectedRows.some((candidate) => (
         candidate.kind === 'folder' && candidate.id !== row.id && row.ancestorFolderIds.includes(candidate.id)
@@ -1357,18 +1694,6 @@ export function WorkspaceSidebar({
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   })
-
-  async function selectCreatedChat(sessionId: string, workspaceId?: string) {
-    if (!workspaceId) return
-    if (workspaceId === ctx.workspace.id) {
-      dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
-    }
-    await navigate({
-      to: '/w/$workspaceId',
-      params: { workspaceId },
-      search: { chat: sessionId, tab: undefined },
-    })
-  }
 
   function updatePointerDropProjection(activeId: string, pointer: { x: number; y: number }) {
     const projected = projectDropFromPointer(activeId, pointer, dndNodes, dragPointerOffsetRef.current)
@@ -1508,9 +1833,9 @@ export function WorkspaceSidebar({
           </button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      <div className={`min-h-0 flex-1 overflow-y-auto px-2 py-2 ${suppressScrollbars ? 'no-scrollbar' : ''}`}>
         <GlobalTabsSidebarSection
-          destination={globalTabsDestination ?? { workspace: null, tabs: [], activeTabId: null }}
+          destination={globalTabsDestination ?? EMPTY_GLOBAL_TABS_DESTINATION}
           onSelect={(tabId) => {
             setSidebarSelection(new Set())
             lastSelectedDndIdRef.current = null
@@ -1535,11 +1860,15 @@ export function WorkspaceSidebar({
             {activeDragId ? <SidebarDragPreview activeId={activeDragId} nodes={displayNodes} /> : null}
           </DragOverlay>
         </DndContext>
-        <WorkspaceSidebarNotifications
+        <WorkspaceSidebarNotificationsView
           workspaceNames={workspaceNames}
-          activeWorkspaceId={ctx.workspace.id}
-          activeSessionId={ctx.uiState.activeAgentSessionId}
+          activeWorkspaceId={currentWorkspaceId}
+          activeSessionId={activeSessionId}
+          notifications={state.notifications}
           dispatchWorkspaceState={dispatchWorkspaceState}
+          onDismissNotification={onDismissNotification}
+          onClearNotifications={onClearNotifications}
+          onOpenNotification={onOpenNotification}
         />
       </div>
       <div className="flex-none border-t border-neutral-900 px-2 py-2">
@@ -1634,9 +1963,10 @@ export function WorkspaceSidebar({
     const editing = edit.editingId === workspace.id && edit.editingKind === 'workspace'
     const archiving = archivingWorkspaceIds.has(workspace.id)
     const activeGlobalTabId = globalTabsDestination?.activeTabId ?? null
-    const active = workspaceSidebarRowActive(workspace.id, ctx.workspace.id, activeGlobalTabId)
+    const active = workspaceSidebarRowActive(workspace.id, currentWorkspaceId, activeGlobalTabId)
     const selected = selectedDndIds.has(dndId)
-    const showChatRollup = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
+    const showChatRollup = state.localEnvAvailable
+    const chatRollup = state.chatRollups[workspace.id]
     const workspaceHref = `/w/${workspace.id}`
     const workspaceRowClassName = 'min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium'
     const handleWorkspaceLinkClick = (e: ReactMouseEvent) => {
@@ -1728,15 +2058,7 @@ export function WorkspaceSidebar({
                 </span>
               ) : showChatRollup && (
                 <span className="pointer-events-none absolute right-1.5 flex items-center transition-transform duration-150 group-hover:-translate-x-5">
-                  <WorkspaceAgentEnvProvider>
-                    <WorkspaceSidebarChatCount
-                      workspaceId={workspace.id}
-                      active={active}
-                      activeSessionId={ctx.uiState.activeAgentSessionId}
-                      readVersion={chatReadVersion}
-                      onMarkRead={() => setChatReadVersion((version) => version + 1)}
-                    />
-                  </WorkspaceAgentEnvProvider>
+                  <WorkspaceSidebarChatRollupView rollup={chatRollup} />
                 </span>
               )}
               <button
@@ -1744,16 +2066,16 @@ export function WorkspaceSidebar({
                   e.preventDefault()
                   e.stopPropagation()
                   if (archiving) return
-                  const target = ctx.localEnvTarget
+                  const target = localEnvTarget
                   if (!target?.available || !target.token) return
                   void openWorkspaceCleanupOverlay({
                     workspace,
                     allWorkspaces: workspaces,
-                    resources: resourcesStore.records,
+                    resources,
                     env: target.env,
                     envToken: target.token,
                   }).then((cleaned) => {
-                    if (cleaned) void closeWorkspace(workspace.id, workspaces)
+                    if (cleaned) void closeWorkspace(workspace.id)
                   }).catch((error) => console.warn('workspace cleanup overlay failed', error))
                 }}
                 disabled={archiving}
@@ -1775,21 +2097,14 @@ export function GlobalTabsSidebarSection({
   destination,
   onSelect,
   onClose,
+  faviconRecords = {},
 }: {
   destination: GlobalTabDestination
   onSelect: (tabId: string) => void
   onClose: (tabId: string) => void
+  faviconRecords?: Record<string, FaviconCacheRecord>
 }) {
   const browserTabs = destination.tabs.filter((tab): tab is Extract<WorkspaceTab, { type: 'browser' }> => tab.type === 'browser')
-  const faviconOrigins = useMemo(() => Array.from(new Set(
-    browserTabs
-      .map((tab) => faviconOriginForUrl(tab.url))
-      .filter((origin): origin is string => Boolean(origin)),
-  )), [browserTabs])
-  const faviconCache = trpc.favicon.getByOrigins.useQuery(
-    { origins: faviconOrigins },
-    { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
-  )
 
   if (browserTabs.length === 0) return null
 
@@ -1817,7 +2132,7 @@ export function GlobalTabsSidebarSection({
                     <TabIconView
                       icon={browserTabIconForUrl({
                         url: tab.url,
-                        records: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
+                        records: faviconRecords,
                         liveDataUrls: {},
                       })}
                     />
@@ -2053,18 +2368,20 @@ function GlobalBrowserTabPane({
   )
 }
 
-function WorkspaceSidebarChatCount({
+function WorkspaceSidebarChatRollupProbe({
   workspaceId,
   active,
   activeSessionId,
   readVersion: _readVersion,
   onMarkRead,
+  onRollup,
 }: {
   workspaceId: string
   active: boolean
   activeSessionId: string | null
   readVersion: number
   onMarkRead: () => void
+  onRollup: (rollup: WorkspaceSidebarChatRollup) => void
 }) {
   const sessions = envTrpc.agent.sessionList.useQuery({ workspaceId }, { refetchOnWindowFocus: false })
   const runtime = useAgentRuntimeStore(workspaceId)
@@ -2085,19 +2402,32 @@ function WorkspaceSidebarChatCount({
     markWorkspaceChatsRead(workspaceId)
     onMarkRead()
   }, [active, activeSessionId, latestActivityAt, onMarkRead, readAt, workspaceId])
-  if (!sessions.data && runtime.records.length === 0) return null
   const chatCount = sessionIds.size
   const newResponseCount = !active && runningCount === 0 && readAt > 0 && latestActivityAt > readAt ? 1 : 0
+  useEffect(() => {
+    onRollup({
+      hasData: Boolean(sessions.data) || runtime.records.length > 0,
+      chatCount,
+      runningCount,
+      pendingAttentionCount,
+      newResponseCount,
+    })
+  }, [chatCount, newResponseCount, onRollup, pendingAttentionCount, runningCount, runtime.records.length, sessions.data])
+  return null
+}
+
+function WorkspaceSidebarChatRollupView({ rollup }: { rollup: WorkspaceSidebarChatRollup | undefined }) {
+  if (!rollup?.hasData) return null
   const glyph = workspaceRollupGlyph(workspaceRollupState({
-    chatCount,
-    runningCount,
-    pendingAttentionCount,
-    newResponseCount,
+    chatCount: rollup.chatCount,
+    runningCount: rollup.runningCount,
+    pendingAttentionCount: rollup.pendingAttentionCount,
+    newResponseCount: rollup.newResponseCount,
   }))
-  if (chatCount <= 1 && !glyph) return null
+  if (rollup.chatCount <= 1 && !glyph) return null
   return (
     <span className="flex shrink-0 items-center gap-1">
-      {chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{chatCount}</span>}
+      {rollup.chatCount > 1 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-500">{rollup.chatCount}</span>}
       {glyph === '.' && <span className="h-1 w-1 rounded-full bg-running" aria-label="New chat response" />}
       {glyph === '*' && <span className="h-2.5 w-2.5 animate-spin rounded-full border border-running border-t-transparent" aria-label="Chat running" />}
       {glyph === '!' && <span className="w-3 text-center text-[10px] font-semibold text-amber-300" aria-label="Chat needs attention">!</span>}
@@ -2114,50 +2444,34 @@ function notificationBorderColor(kind: string): string {
   }
 }
 
-function WorkspaceSidebarNotifications({
+function WorkspaceSidebarNotificationsView({
   workspaceNames,
   activeWorkspaceId,
   activeSessionId,
+  notifications,
   dispatchWorkspaceState,
+  onDismissNotification,
+  onClearNotifications,
+  onOpenNotification,
 }: {
   workspaceNames: Map<string, string>
   activeWorkspaceId: string
   activeSessionId: string | null
+  notifications: AgentNotificationRecord[]
   dispatchWorkspaceState: WorkspaceUiDispatch
+  onDismissNotification?: (notificationId: string) => void
+  onClearNotifications?: (notificationIds: string[]) => void
+  onOpenNotification?: (notificationId: string) => void
 }) {
   const navigate = useNavigate()
-  const notifications = useAgentNotificationsStore()
-  const [soundPrefs] = useAgentNotificationSoundPrefs()
-  const seenNotificationIds = useRef<Set<string>>(new Set())
-  const initializedSoundNotifications = useRef(false)
-  const activeNotificationIds = notifications.records
-    .filter((notification) => notification.sessionId === activeSessionId)
-    .map((notification) => notification.id)
-    .join('\0')
-  const rows = notifications.records.filter((notification) => notification.sessionId !== activeSessionId)
-
-  useEffect(() => {
-    if (!initializedSoundNotifications.current) {
-      seenNotificationIds.current = new Set(notifications.records.map((notification) => notification.id))
-      initializedSoundNotifications.current = true
-      return
-    }
-    for (const notification of notifications.records) {
-      if (seenNotificationIds.current.has(notification.id)) continue
-      seenNotificationIds.current.add(notification.id)
-      if (shouldPlayAgentFinishedSound(notification, activeWorkspaceId, activeSessionId)) {
-        void playAgentNotificationSound(readAgentNotificationSoundPrefs().soundId).catch(() => undefined)
-      }
-    }
-  }, [activeSessionId, activeWorkspaceId, notifications.records, soundPrefs])
-
-  useEffect(() => {
-    if (activeSessionId && activeNotificationIds) void notifications.dismissForSession(activeSessionId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, activeNotificationIds])
+  const rows = notifications.filter((notification) => notification.sessionId !== activeSessionId)
 
   async function openNotification(notification: AgentNotificationRecord) {
-    notifications.dismiss(notification.id)
+    if (onOpenNotification) {
+      onOpenNotification(notification.id)
+      return
+    }
+    onDismissNotification?.(notification.id)
     if (notification.workspaceId === activeWorkspaceId) {
       dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: notification.sessionId })
     }
@@ -2169,7 +2483,7 @@ function WorkspaceSidebarNotifications({
   }
 
   function clearNotifications() {
-    for (const notification of rows) notifications.dismiss(notification.id)
+    onClearNotifications?.(rows.map((notification) => notification.id))
   }
 
   if (rows.length === 0) return null
@@ -2209,7 +2523,7 @@ function WorkspaceSidebarNotifications({
               </button>
               <button
                 type="button"
-                onClick={() => notifications.dismiss(notification.id)}
+                onClick={() => onDismissNotification?.(notification.id)}
                 className="mt-0.5 rounded p-0.5 text-neutral-700 opacity-0 hover:bg-neutral-900 hover:text-neutral-300 group-hover:opacity-100"
                 aria-label={`Dismiss notification ${notification.title}`}
                 title="Dismiss notification"

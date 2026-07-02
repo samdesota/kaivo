@@ -102,6 +102,14 @@ html.overlay-layer-document,
 body.overlay-layer-document,
 #root.overlay-layer-document {
   background: transparent;
+  overflow: hidden;
+  scrollbar-width: none;
+}
+
+html.overlay-layer-document::-webkit-scrollbar,
+body.overlay-layer-document::-webkit-scrollbar,
+#root.overlay-layer-document::-webkit-scrollbar {
+  display: none;
 }
 
 .window-drag {
