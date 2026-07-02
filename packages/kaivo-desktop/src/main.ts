@@ -6,6 +6,7 @@ import { resolveDesktopConfig } from './config'
 import { desktopBrowserSocketPath, readOrCreateDesktopAuthToken } from './instance-runtime'
 import { ensureDesktopServices, type ServiceSupervisor } from './service-supervisor'
 import { startBrowserAgentBridge, type BrowserAgentBridge } from './browser-agent-bridge'
+import { createOnePasswordRuntime, resolveOnePasswordTriggerTabId, type OnePasswordRuntime } from './onepassword'
 
 type DesktopLogKind = 'main' | 'chrome-renderer' | 'tab-renderer' | 'crash' | 'exception'
 
@@ -15,11 +16,13 @@ const stateDir = process.env.CC_DESKTOP_TEST_STATE_DIR
 let webframeApp: WebframeApp | undefined
 let serviceSupervisor: ServiceSupervisor | undefined
 let browserAgentBridge: BrowserAgentBridge | undefined
+let onePasswordRuntime: OnePasswordRuntime | undefined
 const chromeWebContentsIds = new Set<number>()
 const trackedWebContentsIds = new Set<number>()
 const devToolsWindows = new Map<number, BrowserWindow>()
 const browserTabFocusOwners = new Map<string, number>()
 const overlayOwners = new Map<number, Set<string>>()
+let lastFocusedBrowserTabId: string | undefined
 type SidebarZone = { width: number; wasInside: boolean; pendingLeftTimer: NodeJS.Timeout | null }
 const sidebarZones = new Map<number, SidebarZone>()
 let sidebarZoneTimer: NodeJS.Timeout | null = null
@@ -40,9 +43,13 @@ function chromeUserAgent(): string {
 }
 
 const browserTabUserAgent = chromeUserAgent()
-const browserTabSessionPartition = 'persist:webframe'
 
 app.userAgentFallback = browserTabUserAgent
+
+function browserTabSessionPartition(instanceId: string): string {
+  const safeId = instanceId.replace(/[^a-zA-Z0-9_-]/g, '-')
+  return `persist:webframe-${safeId}`
+}
 
 function installAppIcon(): void {
   const icon = nativeImage.createFromPath(resolveAppIconPath())
@@ -303,6 +310,7 @@ function notifyChromeOfFocusedBrowserTab(contents: WebContents): void {
   } | undefined
   const caller = bridge?.callerForWebContents?.(contents)
   if (caller?.kind !== 'tab' || !caller.tabId) return
+  lastFocusedBrowserTabId = caller.tabId
   const chrome = findChromeWebContentsForBrowserTab(caller.tabId) ?? findChromeWebContentsForShortcutSender(contents)
   if (!chrome || chrome.isDestroyed()) return
   chrome.send('kaivo/browser-tab-focused', { browserTabId: caller.tabId })
@@ -659,6 +667,35 @@ function installIpcHandlers(): void {
     await serviceSupervisor.restartTerminal()
     return { ok: true as const }
   })
+  ipcMain.handle('kaivo/onepassword/status', () => {
+    if (!onePasswordRuntime) throw new Error('1Password runtime unavailable')
+    return onePasswordRuntime.getStatus()
+  })
+  ipcMain.handle('kaivo/onepassword/reset', () => {
+    if (!onePasswordRuntime) throw new Error('1Password runtime unavailable')
+    return onePasswordRuntime.resetConfig()
+  })
+  ipcMain.handle('kaivo/onepassword/install', async () => {
+    if (!onePasswordRuntime) throw new Error('1Password runtime unavailable')
+    return onePasswordRuntime.install()
+  })
+  ipcMain.handle('kaivo/onepassword/save-config', (_event, input: { extensionPath?: string; nativeHostManifestPath?: string }) => {
+    if (!onePasswordRuntime) throw new Error('1Password runtime unavailable')
+    if (!input.extensionPath) throw new Error('extensionPath is required')
+    return onePasswordRuntime.saveManualConfig({
+      extensionPath: input.extensionPath,
+      nativeHostManifestPath: input.nativeHostManifestPath,
+    })
+  })
+  ipcMain.handle('kaivo/onepassword/trigger', async (_event, input?: { browserTabId?: string }) => {
+    if (!onePasswordRuntime) throw new Error('1Password runtime unavailable')
+    if (!webframeApp) throw new Error('WebFrame app unavailable')
+    const status = onePasswordRuntime.getStatus()
+    if (status.state !== 'extension-installed' && status.state !== 'ready') throw new Error('1Password extension is not loaded')
+    const browserTabId = resolveOnePasswordTriggerTabId(input, lastFocusedBrowserTabId)
+    await webframeApp.extensions.triggerAction(status.extensionId, { tabId: browserTabId })
+    return { ok: true as const }
+  })
 }
 
 function safeWebContentsUrl(contents: WebContents): string | undefined {
@@ -768,24 +805,32 @@ async function main(): Promise<void> {
   if (config.manageServices) {
     serviceSupervisor = await ensureDesktopServices(config.instance, { preserveTerminalOnStop: app.isPackaged })
   }
+  onePasswordRuntime = createOnePasswordRuntime({ instance: config.instance, env: baseEnv })
 
   app.on('web-contents-created', (_event, contents) => {
     trackWebContents(contents)
   })
 
-  const browserTabSession = electronSession.fromPartition(browserTabSessionPartition)
+  const browserTabSession = electronSession.fromPartition(browserTabSessionPartition(config.instance.instanceId))
   browserTabSession.setUserAgent(browserTabUserAgent)
 
-  webframeApp = await createApp({
-    historyStore: createMemoryHistoryStore(),
-    tabStore: createMemoryTabStore(),
-    session: browserTabSession,
-    tabUserAgent: browserTabUserAgent,
-    logger: {
-      warn: (message: unknown, ctx?: unknown) => writeLog('main', 'info', 'webframe warn', { message: String(message), ctx }),
-      error: (message: unknown, ctx?: unknown) => writeLog('main', 'error', 'webframe error', { message: String(message), ctx }),
-    },
-  })
+  const onePasswordWebFrameOptions = onePasswordRuntime.getWebFrameOptions()
+  try {
+    webframeApp = await createApp({
+      historyStore: createMemoryHistoryStore(),
+      tabStore: createMemoryTabStore(),
+      session: browserTabSession,
+      tabUserAgent: browserTabUserAgent,
+      ...onePasswordWebFrameOptions,
+      logger: {
+        warn: (message: unknown, ctx?: unknown) => writeLog('main', 'info', 'webframe warn', { message: String(message), ctx }),
+        error: (message: unknown, ctx?: unknown) => writeLog('main', 'error', 'webframe error', { message: String(message), ctx }),
+      },
+    })
+  } catch (error) {
+    onePasswordRuntime.setRuntimeLoadError(error instanceof Error ? error.message : String(error))
+    throw error
+  }
   writeLog('main', 'info', 'desktop app starting', { stateDir, config })
   browserAgentBridge = await startBrowserAgentBridge({
     socketPath: desktopBrowserSocketPath(config.instance),

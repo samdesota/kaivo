@@ -485,6 +485,11 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
     await browserApi.openDevTools({ browserTabId: activeBrowserTabId })
   }
 
+  async function openOnePassword() {
+    if (!activeBrowserTabId) return
+    await browserApi.openOnePassword({ browserTabId: activeBrowserTabId })
+  }
+
   async function runFind(nextQuery: string, options?: { forward?: boolean; findNext?: boolean }) {
     if (!activeBrowserTabId) return
     if (!nextQuery) {
@@ -589,6 +594,13 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
           onClick={() => void openDevTools()}
         >
           &lt;/&gt;
+        </BrowserControlButton>
+        <BrowserControlButton
+          label="Open 1Password"
+          disabled={!activeBrowserTabId}
+          onClick={() => void openOnePassword()}
+        >
+          1P
         </BrowserControlButton>
         <BrowserControlButton
           label="Bookmark page"

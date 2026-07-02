@@ -105,6 +105,16 @@ describe('browser API adapter', () => {
     expect(openBrowserDevTools).toHaveBeenCalledWith({ browserTabId: 'tab-1' })
   })
 
+  it('opens the 1Password browser action through the desktop preload bridge', async () => {
+    const { win } = makeWindow()
+    const triggerOnePassword = vi.fn(async () => ({ ok: true }))
+    const api = createBrowserApi({ ...win, cloudCodeDesktop: { triggerOnePassword } } as Parameters<typeof createBrowserApi>[0])
+
+    await api.openOnePassword({ browserTabId: 'tab-1' })
+
+    expect(triggerOnePassword).toHaveBeenCalledWith({ browserTabId: 'tab-1' })
+  })
+
   it('turns webframe tab-not-found results into recoverable client errors', async () => {
     const { win, calls } = makeWindow()
     calls.move!.mockResolvedValueOnce({ ok: false, code: 'TAB_NOT_FOUND', message: 'Tab tab-1 not found' })

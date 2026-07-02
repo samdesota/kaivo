@@ -13,6 +13,7 @@ const api = {
   forward: vi.fn(async () => undefined),
   reload: vi.fn(async () => undefined),
   openDevTools: vi.fn(async () => undefined),
+  openOnePassword: vi.fn(async () => undefined),
   findInPage: vi.fn(async () => undefined),
   stopFindInPage: vi.fn(async () => undefined),
   setZoom: vi.fn(async (input: { level: number }) => ({ zoomLevel: input.level })),
@@ -163,10 +164,12 @@ describe('BrowserPane', () => {
     fireEvent.click(view.getByLabelText('Forward'))
     fireEvent.click(view.getByLabelText('Reload'))
     fireEvent.click(view.getByLabelText('Open DevTools'))
+    fireEvent.click(view.getByLabelText('Open 1Password'))
     expect(api.back).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
     expect(api.forward).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
     expect(api.reload).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
     expect(api.openDevTools).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
+    expect(api.openOnePassword).toHaveBeenCalledWith({ browserTabId: 'native-tab-1' })
 
     const input = view.getByLabelText('URL') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'example.org/path' } })
@@ -311,11 +314,11 @@ describe('BrowserPane', () => {
     await waitFor(() => expect(api.navigate).toHaveBeenCalledWith({ browserTabId: 'native-tab-1', url: 'https://example.com/foo' }))
   })
 
-  it('renders devtools and bookmark controls on the right side of the URL input', async () => {
+  it('renders devtools, 1Password, and bookmark controls on the right side of the URL input', async () => {
     const view = render(<BrowserPane paneId="pane-1" workspaceId="workspace-1" browserTabId="native-tab-1" url="https://example.com" active={true} />)
     await waitFor(() => expect(api.attachTab).toHaveBeenCalled())
     const buttons = Array.from(view.getByLabelText('Browser controls').querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))
-    expect(buttons).toEqual(['Back', 'Forward', 'Reload', 'Open DevTools', 'Bookmark page'])
+    expect(buttons).toEqual(['Back', 'Forward', 'Reload', 'Open DevTools', 'Open 1Password', 'Bookmark page'])
   })
 
   it('opens bookmark creation from star button and shortcut', async () => {
