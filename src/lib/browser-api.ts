@@ -58,10 +58,12 @@ export type BrowserApi = {
   focusOverlay(input: { overlayId: string }): Promise<void>
   detachOverlay(input: { overlayId: string }): Promise<void>
   closeOverlay(input: { overlayId: string }): Promise<void>
+  updateSidebarZone(input: { enabled: boolean; width?: number }): Promise<void>
   onTabChange(handler: (event: BrowserTabChange) => void): () => void
   onWindowTabCreated(handler: (event: BrowserTabCreated) => void): () => void
   onTabFocus(handler: (event: BrowserTabFocus) => void): () => void
   onFoundInPage(handler: (event: BrowserFoundInPage) => void): () => void
+  onSidebarZoneLeft(handler: () => void): () => void
 }
 
 type WebframeGlobal = {
@@ -124,6 +126,8 @@ type DesktopWindowLike = Window & {
       registerBrowserTabFocusOwner?: (input: { browserTabId: string }) => void
       logBrowserDiagnostics?: (input: { action: string; paneId?: string; browserTabId?: string; slot?: string; url?: string }) => Promise<unknown>
       onBrowserTabFocus?: (handler: (input: BrowserTabFocus) => void) => () => void
+      updateSidebarZone?: (input: { enabled: boolean; width?: number }) => Promise<unknown>
+      onSidebarZoneLeft?: (handler: () => void) => () => void
       focusOverlay?: (input: { overlayId: string }) => Promise<unknown>
       registerOverlayOwner?: (input: { overlayId: string }) => Promise<unknown>
       unregisterOverlayOwner?: (input: { overlayId: string }) => Promise<unknown>
@@ -344,6 +348,11 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       await trackBrowserCommand('overlays.close', input, () => webframe.trpc.overlays!.close!.mutate({ overlayId: input.overlayId }))
     },
 
+    async updateSidebarZone(input) {
+      const desktop = win as DesktopWindowLike | undefined
+      await desktop?.cloudCodeDesktop?.updateSidebarZone?.(input)
+    },
+
     onTabChange(handler) {
       if (!win?.webframe?.trpc) return () => undefined
       const sub = win.webframe.trpc.tabs.onChange.subscribe(undefined, {
@@ -388,6 +397,11 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
     onFoundInPage(handler) {
       const desktop = win as DesktopWindowLike | undefined
       return desktop?.cloudCodeDesktop?.onBrowserFoundInPage?.(handler) ?? (() => undefined)
+    },
+
+    onSidebarZoneLeft(handler) {
+      const desktop = win as DesktopWindowLike | undefined
+      return desktop?.cloudCodeDesktop?.onSidebarZoneLeft?.(handler) ?? (() => undefined)
     },
   }
 }

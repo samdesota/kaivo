@@ -53,6 +53,7 @@ export function useWorkspaceSidebarLayoutState() {
 
 export function WorkspaceSidebarLayout({
   hidden,
+  showInlineHoverTarget = true,
   onShowPreview,
   onHidePreview: _onHidePreview,
   sidebar,
@@ -60,6 +61,7 @@ export function WorkspaceSidebarLayout({
 }: {
   hidden: boolean
   previewed: boolean
+  showInlineHoverTarget?: boolean
   onShowPreview: () => void
   onHidePreview: () => void
   sidebar: ReactNode
@@ -67,7 +69,7 @@ export function WorkspaceSidebarLayout({
 }) {
   return (
     <div className="relative flex h-screen max-h-screen w-screen overflow-hidden bg-neutral-975 text-neutral-100">
-      {hidden ? (
+      {hidden && showInlineHoverTarget ? (
         <div
           className="absolute left-0 top-0 z-40 h-screen w-2"
           onPointerEnter={() => {
