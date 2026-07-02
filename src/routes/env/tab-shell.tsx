@@ -35,7 +35,7 @@ export function EnvTabShell({ env }: { env: EnvRow }) {
 
   useEffect(() => {
     const prev = document.title
-    document.title = `${env.label} - cc`
+    document.title = `${env.label} - Kaivo`
     return () => {
       document.title = prev
     }

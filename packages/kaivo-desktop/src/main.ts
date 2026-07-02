@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, ipcMain, Menu, screen, session as electronSession, webContents as electronWebContents, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session as electronSession, webContents as electronWebContents, type WebContents } from 'electron'
 import { createApp, createMemoryHistoryStore, createMemoryTabStore, type WebframeApp } from '@samdesota/webframe'
 import { resolveDesktopConfig } from './config'
 import { desktopBrowserSocketPath, readOrCreateDesktopAuthToken } from './instance-runtime'
@@ -43,6 +43,16 @@ const browserTabUserAgent = chromeUserAgent()
 const browserTabSessionPartition = 'persist:webframe'
 
 app.userAgentFallback = browserTabUserAgent
+
+function installAppIcon(): void {
+  const icon = nativeImage.createFromPath(resolveAppIconPath())
+  if (icon.isEmpty()) return
+  app.dock?.setIcon(icon)
+}
+
+function resolveAppIconPath(): string {
+  return app.isPackaged ? path.join(process.resourcesPath, 'electron.icns') : path.join(__dirname, '..', 'assets', 'icon.png')
+}
 
 type AppShortcutInput = {
   key: string
@@ -741,6 +751,7 @@ process.on('unhandledRejection', (reason) => {
 
 async function main(): Promise<void> {
   await app.whenReady()
+  installAppIcon()
   installAppShortcutMenu()
   installIpcHandlers()
   const baseEnv: NodeJS.ProcessEnv = {
@@ -790,6 +801,7 @@ async function main(): Promise<void> {
       width: 1200,
       height: 800,
       frame: false,
+      icon: resolveAppIconPath(),
       webPreferences: {
         nodeIntegration: false,
       },
