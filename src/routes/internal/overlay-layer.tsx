@@ -536,6 +536,10 @@ function CreateBookmarkOverlay({
   const canSave = Boolean(titleValue && decision && decision.kind !== 'search' && decision.url && !busy)
   const origin = decision && decision.kind !== 'search' ? bookmarkOriginForUrl(decision.url) : null
 
+  useEffect(() => {
+    console.info(`[bookmark-overlay] ${JSON.stringify({ event: 'open', requestId: request.requestId, initialTitle: request.initialTitle ?? null, initialUrl: request.initialUrl, hasFaviconData: Boolean(request.initialFaviconDataUrl), faviconUrl: request.initialFaviconUrl ?? null })}`)
+  }, [request.initialFaviconDataUrl, request.initialFaviconUrl, request.initialTitle, request.initialUrl, request.requestId])
+
   function close() {
     respond({ requestId: request.requestId, type: 'closed' })
   }
@@ -545,6 +549,7 @@ function CreateBookmarkOverlay({
     setBusy(true)
     setError(null)
     try {
+      console.info(`[bookmark-overlay] ${JSON.stringify({ event: 'submit:start', requestId: request.requestId, title: titleValue, url: decision.url })}`)
       const saved = await upsertBookmark({
         title: titleValue,
         url: decision.url,
@@ -552,8 +557,10 @@ function CreateBookmarkOverlay({
         faviconUrl: request.initialFaviconUrl ?? null,
         createdFrom: 'browser-pane',
       })
+      console.info(`[bookmark-overlay] ${JSON.stringify({ event: 'submit:success', requestId: request.requestId, bookmarkId: saved.id, title: saved.title, url: saved.url })}`)
       respond({ requestId: request.requestId, type: 'bookmark-saved', bookmarkId: saved.id })
     } catch (err) {
+      console.info(`[bookmark-overlay] ${JSON.stringify({ event: 'submit:error', requestId: request.requestId, message: (err as { message?: string })?.message ?? String(err) })}`)
       setError((err as { message?: string })?.message ?? 'Bookmark save failed')
       setBusy(false)
     }

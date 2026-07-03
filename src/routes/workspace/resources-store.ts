@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createCollection, useLiveQuery, type Collection } from '@tanstack/react-db'
 import { queryCollectionOptions, type QueryCollectionUtils } from '@tanstack/query-db-collection'
@@ -90,6 +90,7 @@ function normalizeResourceData(data: unknown): Record<string, unknown> {
 export function useWorkspaceResourcesStore(workspaceId?: string) {
   const queryClient = useQueryClient()
   const syncedSeqRef = useRef(0)
+  const [snapshotSeq, setSnapshotSeq] = useState<number | null>(null)
   const collection = useMemo(() => {
     const options = queryCollectionOptions({
       id: 'workspace-resources',
@@ -99,6 +100,7 @@ export function useWorkspaceResourcesStore(workspaceId?: string) {
       queryFn: async () => {
         const snapshot = await appTrpcQuery<WorkspaceResourcesSnapshot>('sync.snapshot', { table: 'workspace_resources' })
         syncedSeqRef.current = Math.max(syncedSeqRef.current, snapshot.seq)
+        setSnapshotSeq(syncedSeqRef.current)
         return snapshot.rows.map(normalizeWorkspaceResourceRecord)
       },
       onInsert: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
@@ -129,8 +131,9 @@ export function useWorkspaceResourcesStore(workspaceId?: string) {
   }, [queryClient])
 
   trpc.sync.changes.useSubscription(
-    { afterSeq: syncedSeqRef.current, tables: ['workspace_resources'] },
+    { afterSeq: snapshotSeq ?? 0, tables: ['workspace_resources'] },
     {
+      enabled: snapshotSeq !== null,
       onData(events) {
         syncedSeqRef.current = applyWorkspaceResourceChangeEvents({
           events: events as WorkspaceResourcesChangeEvent[],

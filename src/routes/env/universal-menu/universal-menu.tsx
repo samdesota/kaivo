@@ -328,6 +328,9 @@ export function UniversalMenu({
   const createWorkspace = trpc.workspace.create.useMutation()
   const upsertWorkspaceResource = trpc.workspace.upsertResource.useMutation()
   const bookmarksStore = useBookmarksStore()
+  const bookmarkDebugSignature = useMemo(() => bookmarksStore.bookmarks
+    .map((bookmark) => `${bookmark.id}:${bookmark.updatedAt.getTime()}`)
+    .join('|'), [bookmarksStore.bookmarks])
   const folderBrowse = envTrpc.fs.browseHome.useQuery(
     { path: folderBrowsePlan ? folderBrowsePlan.dir : folderPath },
     { enabled: open && scope?.definition.id === 'open-folder', refetchOnWindowFocus: false },
@@ -379,6 +382,18 @@ export function UniversalMenu({
     setActionMenuOpen(false)
     setClosedChatsOpen(false)
   }, [initialIntent, initialScope, open, workspaceId])
+
+  useEffect(() => {
+    if (!open) return
+    console.info(`[universal-menu-bookmarks] ${JSON.stringify({
+      event: 'bookmarks:update',
+      bookmarkCount: bookmarksStore.bookmarks.length,
+      signature: bookmarkDebugSignature,
+      query,
+      scope: scope?.definition.id ?? null,
+      sample: bookmarksStore.bookmarks.slice(0, 5).map((bookmark) => ({ id: bookmark.id, title: bookmark.title, url: bookmark.url, updatedAt: bookmark.updatedAt.getTime() })),
+    })}`)
+  }, [bookmarkDebugSignature, open, query, scope?.definition.id])
 
   useLayoutEffect(() => {
     if (!open) return

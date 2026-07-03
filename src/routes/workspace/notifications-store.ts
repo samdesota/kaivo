@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createCollection, useLiveQuery, type Collection } from '@tanstack/react-db'
 import { queryCollectionOptions, type QueryCollectionUtils } from '@tanstack/query-db-collection'
@@ -49,6 +49,7 @@ export function compareAgentNotificationRecords(a: AgentNotificationRecord, b: A
 export function useAgentNotificationsStore() {
   const queryClient = useQueryClient()
   const syncedSeqRef = useRef(0)
+  const [snapshotSeq, setSnapshotSeq] = useState<number | null>(null)
   const collection = useMemo(() => {
     const options = queryCollectionOptions({
       id: 'agent-notifications',
@@ -58,6 +59,7 @@ export function useAgentNotificationsStore() {
       queryFn: async () => {
         const snapshot = await appTrpcQuery<AgentNotificationsSnapshot>('sync.snapshot', { table: 'agent_notifications' })
         syncedSeqRef.current = Math.max(syncedSeqRef.current, snapshot.seq)
+        setSnapshotSeq(syncedSeqRef.current)
         return snapshot.rows.map(normalizeAgentNotificationRecord)
       },
       onDelete: async ({ transaction }: { transaction: { mutations: Array<{ key: unknown }> } }) => {
@@ -70,8 +72,9 @@ export function useAgentNotificationsStore() {
   }, [queryClient])
 
   trpc.sync.changes.useSubscription(
-    { afterSeq: syncedSeqRef.current, tables: ['agent_notifications'] },
+    { afterSeq: snapshotSeq ?? 0, tables: ['agent_notifications'] },
     {
+      enabled: snapshotSeq !== null,
       onData(events) {
         const batch = events as AgentNotificationsChangeEvent[]
         const deduped = new Map<string, AgentNotificationsChangeEvent>()

@@ -151,6 +151,29 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
   }
 }
 
+function sameWorkspaceTabRow(left: WorkspaceTabRow, right: WorkspaceTabRow): boolean {
+  return left.workspaceId === right.workspaceId
+    && left.id === right.id
+    && left.type === right.type
+    && left.title === right.title
+    && left.titleSource === right.titleSource
+    && left.position === right.position
+    && left.envId === right.envId
+    && left.shellId === right.shellId
+    && left.path === right.path
+    && left.sessionId === right.sessionId
+    && left.port === right.port
+    && left.url === right.url
+    && left.browserTabId === right.browserTabId
+}
+
+function sameWorkspaceViewStateValues(left: WorkspaceViewState, right: Pick<WorkspaceViewState, 'activeAgentSessionId' | 'activeWorkspaceTabId' | 'splitRatio' | 'agentCollapsed'>): boolean {
+  return left.activeAgentSessionId === right.activeAgentSessionId
+    && left.activeWorkspaceTabId === right.activeWorkspaceTabId
+    && Object.is(left.splitRatio, right.splitRatio)
+    && left.agentCollapsed === right.agentCollapsed
+}
+
 function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
   if (row.type === 'shell' && row.envId && row.shellId) {
     return { id: row.id, type: 'shell', envId: row.envId, shellId: row.shellId, title: row.title, titleSource: row.titleSource ?? 'auto' }
@@ -532,6 +555,12 @@ export function createWorkspaceService(database: Db = db) {
     await get(workspaceId)
     const now = new Date()
     const row = tabToRow(workspaceId, input.tab, input.position, now)
+    const existing = await database
+      .select()
+      .from(workspaceTabs)
+      .where(and(eq(workspaceTabs.workspaceId, workspaceId), eq(workspaceTabs.id, input.tab.id)))
+      .limit(1)
+    if (existing[0] && sameWorkspaceTabRow(existing[0], row)) return existing[0]
     await database
       .insert(workspaceTabs)
       .values(row)
@@ -904,6 +933,25 @@ export function createWorkspaceService(database: Db = db) {
       await get(workspaceId)
       const now = new Date()
       const normalized = normalizeWorkspaceUiState(state)
+      const existingViewState = await database
+        .select()
+        .from(workspaceViewStates)
+        .where(eq(workspaceViewStates.workspaceId, workspaceId))
+        .limit(1)
+      const existingTabs = await database
+        .select()
+        .from(workspaceTabs)
+        .where(eq(workspaceTabs.workspaceId, workspaceId))
+        .orderBy(asc(workspaceTabs.position), asc(workspaceTabs.id))
+      const nextTabRows = normalized.workspaceTabs.map((tab, idx) => tabToRow(workspaceId, tab, idx, now))
+      if (
+        existingViewState[0]
+        && sameWorkspaceViewStateValues(existingViewState[0], normalized)
+        && existingTabs.length === nextTabRows.length
+        && existingTabs.every((tab, idx) => sameWorkspaceTabRow(tab, nextTabRows[idx]!))
+      ) {
+        return normalized
+      }
       await database
         .insert(workspaceViewStates)
         .values({
@@ -925,11 +973,10 @@ export function createWorkspaceService(database: Db = db) {
           },
         })
       await database.delete(workspaceTabs).where(eq(workspaceTabs.workspaceId, workspaceId))
-      const tabRows = normalized.workspaceTabs.map((tab, idx) => tabToRow(workspaceId, tab, idx, now))
-      if (tabRows.length > 0) {
+      if (nextTabRows.length > 0) {
         await database
           .insert(workspaceTabs)
-          .values(tabRows)
+          .values(nextTabRows)
           .onConflictDoUpdate({
             target: [workspaceTabs.workspaceId, workspaceTabs.id],
             set: {

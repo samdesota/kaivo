@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createCollection, useLiveQuery, type Collection } from '@tanstack/react-db'
 import { queryCollectionOptions, type QueryCollectionUtils } from '@tanstack/query-db-collection'
@@ -59,8 +59,21 @@ export function bookmarkInput(input: BookmarkInput): BookmarkInput {
   }
 }
 
+function logBookmarkSync(event: string, details: Record<string, unknown> = {}) {
+  console.info(`[bookmarks-sync] ${JSON.stringify({ event, ...details })}`)
+}
+
 export async function upsertBookmark(input: BookmarkInput): Promise<BookmarkRecord> {
-  return normalizeBookmarkRecord(await appTrpcMutation<RawBookmarkRecord>('bookmarks.upsert', bookmarkInput(input)))
+  const normalized = bookmarkInput(input)
+  logBookmarkSync('upsert:start', { title: normalized.title, url: normalized.url, createdFrom: normalized.createdFrom })
+  try {
+    const saved = normalizeBookmarkRecord(await appTrpcMutation<RawBookmarkRecord>('bookmarks.upsert', normalized))
+    logBookmarkSync('upsert:success', { id: saved.id, title: saved.title, url: saved.url, updatedAt: saved.updatedAt.getTime() })
+    return saved
+  } catch (error) {
+    logBookmarkSync('upsert:error', { message: error instanceof Error ? error.message : String(error) })
+    throw error
+  }
 }
 
 export async function deleteBookmark(id: string): Promise<void> {
@@ -124,16 +137,34 @@ export function applyBookmarkChangeEvents(input: {
 export function useBookmarksStore() {
   const queryClient = useQueryClient()
   const syncedSeqRef = useRef(0)
+  const instanceIdRef = useRef(Math.random().toString(36).slice(2, 8))
+  const [snapshotSeq, setSnapshotSeq] = useState<number | null>(null)
   const collection = useMemo(() => {
+    logBookmarkSync('collection:create', { instanceId: instanceIdRef.current })
     const options = queryCollectionOptions({
       id: 'bookmarks',
       queryKey: ['sync', 'bookmarks'],
       queryClient,
       getKey: (record: BookmarkRecord) => record.id,
       queryFn: async () => {
-        const snapshot = await appTrpcQuery<BookmarksSnapshot>('sync.snapshot', { table: 'bookmarks' })
-        syncedSeqRef.current = Math.max(syncedSeqRef.current, snapshot.seq)
-        return snapshot.rows.map(normalizeBookmarkRecord)
+        logBookmarkSync('snapshot:start', { instanceId: instanceIdRef.current, previousSeq: syncedSeqRef.current })
+        try {
+          const snapshot = await appTrpcQuery<BookmarksSnapshot>('sync.snapshot', { table: 'bookmarks' })
+          syncedSeqRef.current = Math.max(syncedSeqRef.current, snapshot.seq)
+          setSnapshotSeq(syncedSeqRef.current)
+          const rows = snapshot.rows.map(normalizeBookmarkRecord)
+          logBookmarkSync('snapshot:success', {
+            instanceId: instanceIdRef.current,
+            rowCount: rows.length,
+            seq: snapshot.seq,
+            firstId: rows[0]?.id ?? null,
+            latestId: [...rows].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0]?.id ?? null,
+          })
+          return rows
+        } catch (error) {
+          logBookmarkSync('snapshot:error', { instanceId: instanceIdRef.current, message: error instanceof Error ? error.message : String(error) })
+          throw error
+        }
       },
       onInsert: async ({ transaction }: { transaction: { mutations: Array<{ modified: unknown }> } }) => {
         for (const mutation of transaction.mutations) await appTrpcMutation('bookmarks.upsert', bookmarkInput(mutation.modified as BookmarkRecord))
@@ -149,21 +180,56 @@ export function useBookmarksStore() {
   }, [queryClient])
 
   trpc.sync.changes.useSubscription(
-    { afterSeq: syncedSeqRef.current, tables: ['bookmarks'] },
+    { afterSeq: snapshotSeq ?? 0, tables: ['bookmarks'] },
     {
+      enabled: snapshotSeq !== null,
       onData(events) {
+        const typedEvents = events as BookmarksChangeEvent[]
+        logBookmarkSync('subscription:data', {
+          instanceId: instanceIdRef.current,
+          eventCount: typedEvents.length,
+          currentSeq: syncedSeqRef.current,
+          minSeq: typedEvents.length ? Math.min(...typedEvents.map((event) => event.seq)) : null,
+          maxSeq: typedEvents.length ? Math.max(...typedEvents.map((event) => event.seq)) : null,
+          ops: typedEvents.reduce<Record<string, number>>((acc, event) => {
+            acc[event.op] = (acc[event.op] ?? 0) + 1
+            return acc
+          }, {}),
+        })
         syncedSeqRef.current = applyBookmarkChangeEvents({
-          events: events as BookmarksChangeEvent[],
+          events: typedEvents,
           collectionUtils: collection.utils,
           collectionHas: (key) => collection.has(key),
           syncedSeq: syncedSeqRef.current,
         })
+        logBookmarkSync('subscription:applied', { instanceId: instanceIdRef.current, nextSeq: syncedSeqRef.current })
+      },
+      onError(error) {
+        logBookmarkSync('subscription:error', { instanceId: instanceIdRef.current, message: error instanceof Error ? error.message : String(error) })
       },
     },
   )
 
   const live = useLiveQuery(() => collection, [collection])
   const bookmarks = validBookmarks(live.data ?? [])
+  const bookmarksSignature = bookmarks
+    .map((bookmark) => `${bookmark.id}:${bookmark.updatedAt.getTime()}`)
+    .join('|')
+
+  useEffect(() => {
+    if (snapshotSeq === null) return
+    logBookmarkSync('subscription:mounted', { instanceId: instanceIdRef.current, afterSeq: snapshotSeq })
+  }, [snapshotSeq])
+
+  useEffect(() => {
+    logBookmarkSync('live:update', {
+      instanceId: instanceIdRef.current,
+      rawCount: live.data?.length ?? 0,
+      validCount: bookmarks.length,
+      syncedSeq: syncedSeqRef.current,
+      latest: bookmarks.slice(0, 3).map((bookmark) => ({ id: bookmark.id, title: bookmark.title, url: bookmark.url, updatedAt: bookmark.updatedAt.getTime() })),
+    })
+  }, [bookmarksSignature, live.data?.length])
 
   return {
     ...live,
