@@ -13,6 +13,7 @@ import { terminalService } from '../terminal/service.js'
 import { terminalDaemonClient, useTerminalDaemon } from '../terminal/daemon-client.js'
 import { opencodeSupervisor } from '../agent/opencode.js'
 import { registerAgentProxy } from '../agent/proxy.js'
+import { agentService } from '../agent/service.js'
 import { getIdentityToken } from '../identity/client.js'
 
 export async function buildServer(): Promise<FastifyInstance> {
@@ -103,6 +104,16 @@ export async function buildServer(): Promise<FastifyInstance> {
       throw err
     }
   })
+
+  if (config.CC_E2E_AGENT_EVENT_TOKEN) {
+    app.post('/__e2e/agent-event', async (req, reply) => {
+      const header = req.headers['x-kaivo-e2e-token']
+      const token = Array.isArray(header) ? header[0] : header
+      if (token !== config.CC_E2E_AGENT_EVENT_TOKEN) return reply.code(401).send({ error: 'unauthorized' })
+      await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent(req.body)
+      return { ok: true }
+    })
+  }
 
   await app.register(fastifyWebsocket)
 

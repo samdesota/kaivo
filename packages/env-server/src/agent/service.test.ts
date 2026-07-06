@@ -28,11 +28,15 @@ const recentRows: Array<{ path: string; label: string | null; lastOpenedAt: stri
 let opencodeSessionSeq = 0
 const createAgentNotificationMock = vi.hoisted(() => vi.fn())
 const opencodeMessagesData = vi.hoisted(() => [] as Array<{
-  info?: { role?: string }
-  parts?: Array<{ type?: string; text?: string }>
+  info?: { role?: string; providerID?: string; modelID?: string; tokens?: { input?: number; total?: number; cache?: { read?: number } } }
+  parts?: Array<{ type?: string; text?: string; tokens?: { input?: number; total?: number; cache?: { read?: number } } }>
 }>)
 const opencodeStatusData = vi.hoisted(() => new Map<string, { type: string; message?: string }>())
 const opencodeAbortCalls = vi.hoisted(() => [] as string[])
+const opencodeMessageCalls = vi.hoisted(() => [] as unknown[])
+const opencodeStatusCalls = vi.hoisted(() => [] as unknown[])
+const opencodeTodoCalls = vi.hoisted(() => [] as unknown[])
+const opencodeProviderCalls = vi.hoisted(() => [] as unknown[])
 const opencodePermissionCalls = vi.hoisted(() => [] as Array<{ sessionId: string; permissionId: string; response: string }>)
 const opencodePermissionFetchCalls = vi.hoisted(() => [] as Array<{ url: string; reply: string }>)
 const opencodePermissionError = vi.hoisted(() => ({ value: null as Error | null }))
@@ -44,6 +48,10 @@ function resetState() {
   opencodeMessagesData.length = 0
   opencodeStatusData.clear()
   opencodeAbortCalls.length = 0
+  opencodeMessageCalls.length = 0
+  opencodeStatusCalls.length = 0
+  opencodeTodoCalls.length = 0
+  opencodeProviderCalls.length = 0
   opencodePermissionCalls.length = 0
   opencodePermissionFetchCalls.length = 0
   opencodePermissionError.value = null
@@ -170,14 +178,40 @@ vi.mock('@opencode-ai/sdk', () => ({
       create: async ({ body }: { body?: { title?: string } }) => ({
         data: { id: `oc-${++opencodeSessionSeq}`, title: body?.title ?? null },
       }),
-      messages: async () => ({ data: opencodeMessagesData }),
-      status: async () => ({ data: Object.fromEntries(opencodeStatusData) }),
-      todo: async () => ({ data: [] }),
+      messages: async (options: unknown) => {
+        opencodeMessageCalls.push(options)
+        return { data: opencodeMessagesData }
+      },
+      status: async (options: unknown) => {
+        opencodeStatusCalls.push(options)
+        return { data: Object.fromEntries(opencodeStatusData) }
+      },
+      todo: async (options: unknown) => {
+        opencodeTodoCalls.push(options)
+        return { data: [] }
+      },
       abort: async ({ path }: { path: { id: string } }) => {
         opencodeAbortCalls.push(path.id)
         opencodeStatusData.delete(path.id)
       },
       promptAsync: async () => undefined,
+    },
+    config: {
+      providers: async (options: unknown) => {
+        opencodeProviderCalls.push(options)
+        return {
+          data: {
+            providers: [
+              {
+                id: 'openai',
+                models: {
+                  'gpt-5.5': { id: 'gpt-5.5', limit: { context: 1_050_000, input: 272_000 } },
+                },
+              },
+            ],
+          },
+        }
+      },
     },
     postSessionIdPermissionsPermissionId: async ({
       path,
@@ -284,10 +318,15 @@ describe('agent service workspace sessions', () => {
     expect(all).toHaveLength(3)
   })
 
-  it('persists transcript events with replay sequence cursors', async () => {
+  it('keeps OpenCode message events live-only without replay rows', async () => {
     const { agentService } = await import('./service.js')
 
     const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    const liveEvents: Array<{ type: string; seq?: number }> = []
+    const unsubscribe = agentService.subscribeTranscript(session.id, (evt) => {
+      liveEvents.push({ type: evt.type, seq: evt.seq })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
     await (agentService as unknown as {
       handleEvent(raw: unknown): Promise<void>
     }).handleEvent({
@@ -300,13 +339,49 @@ describe('agent service workspace sessions', () => {
         },
       },
     })
+    await (agentService as unknown as {
+      handleEvent(raw: unknown): Promise<void>
+    }).handleEvent({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'part-1',
+          messageID: 'msg-1',
+          type: 'text',
+          text: 'Live response',
+          sessionID: session.opencodeSessionId,
+        },
+      },
+    })
+
+    const replay = await agentService.transcriptReplay(session.id, 0)
+    expect(replay).toEqual([])
+    expect(transcriptRows).toHaveLength(0)
+    await vi.waitFor(() => expect(liveEvents.map((evt) => evt.type)).toEqual(['message.updated', 'message.part.updated']))
+    expect(liveEvents.every((evt) => evt.seq === undefined)).toBe(true)
+    unsubscribe()
+  })
+
+  it('persists session errors with replay sequence cursors', async () => {
+    const { agentService } = await import('./service.js')
+
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: session.opencodeSessionId,
+        message: 'durable provider error',
+        time: { created: 123 },
+      },
+    })
 
     const replay = await agentService.transcriptReplay(session.id, 0)
     expect(replay).toHaveLength(1)
     expect(replay[0]).toMatchObject({
       seq: 1,
-      type: 'message.updated',
+      type: 'session.error',
       sessionId: session.opencodeSessionId,
+      payload: { message: 'durable provider error' },
     })
     expect(await agentService.transcriptReplay(session.id, 1)).toEqual([])
   })
@@ -341,6 +416,45 @@ describe('agent service workspace sessions', () => {
     })
   })
 
+  it('uses a recent-message read for context usage and preserves model limit lookup', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    opencodeMessagesData.push(
+      { info: { role: 'assistant', providerID: 'openai', modelID: 'gpt-5.5', tokens: { total: 123_456 } }, parts: [] },
+    )
+
+    const status = await agentService.sessionStatus({ sessionId: session.id })
+
+    expect(status.contextUsage).toEqual({ used: 123_456, limit: 272_000 })
+    expect(opencodeMessageCalls.at(-1)).toMatchObject({
+      path: { id: session.opencodeSessionId },
+      query: { limit: 20 },
+    })
+    expect(opencodeProviderCalls).toHaveLength(1)
+  })
+
+  it('preserves directory options for status todo and recent message reads', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a', directory: '/tmp/project-status' })
+
+    await agentService.sessionStatus({ sessionId: session.id })
+
+    expect(opencodeTodoCalls.at(-1)).toMatchObject({
+      path: { id: session.opencodeSessionId },
+      query: { directory: '/tmp/project-status' },
+      headers: { 'x-opencode-directory': '/tmp/project-status' },
+    })
+    expect(opencodeStatusCalls.at(-1)).toMatchObject({
+      query: { directory: '/tmp/project-status' },
+      headers: { 'x-opencode-directory': '/tmp/project-status' },
+    })
+    expect(opencodeMessageCalls.at(-1)).toMatchObject({
+      path: { id: session.opencodeSessionId },
+      query: { directory: '/tmp/project-status', limit: 20 },
+      headers: { 'x-opencode-directory': '/tmp/project-status' },
+    })
+  })
+
   it('does not surface user aborts as transcript errors', async () => {
     const { agentService } = await import('./service.js')
 
@@ -356,7 +470,7 @@ describe('agent service workspace sessions', () => {
     })
 
     const replay = await agentService.transcriptReplay(session.id, 0)
-    expect(replay.map((evt) => evt.type)).toEqual(['session.idle'])
+    expect(replay).toEqual([])
     expect(createAgentNotificationMock).not.toHaveBeenCalled()
   })
 
@@ -383,6 +497,9 @@ describe('agent service workspace sessions', () => {
 
     const unrelatedMessages = await agentService.sessionMessages(unrelated.id)
     expect(unrelatedMessages.flatMap((message) => message.parts).some((part) => part.type === 'session-error')).toBe(false)
+
+    const rawMessages = await agentService.openCodeSessionMessages(failed.id)
+    expect(rawMessages.flatMap((message) => message.parts).some((part) => part.type === 'session-error')).toBe(false)
   })
 
   it('preserves fast-tier session model selections', async () => {
@@ -441,6 +558,10 @@ describe('agent service workspace sessions', () => {
   it('uses a brief last-response fallback instead of the chat title when summarization is unavailable', async () => {
     const { agentService } = await import('./service.js')
     const session = await agentService.sessionStart({ workspaceId: 'workspace-a', title: 'setup a todo list' })
+    opencodeMessagesData.push({
+      info: { role: 'assistant' },
+      parts: [{ type: 'text', text: 'Created the requested todo list and organized the next implementation steps. Extra details should not appear.' }],
+    })
 
     await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
       type: 'message.updated',
@@ -547,8 +668,8 @@ describe('agent service workspace sessions', () => {
     expect(opencodePermissionFetchCalls[0]?.reply).toBe('reject')
     expect((await agentService.sessionStatus({ sessionId: session.id })).pendingApprovals).toEqual([])
     const replay = await agentService.transcriptReplay(session.id, 0)
-    expect(replay.map((evt) => evt.type)).toEqual(['permission.updated', 'permission.replied'])
-    expect(replay[1]?.payload).toMatchObject({
+    expect(replay.map((evt) => evt.type)).toEqual(['permission.replied'])
+    expect(replay[0]?.payload).toMatchObject({
       sessionID: session.opencodeSessionId,
       permissionID: 'permission-1',
     })

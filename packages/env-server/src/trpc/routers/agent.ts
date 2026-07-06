@@ -144,6 +144,16 @@ export const agentRouter = router({
       }
     }),
 
+  openCodeSessionMessages: authedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await agentService.openCodeSessionMessages(input.sessionId)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   childTranscripts: authedProcedure
     .input(z.object({ sessionId: z.string().min(1) }))
     .query(async ({ input }) => {

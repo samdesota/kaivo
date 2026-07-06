@@ -46,11 +46,21 @@ const CLOUD_TOOL_OVERRIDES = {
   websearch: true,
 } as const
 
+const RECENT_MESSAGE_CONTEXT_LIMIT = 20
+
 function directoryOpts(dir: string | null | undefined) {
   if (!dir) return {}
   return {
     query: { directory: dir },
     headers: { 'x-opencode-directory': dir },
+  }
+}
+
+function directoryQueryOpts(dir: string | null | undefined, query: Record<string, unknown>) {
+  const opts = directoryOpts(dir)
+  return {
+    ...opts,
+    query: { ...('query' in opts ? opts.query : {}), ...query },
   }
 }
 
@@ -205,6 +215,15 @@ export interface TranscriptEvent {
 }
 
 type TranscriptListener = (evt: TranscriptEvent) => void
+
+const DURABLE_TRANSCRIPT_EVENT_TYPES = new Set<TranscriptEvent['type']>([
+  // Kaivo overlay events that cannot be reconstructed from OpenCode messages.
+  'session.error',
+  'child.session.created',
+  'permission.replied',
+  'question.replied',
+  'question.rejected',
+])
 
 type OpencodeSessionStatus = {
   type?: string
@@ -783,17 +802,24 @@ class AgentService {
   async sessionMessages(
     sessionId: string,
   ): Promise<Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>> {
+    const { row } = await this.sessionContext(sessionId)
+    const messages = await this.openCodeSessionMessages(sessionId)
+    return this.withPersistedSessionErrors(row.id, row.opencodeSessionId, messages)
+  }
+
+  async openCodeSessionMessages(
+    sessionId: string,
+  ): Promise<Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>> {
     const { row, client, dirOpts } = await this.sessionContext(sessionId)
     const res = await client.session.messages({
       path: { id: row.opencodeSessionId },
       ...dirOpts,
       throwOnError: true,
     })
-    const messages = (res.data ?? []) as Array<{
+    return (res.data ?? []) as Array<{
       info: Record<string, unknown>
       parts: Array<Record<string, unknown>>
     }>
-    return this.withPersistedSessionErrors(row.id, row.opencodeSessionId, messages)
   }
 
   private withPersistedSessionErrors(
@@ -942,7 +968,7 @@ class AgentService {
     try {
       const msgRes = await client.session.messages({
         path: { id: row.opencodeSessionId },
-        ...dirOpts,
+        ...directoryQueryOpts(row.workingDir, { limit: RECENT_MESSAGE_CONTEXT_LIMIT }),
         throwOnError: true,
       })
       type TokenInfo = { input?: number; total?: number; cache?: { read?: number } }
@@ -1612,6 +1638,8 @@ class AgentService {
   }
 
   private recordReplayEvent(opencodeSessionId: string, evt: TranscriptEvent): TranscriptEvent {
+    if (!DURABLE_TRANSCRIPT_EVENT_TYPES.has(evt.type)) return evt
+
     const rootOpencodeSessionId = this.parentByChild.get(opencodeSessionId) ?? opencodeSessionId
     const rows = db
       .select()
@@ -1733,7 +1761,7 @@ class AgentService {
       const client = await this.getClient()
       const res = await client.session.messages({
         path: { id: row.opencodeSessionId },
-        ...directoryOpts(row.workingDir),
+        ...directoryQueryOpts(row.workingDir, { limit: RECENT_MESSAGE_CONTEXT_LIMIT }),
         throwOnError: true,
       })
       const msgs = (res.data ?? []) as Array<{

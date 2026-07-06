@@ -54,6 +54,10 @@ const schema = z.object({
   // terminal daemon over this Unix socket. Container/manual envs leave it unset
   // and keep the historical in-process terminal service behavior.
   CC_TERMINAL_SOCKET: z.string().optional(),
+
+  // Test-only hook used by real-stack E2E tests to simulate upstream
+  // OpenCode events that are otherwise difficult to deterministically trigger.
+  CC_E2E_AGENT_EVENT_TOKEN: z.string().optional(),
 })
 
 const parsed = schema.safeParse(process.env)

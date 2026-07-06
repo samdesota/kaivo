@@ -4,14 +4,16 @@ import { useEnv } from '../env-context'
 import {
   applyEvent,
   emptyTranscript,
-  hydrateChildren,
-  hydrateFromMessages,
+  hydrateTranscriptProjection,
+  type ChildTranscript,
+  type OpenCodeMessage,
+  type OverlayTranscriptEvent,
   type TranscriptState,
 } from './transcript-store'
 import { chatDebug } from './chat-debug'
 import { recordAgentRunFinished, recordAgentRunStarted } from '../../../lib/agent-notification-sounds'
 
-export interface ChatTranscriptEvent {
+export interface ChatTranscriptEvent extends OverlayTranscriptEvent {
   seq?: number
   type: string
   parentSessionId?: string
@@ -50,8 +52,9 @@ export interface ChatSnapshot {
 }
 
 export interface ChatStateApi {
-  sessionMessages(sessionId: string): Promise<Array<{ info: unknown; parts: unknown[] }>>
-  childTranscripts(sessionId: string): Promise<Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }>>
+  openCodeMessages(sessionId: string): Promise<OpenCodeMessage[]>
+  childTranscripts(sessionId: string): Promise<ChildTranscript[]>
+  overlayEvents(sessionId: string, sinceSeq: number): Promise<OverlayTranscriptEvent[]>
   transcriptLatestSeq(sessionId: string): Promise<number>
   sessionStatus(sessionId: string): Promise<ChatSessionStatus>
   subscribeTranscript(
@@ -63,10 +66,11 @@ export interface ChatStateApi {
 
 interface TrpcChatClient {
   agent: {
-    sessionMessages: { query(input: { sessionId: string }): Promise<Array<{ info: unknown; parts: unknown[] }>> }
+    openCodeSessionMessages: { query(input: { sessionId: string }): Promise<OpenCodeMessage[]> }
     childTranscripts: {
-      query(input: { sessionId: string }): Promise<Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }>>
+      query(input: { sessionId: string }): Promise<ChildTranscript[]>
     }
+    transcriptReplay: { query(input: { sessionId: string; sinceSeq: number }): Promise<OverlayTranscriptEvent[]> }
     transcriptLatestSeq: { query(input: { sessionId: string }): Promise<{ seq?: number }> }
     sessionStatus: { query(input: { sessionId: string }): Promise<ChatSessionStatus> }
     transcript: {
@@ -243,9 +247,10 @@ export class ChatStateStore {
     entry.error = null
     this.emit(sessionId)
     try {
-      const [messages, children, latestSeq, status] = await Promise.all([
-        this.api.sessionMessages(sessionId),
+      const [messages, children, overlays, latestSeq, status] = await Promise.all([
+        this.api.openCodeMessages(sessionId),
         this.api.childTranscripts(sessionId),
+        this.api.overlayEvents(sessionId, 0),
         this.api.transcriptLatestSeq(sessionId),
         this.api.sessionStatus(sessionId).catch(() => null),
       ])
@@ -254,11 +259,12 @@ export class ChatStateStore {
         sessionId,
         messages: messages.length,
         children: children.length,
+        overlays: overlays.length,
         latestSeq,
         hadStatus: Boolean(status),
         optimisticCount: entry.optimisticMessages.size,
       })
-      entry.state = hydrateChildren(hydrateFromMessages(emptyTranscript(), messages), children)
+      entry.state = hydrateTranscriptProjection({ messages, children, overlays })
       entry.state = reapplyOptimisticMessages(entry.state, entry.optimisticMessages)
       entry.lastSeenSeq = latestSeq
       entry.seenSeqs = new Set()
@@ -360,15 +366,17 @@ export class ChatStateStore {
 
   private async replayAndReconnect(sessionId: string, entry: SessionEntry): Promise<void> {
     try {
-      const [messages, children, latestSeq] = await Promise.all([
-        this.api.sessionMessages(sessionId),
+      const replayFromSeq = entry.lastSeenSeq
+      const [messages, children, overlays, latestSeq] = await Promise.all([
+        this.api.openCodeMessages(sessionId),
         this.api.childTranscripts(sessionId),
+        this.api.overlayEvents(sessionId, replayFromSeq),
         this.api.transcriptLatestSeq(sessionId),
       ])
       if (!this.isRetained(sessionId, entry)) return
-      entry.state = hydrateChildren(hydrateFromMessages(entry.state, messages), children)
+      entry.state = hydrateTranscriptProjection({ state: entry.state, messages, children, overlays })
       entry.state = removeEchoedOptimisticMessages(entry.state, entry.optimisticMessages)
-      entry.lastSeenSeq = Math.max(entry.lastSeenSeq, latestSeq)
+      entry.lastSeenSeq = Math.max(entry.lastSeenSeq, latestSeq, ...overlays.map((evt) => evt.seq ?? 0))
       entry.reconnecting = false
       entry.error = null
       this.emit(sessionId)
@@ -570,11 +578,14 @@ export function getChatStateStore(env: EnvRef, envToken: string): ChatStateStore
 export function createTrpcChatStateApi(env: EnvRef, envToken: string): ChatStateApi {
   const client = makeEnvClient(env, envToken) as unknown as TrpcChatClient
   return {
-    sessionMessages(sessionId) {
-      return client.agent.sessionMessages.query({ sessionId })
+    openCodeMessages(sessionId) {
+      return client.agent.openCodeSessionMessages.query({ sessionId })
     },
     childTranscripts(sessionId) {
       return client.agent.childTranscripts.query({ sessionId })
+    },
+    overlayEvents(sessionId, sinceSeq) {
+      return client.agent.transcriptReplay.query({ sessionId, sinceSeq })
     },
     async transcriptLatestSeq(sessionId) {
       const res = await client.agent.transcriptLatestSeq.query({ sessionId })

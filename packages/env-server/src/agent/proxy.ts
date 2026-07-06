@@ -84,6 +84,12 @@ function filterResponseHeaders(headers: http.IncomingHttpHeaders): http.Outgoing
   return out
 }
 
+export const agentProxyTestHooks = {
+  stripAgentPrefix,
+  filterRequestHeaders,
+  filterResponseHeaders,
+}
+
 /**
  * Register `/agent/*` reverse proxy to the local opencode server. HTTP via
  * `onRequest` hook, WebSocket via a dedicated fastify websocket route

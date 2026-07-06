@@ -25,6 +25,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:opencode": "npm run build:plugin && playwright test -c playwright.opencode.config.ts",
     "test:e2e:desktop": "playwright test -c playwright.desktop.config.ts",
     "test:e2e:desktop:app": "CC_DESKTOP_MAIN=packages/kaivo-desktop/dist/main.js playwright test -c playwright.desktop.config.ts tests/desktop/skeleton.spec.ts",
     "db:migrate": "tsx server/db/migrate-cli.ts",

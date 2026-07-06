@@ -70,6 +70,20 @@ export interface TranscriptState {
   childTranscripts: Map<string, TranscriptState>
 }
 
+export type OpenCodeMessage = { info: unknown; parts: unknown[] }
+
+export type ChildTranscript = {
+  sessionID: string
+  messages: OpenCodeMessage[]
+}
+
+export type OverlayTranscriptEvent = {
+  seq?: number
+  type: string
+  parentSessionId?: string
+  payload: Record<string, unknown>
+}
+
 export interface SessionErrorPart extends Part {
   type: 'session-error'
   title: string
@@ -127,7 +141,7 @@ function upsertPart(state: TranscriptState, part: Part): TranscriptState {
 
 export function hydrateFromMessages(
   state: TranscriptState,
-  msgs: Array<{ info: unknown; parts: unknown[] }>,
+  msgs: OpenCodeMessage[],
 ): TranscriptState {
   let s = state
   for (const m of msgs) {
@@ -143,10 +157,7 @@ export function hydrateFromMessages(
 
 export function hydrateChildren(
   state: TranscriptState,
-  children: Array<{
-    sessionID: string
-    messages: Array<{ info: unknown; parts: unknown[] }>
-  }>,
+  children: ChildTranscript[],
 ): TranscriptState {
   const childOrder = [...state.childOrder]
   const childTranscripts = new Map(state.childTranscripts)
@@ -156,6 +167,17 @@ export function hydrateChildren(
     childTranscripts.set(c.sessionID, hydrateFromMessages(existing, c.messages))
   }
   return { ...state, childOrder, childTranscripts }
+}
+
+export function hydrateTranscriptProjection(input: {
+  state?: TranscriptState
+  messages: OpenCodeMessage[]
+  children: ChildTranscript[]
+  overlays: OverlayTranscriptEvent[]
+}): TranscriptState {
+  let next = hydrateChildren(hydrateFromMessages(input.state ?? emptyTranscript(), input.messages), input.children)
+  for (const overlay of input.overlays) next = applyEvent(next, overlay)
+  return next
 }
 
 export function applyEvent(

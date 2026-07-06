@@ -20,6 +20,7 @@ function status(overrides: Partial<ChatSessionStatus> = {}): ChatSessionStatus {
 class MockChatApi implements ChatStateApi {
   messages: Array<{ info: unknown; parts: unknown[] }> = []
   children: Array<{ sessionID: string; messages: Array<{ info: unknown; parts: unknown[] }> }> = []
+  overlays: ChatTranscriptEvent[] = []
   latestSeq = 0
   currentStatus = status()
   subscriptions: Array<{
@@ -29,8 +30,9 @@ class MockChatApi implements ChatStateApi {
     unsubscribed: boolean
   }> = []
 
-  sessionMessages = vi.fn(async () => this.messages)
+  openCodeMessages = vi.fn(async () => this.messages)
   childTranscripts = vi.fn(async () => this.children)
+  overlayEvents = vi.fn(async (_sessionId: string, sinceSeq: number) => this.overlays.filter((evt) => (evt.seq ?? 0) > sinceSeq))
   transcriptLatestSeq = vi.fn(async () => this.latestSeq)
   sessionStatus = vi.fn(async () => this.currentStatus)
 
@@ -75,12 +77,44 @@ describe('ChatStateStore', () => {
     const release = store.retainSession('s1')
     await flush()
 
-    expect(api.sessionMessages).toHaveBeenCalledTimes(1)
+    expect(api.openCodeMessages).toHaveBeenCalledTimes(1)
     expect(api.childTranscripts).toHaveBeenCalledTimes(1)
+    expect(api.overlayEvents).toHaveBeenCalledWith('s1', 0)
     expect(api.transcriptLatestSeq).toHaveBeenCalledTimes(1)
     expect(api.subscriptions).toHaveLength(1)
     expect(api.subscriptions[0]?.sinceSeq).toBe(7)
     expect(store.getSnapshot('s1').state.parts.get('p1')?.text).toBe('hello')
+
+    release()
+  })
+
+  it('hydrates OpenCode messages first and then applies persisted overlay session errors', async () => {
+    const api = new MockChatApi()
+    api.latestSeq = 9
+    api.messages = [
+      {
+        info: { id: 'm1', role: 'assistant', sessionID: 'oc1', time: { created: 1 } },
+        parts: [{ id: 'p1', type: 'text', messageID: 'm1', sessionID: 'oc1', text: 'from opencode' }],
+      },
+    ]
+    api.overlays = [
+      {
+        seq: 9,
+        type: 'session.error',
+        payload: { sessionID: 'oc1', message: 'persisted provider failure', time: { created: 2 } },
+      },
+    ]
+    const store = new ChatStateStore(api)
+
+    const release = store.retainSession('s1')
+    await flush()
+
+    const snap = store.getSnapshot('s1')
+    expect(snap.state.parts.get('p1')?.text).toBe('from opencode')
+    const errorParts = [...snap.state.parts.values()].filter((part) => part.type === 'session-error')
+    expect(errorParts).toHaveLength(1)
+    expect(errorParts[0]?.message).toContain('persisted provider failure')
+    expect(api.subscriptions[0]?.sinceSeq).toBe(9)
 
     release()
   })
@@ -239,6 +273,29 @@ describe('ChatStateStore', () => {
     expect(api.subscriptions[1]?.sinceSeq).toBe(3)
     expect(store.getSnapshot('s1').reconnecting).toBe(false)
     expect(store.getSnapshot('s1').state.parts.get('p1')?.text).toBe('replayed')
+  })
+
+  it('does not duplicate overlay errors after reconnect replay', async () => {
+    const api = new MockChatApi()
+    api.latestSeq = 2
+    api.overlays = [
+      {
+        seq: 2,
+        type: 'session.error',
+        payload: { sessionID: 'oc1', message: 'provider failure', time: { created: 2 } },
+      },
+    ]
+    const store = new ChatStateStore(api)
+    store.retainSession('s1')
+    await flush()
+
+    expect([...store.getSnapshot('s1').state.parts.values()].filter((part) => part.type === 'session-error')).toHaveLength(1)
+
+    api.subscriptions[0]?.handlers.onError(new Error('ws down'))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flush()
+
+    expect([...store.getSnapshot('s1').state.parts.values()].filter((part) => part.type === 'session-error')).toHaveLength(1)
   })
 
   it('keeps chat readers alive after view subscribers release them', async () => {
