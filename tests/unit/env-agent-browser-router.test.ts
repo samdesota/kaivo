@@ -178,7 +178,11 @@ describe('agentBrowser env-server router', () => {
         title: 'Example app',
         activate: false,
       })
-      expect(openAndConnect.mock.invocationCallOrder[0]).toBeLessThan(openPaneForAgentMock.mock.invocationCallOrder[0])
+      const openAndConnectCallOrder = openAndConnect.mock.invocationCallOrder[0]
+      const openPaneCallOrder = openPaneForAgentMock.mock.invocationCallOrder[0]
+      expect(openAndConnectCallOrder).toBeDefined()
+      expect(openPaneCallOrder).toBeDefined()
+      expect(openAndConnectCallOrder!).toBeLessThan(openPaneCallOrder!)
     } finally {
       restore()
     }

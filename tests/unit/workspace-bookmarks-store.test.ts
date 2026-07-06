@@ -186,6 +186,8 @@ describe('global bookmarks store', () => {
       resourceKey: 'shell-1',
       data: { shellId: 'shell-1', cwd: '/tmp/project', title: 'dev shell' },
     })
-    expect(registry.handlerFor('shell').row(discovered![0])).toMatchObject({ id: 'discovered:shell:shell-1', type: 'shell', label: 'dev shell', detail: '/tmp/project', canCleanup: true })
+    const discoveredShell = discovered?.[0]
+    expect(discoveredShell).toBeDefined()
+    expect(registry.handlerFor('shell').row(discoveredShell!)).toMatchObject({ id: 'discovered:shell:shell-1', type: 'shell', label: 'dev shell', detail: '/tmp/project', canCleanup: true })
   })
 })
