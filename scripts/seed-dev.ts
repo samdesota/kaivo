@@ -9,7 +9,7 @@ const DEFAULT_PASSWORD = 'password'
 const DEFAULT_OPENAI_API_KEY = 'dev-local-llm-key'
 const DEFAULT_OPENAI_BASE_URL = 'https://llm.438d.xyz'
 const DEFAULT_OPENAI_API_KEY_OP_REF = 'op://Personal/llm.438d.xyz/password'
-const DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' }
+const DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.6-sol' }
 const BCRYPT_COST = 12
 const DESKTOP_APP_ID = 'kaivo-desktop'
 

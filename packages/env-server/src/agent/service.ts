@@ -16,7 +16,7 @@ import {
 } from './opencode.js'
 import { createAgentNotification, IdentityAuthError, IdentityUnreachableError, resolveProviderKeys } from '../identity/client.js'
 
-const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
+const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.6-sol' } as const
 const REASONING_EFFORT_VARIANTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
 type ModelLimit = { context?: number; input?: number }
 export type ReasoningEffortVariant = typeof REASONING_EFFORT_VARIANTS[number]

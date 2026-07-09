@@ -291,8 +291,8 @@ function AgentDefaultModelSection() {
   const current = trpc.agent.defaultModelGet.useQuery()
   const save = trpc.agent.defaultModelSet.useMutation()
   const queryClient = useQueryClient()
-  const [model, setModel] = useState('openai/gpt-5.5')
-  const [savedModel, setSavedModel] = useState('openai/gpt-5.5')
+  const [model, setModel] = useState('openai/gpt-5.6-sol')
+  const [savedModel, setSavedModel] = useState('openai/gpt-5.6-sol')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -319,13 +319,13 @@ function AgentDefaultModelSection() {
     <SettingsPanel
       id="agent-model"
       title="Default model"
-      description={<>Used for new messages when a chat has no model override. Built-in default: <span className="font-mono">openai/gpt-5.5</span>.</>}
+      description={<>Used for new messages when a chat has no model override. Built-in default: <span className="font-mono">openai/gpt-5.6-sol</span>.</>}
     >
       <div className="max-w-xl space-y-2">
         <Input
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          placeholder="openai/gpt-5.5"
+          placeholder="openai/gpt-5.6-sol"
           className="h-7 px-2 py-1 font-mono text-xs"
           maxLength={300}
         />

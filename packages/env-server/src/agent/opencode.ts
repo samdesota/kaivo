@@ -549,14 +549,14 @@ class OpenCodeSupervisor {
     const xdgConfigHome = path.join(config.CC_STATE_DIR, 'xdg', 'config')
     const dir = path.join(xdgConfigHome, 'opencode')
     await fs.mkdir(dir, { recursive: true })
-    const gpt55ContextLimit = config.CC_OPENCODE_GPT55_CONTEXT_LIMIT
-    const gpt55OutputLimit = config.CC_OPENCODE_GPT55_OUTPUT_LIMIT
-    const gpt55InputLimit = config.CC_OPENCODE_GPT55_COMPACT_LIMIT ?? Math.max(1, gpt55ContextLimit - gpt55OutputLimit)
-    const gpt55Model = {
+    const gptContextLimit = config.CC_OPENCODE_GPT55_CONTEXT_LIMIT
+    const gptOutputLimit = config.CC_OPENCODE_GPT55_OUTPUT_LIMIT
+    const gptInputLimit = config.CC_OPENCODE_GPT55_COMPACT_LIMIT ?? Math.max(1, gptContextLimit - gptOutputLimit)
+    const gptModel = {
       limit: {
-        context: gpt55ContextLimit,
-        input: gpt55InputLimit,
-        output: gpt55OutputLimit,
+        context: gptContextLimit,
+        input: gptInputLimit,
+        output: gptOutputLimit,
       },
       modalities: {
         input: ['text', 'image'],
@@ -585,10 +585,10 @@ class OpenCodeSupervisor {
     const cfg = {
       plugin: mergePluginLists([config.CC_OPENCODE_PLUGIN_PATH, OPENAI_OAUTH_PLUGIN], userPlugins),
       agent: {
-        plan: { mode: 'primary', model: 'openai/gpt-5.5' },
-        build: { mode: 'primary', model: 'openai/gpt-5.5' },
-        general: { mode: 'subagent', model: 'openai/gpt-5.5' },
-        explore: { mode: 'subagent', model: 'openai/gpt-5.5' },
+        plan: { mode: 'primary', model: 'openai/gpt-5.6-sol' },
+        build: { mode: 'primary', model: 'openai/gpt-5.6-sol' },
+        general: { mode: 'subagent', model: 'openai/gpt-5.6-sol' },
+        explore: { mode: 'subagent', model: 'openai/gpt-5.6-sol' },
       },
       provider: {
         openai: {
@@ -602,11 +602,19 @@ class OpenCodeSupervisor {
           models: {
             'gpt-5.5': {
               name: 'GPT 5.5 (OAuth)',
-              ...gpt55Model,
+              ...gptModel,
             },
             'gpt-5.5-fast': {
               name: 'GPT 5.5 Fast (OAuth)',
-              ...gpt55Model,
+              ...gptModel,
+            },
+            'gpt-5.6-sol': {
+              name: 'GPT 5.6 Sol (OAuth)',
+              ...gptModel,
+            },
+            'gpt-5.6-sol-fast': {
+              name: 'GPT 5.6 Sol Fast (OAuth)',
+              ...gptModel,
             },
           },
         },

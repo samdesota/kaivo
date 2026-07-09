@@ -325,10 +325,10 @@ async function ensurePluginConfig(sandboxId: string): Promise<void> {
   const cfg = {
     plugin: [PLUGIN_CONTAINER_PATH],
     agent: {
-      plan: { mode: 'primary', model: 'openai/gpt-5.5' },
-      build: { mode: 'primary', model: 'openai/gpt-5.5' },
-      general: { mode: 'subagent', model: 'openai/gpt-5.5' },
-      explore: { mode: 'subagent', model: 'openai/gpt-5.5' },
+      plan: { mode: 'primary', model: 'openai/gpt-5.6-sol' },
+      build: { mode: 'primary', model: 'openai/gpt-5.6-sol' },
+      general: { mode: 'subagent', model: 'openai/gpt-5.6-sol' },
+      explore: { mode: 'subagent', model: 'openai/gpt-5.6-sol' },
     },
   }
   const json = JSON.stringify(cfg)

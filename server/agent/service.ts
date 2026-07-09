@@ -16,7 +16,7 @@ import {
   startOpenCode,
 } from './opencode.js'
 
-const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.5' } as const
+const BUILTIN_DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.6-sol' } as const
 const DEFAULT_MODEL_SECRET = 'agent.default_model'
 
 /**
