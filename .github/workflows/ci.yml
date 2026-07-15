@@ -25,8 +25,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
+            packages/kaivo-desktop/package-lock.json
             packages/opencode-plugin/package-lock.json
             packages/env-server/package-lock.json
+            packages/webframe/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
@@ -35,6 +37,8 @@ jobs:
         run: |
           npm ci --prefix packages/opencode-plugin
           npm ci --prefix packages/env-server
+          npm ci --prefix packages/webframe
+          npm ci --prefix packages/kaivo-desktop
 
       - name: Typecheck
         run: |
@@ -42,8 +46,10 @@ jobs:
           npx tsc --noEmit -p tsconfig.client.json
           npm run typecheck --prefix packages/opencode-plugin
           npm run typecheck --prefix packages/env-server
+          npm run typecheck --prefix packages/kaivo-desktop
       - run: npm run lint
       - run: npm test
+      - run: npm test --prefix packages/webframe
 
   build:
     name: Build
@@ -57,8 +63,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
+            packages/kaivo-desktop/package-lock.json
             packages/opencode-plugin/package-lock.json
             packages/env-server/package-lock.json
+            packages/webframe/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
@@ -67,5 +75,8 @@ jobs:
         run: |
           npm ci --prefix packages/opencode-plugin
           npm ci --prefix packages/env-server
+          npm ci --prefix packages/webframe
+          npm ci --prefix packages/kaivo-desktop
 
       - run: npm run build
+      - run: npm run build --prefix packages/kaivo-desktop

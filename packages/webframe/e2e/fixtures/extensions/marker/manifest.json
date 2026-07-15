@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "WebFrame Marker Fixture",
+  "version": "0.0.2",
+  "key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCiFfvi1rGG/c3BQoQ7LHrN3RFiF1WOSyDoJBLJvY6jpLycLxe0zQO+8b6BJFtsoSWNZrDT4Ry3YyhZ5dpvFQIfvmALueDoFbrev8csqBbhLc7RslQqYTZ3WtZGlnQsOSP75TcJgcbKcTkmek/OEQV2t0m8pEEb7IxmSLohZyEL/QIDAQAB",
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["file://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["resource.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

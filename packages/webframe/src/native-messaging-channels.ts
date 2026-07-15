@@ -1,0 +1,9 @@
+export const NATIVE_SEND_CHANNEL = 'webframe/nativeMessaging/sendNativeMessage';
+export const NATIVE_CONNECT_CHANNEL = 'webframe/nativeMessaging/connectNative';
+export const NATIVE_CONNECT_PORT_CHANNEL = 'webframe/nativeMessaging/connectNativePort';
+export const NATIVE_PORT_POST_CHANNEL = 'webframe/nativeMessaging/portPostMessage';
+export const NATIVE_PORT_DISCONNECT_CHANNEL = 'webframe/nativeMessaging/portDisconnect';
+export const NATIVE_PORT_MESSAGE_CHANNEL = 'webframe/nativeMessaging/portMessage';
+export const NATIVE_PORT_DISCONNECTED_CHANNEL = 'webframe/nativeMessaging/portDisconnected';
+export const EXTENSION_ACTION_CLICKED_CHANNEL = 'webframe/extensions/actionClicked';
+export const WEB_NAVIGATION_GET_ALL_FRAMES_CHANNEL = 'webframe/extensions/webNavigation/getAllFrames';

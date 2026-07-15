@@ -1,0 +1,70 @@
+{
+  "name": "@samdesota/webframe",
+  "version": "0.1.12",
+  "description": "Electron browser framework: logical tabs with placement, overlays, and tRPC API",
+  "private": true,
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./renderer": {
+      "types": "./dist/renderer.d.ts",
+      "default": "./dist/renderer.js"
+    },
+    "./sqlite": {
+      "types": "./sqlite/dist/index.d.ts",
+      "default": "./sqlite/dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "sqlite/dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.sqlite.json",
+    "prepare": "npm run build",
+    "build:watch": "tsc -p tsconfig.json --watch",
+    "test": "npm run test:exports && npm run test:unit && npm run test:pack",
+    "test:exports": "npm run build && node scripts/export-smoke.cjs",
+    "test:unit": "npm run build && node scripts/get-webcontents-unit.cjs && node scripts/extensions-unit.cjs && node scripts/native-messaging-unit.cjs",
+    "test:pack": "npm run build && node scripts/pack-install-smoke.cjs",
+    "test:e2e": "playwright test",
+    "test:app": "npm run build && electron test-app/dist/main.js",
+    "test:1password:interactive": "node scripts/onepassword-interactive.cjs",
+    "test:1password:build-signed-browser": "node scripts/build-signed-test-browser.cjs",
+    "test:1password:signing": "node scripts/macos-app-signing-check.cjs",
+    "build:test-app": "tsc -p tsconfig.test-app.json",
+    "clean": "rm -rf dist sqlite/dist test-app/dist"
+  },
+  "peerDependencies": {
+    "electron": ">=42"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "dependencies": {
+    "@trpc/client": "^11.0.0",
+    "@trpc/server": "^11.0.0",
+    "electron-chrome-extensions": "^4.9.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@electron/osx-sign": "^1.3.3",
+    "@playwright/test": "^1.47.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/chrome": "^0.0.300",
+    "@types/node": "^20.0.0",
+    "electron": "^42.2.0",
+    "playwright": "^1.47.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "outDir": "sqlite/dist",
+    "rootDir": "sqlite/src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "paths": {
+      "webframe": ["../src/index.ts"],
+      "webframe/*": ["../src/*"]
+    }
+  },
+  "include": ["sqlite/src/**/*"],
+  "exclude": ["node_modules"]
+}
