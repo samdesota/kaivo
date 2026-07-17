@@ -1,4 +1,4 @@
-import { inArray } from 'drizzle-orm'
+import { desc, inArray } from 'drizzle-orm'
 import { db, type Db } from '../db/client.js'
 import { faviconCache, type FaviconCacheRow } from '../db/schema.js'
 
@@ -58,11 +58,15 @@ export function validateFaviconCacheInput(input: FaviconCacheInput): Omit<Favico
 
 export function createFaviconService(database: Db = db) {
   return {
-    async getByOrigins(origins: string[]): Promise<Record<string, FaviconCacheRow>> {
+    async getByOrigins(origins: string[]): Promise<Record<string, FaviconCacheRow[]>> {
       const normalized = Array.from(new Set(origins.map(normalizeFaviconPageOrigin).filter((origin): origin is string => Boolean(origin))))
       if (normalized.length === 0) return {}
-      const rows = await database.select().from(faviconCache).where(inArray(faviconCache.pageOrigin, normalized))
-      return Object.fromEntries(rows.map((row) => [row.pageOrigin, row]))
+      const rows = await database.select().from(faviconCache)
+        .where(inArray(faviconCache.pageOrigin, normalized))
+        .orderBy(desc(faviconCache.lastSeenAt), desc(faviconCache.updatedAt))
+      const records: Record<string, FaviconCacheRow[]> = {}
+      for (const row of rows) (records[row.pageOrigin] ??= []).push(row)
+      return records
     },
 
     async upsert(input: FaviconCacheInput): Promise<void> {
@@ -72,9 +76,8 @@ export function createFaviconService(database: Db = db) {
         .insert(faviconCache)
         .values({ ...record, updatedAt: now, lastSeenAt: now })
         .onConflictDoUpdate({
-          target: faviconCache.pageOrigin,
+          target: [faviconCache.pageOrigin, faviconCache.iconUrl],
           set: {
-            iconUrl: record.iconUrl,
             dataUrl: record.dataUrl,
             mediaType: record.mediaType,
             sizeBytes: record.sizeBytes,
@@ -95,9 +98,8 @@ export function createFaviconService(database: Db = db) {
         .insert(faviconCache)
         .values({ ...record, updatedAt: now, lastSeenAt: now })
         .onConflictDoUpdate({
-          target: faviconCache.pageOrigin,
+          target: [faviconCache.pageOrigin, faviconCache.iconUrl],
           set: {
-            iconUrl: record.iconUrl,
             dataUrl: record.dataUrl,
             mediaType: record.mediaType,
             sizeBytes: record.sizeBytes,

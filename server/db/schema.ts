@@ -48,6 +48,7 @@ export type WorkspaceTabRow = {
   port: number | null
   url: string | null
   browserTabId: string | null
+  faviconUrl: string | null
   updatedAt: Date
 }
 
@@ -200,6 +201,7 @@ export const workspaceTabs = sqliteTable(
     port: integer('port'),
     url: text('url'),
     browserTabId: text('browser_tab_id'),
+    faviconUrl: text('favicon_url'),
     updatedAt: timestamp('updated_at').notNull().default(nowMs),
   },
   (t) => ({ pk: primaryKey({ columns: [t.workspaceId, t.id] }) }),
@@ -244,14 +246,14 @@ export const bookmarks = sqliteTable('bookmarks', {
 })
 
 export const faviconCache = sqliteTable('favicon_cache', {
-  pageOrigin: text('page_origin').primaryKey(),
+  pageOrigin: text('page_origin').notNull(),
   iconUrl: text('icon_url').notNull(),
   dataUrl: text('data_url').notNull(),
   mediaType: text('media_type').notNull(),
   sizeBytes: integer('size_bytes').notNull(),
   updatedAt: timestamp('updated_at').notNull().default(nowMs),
   lastSeenAt: timestamp('last_seen_at').notNull().default(nowMs),
-})
+}, (t) => ({ pk: primaryKey({ columns: [t.pageOrigin, t.iconUrl] }) }))
 
 export const agentNotifications = sqliteTable('agent_notifications', {
   id: text('id').primaryKey(),

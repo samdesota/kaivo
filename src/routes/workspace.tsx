@@ -37,7 +37,7 @@ import type { WorkspaceFolderRecord, WorkspaceSidebarNode } from '../data/module
 import type { WorkspaceRecord } from '../data/modules/workspaces'
 import { browserApi, type BrowserTabCreated } from '../lib/browser-api'
 import { resolveBrowserAddress } from '../lib/browser-navigation'
-import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../lib/favicon-cache'
+import { browserTabIconForUrl, faviconAssetForUrl, faviconOriginForUrl, type FaviconCacheByOrigin } from '../lib/favicon-cache'
 import { openConfirmOverlay, openTextInputOverlay, openUniversalMenuOverlay, openWorkspaceCleanupOverlay, prewarmOverlayLayer } from '../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../lib/utils'
 import { BorderedTabStrip, type BorderedTabItem } from '../components/bordered-tab-strip'
@@ -75,6 +75,7 @@ import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-
 import { useWorkspaceSidebarLayoutState, WorkspaceSidebarLayout } from './workspace/sidebar-layout'
 import { clearWorkspaceSidebarOverlayTarget, setWorkspaceSidebarOverlayTarget, type WorkspaceSidebarOverlayAction, type WorkspaceSidebarOverlayCommand } from './workspace/sidebar-overlay-controller'
 import { WorkspaceSidebarBridgeStateSource, useWorkspaceSidebarState, type GlobalTabDestination, type GlobalTabsWorkspaceSummary, type WorkspaceSidebarChatRollup, type WorkspaceSidebarStateSnapshot } from './workspace/sidebar-state'
+import { BrowserTabMetadataSync } from './workspace/browser-tab-metadata-sync'
 import { useAgentNotificationsStore, type AgentNotificationRecord } from './workspace/notifications-store'
 import { useAgentRuntimeStore } from './workspace/agent-runtime-store'
 import {
@@ -761,7 +762,7 @@ function WorkspaceShell({
           return [{ id: `tab:${tab.id}`, kind: 'shell', label: tab.title, detail: `shell ${tab.shellId}`, content: { type: 'shell', shellId: tab.shellId } }]
         }
         if (tab.type === 'browser') {
-          return [{ id: `tab:${tab.id}`, kind: 'browser-tab', label: tab.title, detail: tab.url ?? tab.browserTabId ?? 'Browser', content: { type: 'browser', url: tab.url, browserTabId: tab.browserTabId } }]
+          return [{ id: `tab:${tab.id}`, kind: 'browser-tab', label: tab.title, detail: tab.url ?? tab.browserTabId ?? 'Browser', content: { type: 'browser', url: tab.url, browserTabId: tab.browserTabId, faviconUrl: tab.faviconUrl } }]
         }
         return []
       }),
@@ -922,6 +923,7 @@ function WorkspaceShell({
 
   return (
     <>
+    <BrowserTabMetadataSync />
     {sidebarHidden ? (
       <WorkspaceSidebarSnapshotPublisher
         globalTabsDestination={sidebarGlobalTabsDestination}
@@ -2097,14 +2099,22 @@ export function GlobalTabsSidebarSection({
   destination,
   onSelect,
   onClose,
-  faviconRecords = {},
+  faviconRecords: suppliedFaviconRecords,
 }: {
   destination: GlobalTabDestination
   onSelect: (tabId: string) => void
   onClose: (tabId: string) => void
-  faviconRecords?: Record<string, FaviconCacheRecord>
+  faviconRecords?: FaviconCacheByOrigin
 }) {
   const browserTabs = destination.tabs.filter((tab): tab is Extract<WorkspaceTab, { type: 'browser' }> => tab.type === 'browser')
+  const faviconOrigins = Array.from(new Set(browserTabs
+    .map((tab) => faviconOriginForUrl(tab.url))
+    .filter((origin): origin is string => Boolean(origin))))
+  const faviconCache = trpc.favicon.getByOrigins.useQuery(
+    { origins: faviconOrigins },
+    { enabled: suppliedFaviconRecords === undefined && faviconOrigins.length > 0, staleTime: 60_000 },
+  )
+  const faviconRecords = suppliedFaviconRecords ?? (faviconCache.data ?? {}) as FaviconCacheByOrigin
 
   if (browserTabs.length === 0) return null
 
@@ -2132,6 +2142,7 @@ export function GlobalTabsSidebarSection({
                     <TabIconView
                       icon={browserTabIconForUrl({
                         url: tab.url,
+                        faviconUrl: tab.faviconUrl,
                         records: faviconRecords,
                         liveDataUrls: {},
                       })}
@@ -2211,6 +2222,7 @@ export function globalChildTabFromWindowTabCreated(tabs: WorkspaceTab[], event: 
     type: 'browser',
     url: event.url,
     browserTabId: event.browserTabId,
+    faviconUrl: event.favicon,
     title: truncateTabTitle(event.title || event.url),
   }
 }
@@ -2232,12 +2244,9 @@ function GlobalBrowserTabPane({
   showTabStrip: boolean
   onActiveTabFallback: (tabId: string | null) => void
 }) {
-  const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
-  const pendingFaviconWritesRef = useRef(new Set<string>())
   const tabsRef = useRef(tabs)
   const bookmarksStore = useBookmarksStore()
   const upsertResource = trpc.workspace.upsertResource.useMutation()
-  const upsertFavicon = trpc.favicon.cacheFromUrl.useMutation()
   const browserTabs = useMemo(
     () => tabs.filter((candidate): candidate is Extract<WorkspaceTab, { type: 'browser' }> => candidate.type === 'browser'),
     [tabs],
@@ -2251,7 +2260,10 @@ function GlobalBrowserTabPane({
     { origins: faviconOrigins },
     { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
   )
-  const faviconRecords = (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>
+  const faviconRecords = useMemo(
+    () => (faviconCache.data ?? {}) as FaviconCacheByOrigin,
+    [faviconCache.data],
+  )
   const tabStripItems = useMemo<BorderedTabItem[]>(() => browserTabs.map((candidate) => {
     const label = globalTabLabel(candidate)
     return {
@@ -2259,9 +2271,9 @@ function GlobalBrowserTabPane({
       label,
       title: label,
       closeTitle: `Close ${label}`,
-      icon: browserTabIconForUrl({ url: candidate.url, records: faviconRecords, liveDataUrls: liveFaviconDataUrls }),
+      icon: browserTabIconForUrl({ url: candidate.url, faviconUrl: candidate.faviconUrl, records: faviconRecords }),
     }
-  }), [browserTabs, faviconRecords, liveFaviconDataUrls])
+  }), [browserTabs, faviconRecords])
 
   tabsRef.current = tabs
 
@@ -2273,23 +2285,6 @@ function GlobalBrowserTabPane({
       onActiveTabFallback(childTab.id)
     })
   }, [onActiveTabFallback, workspaceId])
-
-  async function handleBrowserFaviconChange(input: { pageUrl: string; faviconUrl: string }) {
-    const origin = faviconOriginForUrl(input.pageUrl)
-    if (!origin) return
-    const key = `${origin}:${input.faviconUrl}`
-    if (pendingFaviconWritesRef.current.has(key)) return
-    pendingFaviconWritesRef.current.add(key)
-    try {
-      const record = await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl })
-      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: record.dataUrl }))
-      void faviconCache.refetch()
-    } catch (error) {
-      console.info('Favicon cache update failed', error)
-    } finally {
-      pendingFaviconWritesRef.current.delete(key)
-    }
-  }
 
   const dispatchGlobalWorkspaceState = useCallback<WorkspaceUiDispatch>((action) => {
     if (action.type === 'setBrowserTabId') {
@@ -2352,15 +2347,12 @@ function GlobalBrowserTabPane({
             })
           }}
           onBrowserTabId={(browserTabId) => dispatchGlobalWorkspaceState({ type: 'setBrowserTabId', tabId: tab.id, browserTabId })}
-          onUrlChange={(url) => dispatchGlobalWorkspaceState({ type: 'setTabUrl', tabId: tab.id, url })}
-          onTitleChange={(title) => dispatchGlobalWorkspaceState({ type: 'setTabTitle', tabId: tab.id, title: truncateTabTitle(title) })}
-          onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
           bookmarks={bookmarksStore.bookmarks}
           faviconDataUrl={tab.type === 'browser'
-            ? (liveFaviconDataUrls[faviconOriginForUrl(tab.url) ?? ''] ?? faviconRecords[faviconOriginForUrl(tab.url) ?? '']?.dataUrl ?? null)
+            ? (faviconAssetForUrl({ url: tab.url, faviconUrl: tab.faviconUrl, records: faviconRecords })?.dataUrl ?? null)
             : null}
           faviconUrl={tab.type === 'browser'
-            ? (faviconRecords[faviconOriginForUrl(tab.url) ?? '']?.iconUrl ?? null)
+            ? (tab.faviconUrl ?? faviconAssetForUrl({ url: tab.url, records: faviconRecords })?.iconUrl ?? null)
             : null}
         />
       </div>
@@ -3049,8 +3041,6 @@ function WorkspaceTabPane({
   const ctx = useWorkspaceContext()
   const tabsRef = useRef(ctx.uiState.workspaceTabs)
   const [fileEditorStates, setFileEditorStates] = useState<Record<string, FileEditorState>>({})
-  const [liveFaviconDataUrls, setLiveFaviconDataUrls] = useState<Record<string, string>>({})
-  const pendingFaviconWritesRef = useRef(new Set<string>())
   const bookmarksStore = useBookmarksStore()
   const faviconOrigins = useMemo(() => Array.from(new Set(
     ctx.uiState.workspaceTabs
@@ -3062,7 +3052,6 @@ function WorkspaceTabPane({
     { origins: faviconOrigins },
     { enabled: faviconOrigins.length > 0, staleTime: 60_000 },
   )
-  const upsertFavicon = trpc.favicon.cacheFromUrl.useMutation()
 
   tabsRef.current = ctx.uiState.workspaceTabs
 
@@ -3081,6 +3070,7 @@ function WorkspaceTabPane({
           type: 'browser',
           url: event.url,
           browserTabId: event.browserTabId,
+          faviconUrl: event.favicon,
           title: truncateTabTitle(event.title || event.url),
         },
         activate: true,
@@ -3100,29 +3090,13 @@ function WorkspaceTabPane({
     icon: tab.type === 'browser'
       ? browserTabIconForUrl({
         url: tab.url,
-        records: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
-        liveDataUrls: liveFaviconDataUrls,
+        faviconUrl: tab.faviconUrl,
+        records: (faviconCache.data ?? {}) as FaviconCacheByOrigin,
       })
       : paneTabIconForType(tab.type),
     title: workspaceTabLabel(tab),
   }))
 
-  async function handleBrowserFaviconChange(input: { pageUrl: string; faviconUrl: string }) {
-    const origin = faviconOriginForUrl(input.pageUrl)
-    if (!origin) return
-    const key = `${origin}:${input.faviconUrl}`
-    if (pendingFaviconWritesRef.current.has(key)) return
-    pendingFaviconWritesRef.current.add(key)
-    try {
-      const record = await upsertFavicon.mutateAsync({ pageOrigin: origin, iconUrl: input.faviconUrl })
-      setLiveFaviconDataUrls((current) => ({ ...current, [origin]: record.dataUrl }))
-      void faviconCache.refetch()
-    } catch (error) {
-      console.info('Favicon cache update failed', error)
-    } finally {
-      pendingFaviconWritesRef.current.delete(key)
-    }
-  }
   const canUseEnvTabs = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
   return (
     <section
@@ -3180,20 +3154,13 @@ function WorkspaceTabPane({
             onBrowserTabId={(browserTabId) =>
               dispatchWorkspaceState({ type: 'setBrowserTabId', tabId: activeTab.id, browserTabId })
             }
-            onUrlChange={(url) =>
-              dispatchWorkspaceState({ type: 'setTabUrl', tabId: activeTab.id, url })
-            }
-            onTitleChange={(title) =>
-              dispatchWorkspaceState({ type: 'setTabTitle', tabId: activeTab.id, title: truncateTabTitle(title) })
-            }
-            onFaviconChange={(input) => void handleBrowserFaviconChange(input)}
             onNativeFocus={onFocusTabs}
             bookmarks={bookmarksStore.bookmarks}
             faviconDataUrl={activeTab.type === 'browser'
-              ? (liveFaviconDataUrls[faviconOriginForUrl(activeTab.url) ?? ''] ?? ((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(activeTab.url) ?? '']?.dataUrl ?? null)
+              ? (faviconAssetForUrl({ url: activeTab.url, faviconUrl: activeTab.faviconUrl, records: (faviconCache.data ?? {}) as FaviconCacheByOrigin })?.dataUrl ?? null)
               : null}
             faviconUrl={activeTab.type === 'browser'
-              ? (((faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>)[faviconOriginForUrl(activeTab.url) ?? '']?.iconUrl ?? null)
+              ? (activeTab.faviconUrl ?? faviconAssetForUrl({ url: activeTab.url, records: (faviconCache.data ?? {}) as FaviconCacheByOrigin })?.iconUrl ?? null)
               : null}
           />
         ) : (
@@ -3320,9 +3287,6 @@ function WorkspaceTabContent({
   fileEditorState,
   onFileEditorStateChange,
   onBrowserTabId,
-  onUrlChange,
-  onTitleChange,
-  onFaviconChange,
   onNativeFocus,
   bookmarks,
   faviconDataUrl,
@@ -3334,9 +3298,6 @@ function WorkspaceTabContent({
   fileEditorState?: FileEditorState
   onFileEditorStateChange?: (editorState: FileEditorState) => void
   onBrowserTabId: (browserTabId: string) => void
-  onUrlChange: (url: string) => void
-  onTitleChange: (title: string) => void
-  onFaviconChange: (input: { pageUrl: string; faviconUrl: string }) => void
   onNativeFocus?: () => void
   bookmarks?: import('./workspace/bookmarks-store').BookmarkRecord[]
   faviconDataUrl?: string | null
@@ -3387,9 +3348,6 @@ function WorkspaceTabContent({
         bookmarks={bookmarks}
         active
         onBrowserTabId={onBrowserTabId}
-        onUrlChange={onUrlChange}
-        onTitleChange={onTitleChange}
-        onFaviconChange={onFaviconChange}
         onNativeFocus={onNativeFocus}
         closeOnUnmount={false}
       />

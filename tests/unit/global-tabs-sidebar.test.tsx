@@ -14,6 +14,8 @@ import {
 } from '../../src/routes/workspace'
 import type { WorkspaceTab } from '../../src/routes/workspace/tab-state'
 
+const faviconQueryData: { current: Record<string, unknown> } = { current: {} }
+
 vi.mock('../../src/trpc', () => ({
   makeTrpcClient: () => ({
     query: vi.fn(),
@@ -22,7 +24,7 @@ vi.mock('../../src/trpc', () => ({
   trpc: {
     favicon: {
       getByOrigins: {
-        useQuery: () => ({ data: {} }),
+        useQuery: () => ({ data: faviconQueryData.current }),
       },
       cacheFromUrl: {
         useMutation: () => ({ mutateAsync: vi.fn() }),
@@ -44,7 +46,10 @@ const tabs: WorkspaceTab[] = [
   { id: 'global-b', type: 'browser', url: 'https://second.test', title: 'Browser' },
 ]
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  faviconQueryData.current = {}
+})
 
 describe('global tabs sidebar', () => {
   it('renders global tabs above workspaces without workspace dnd selection ids', () => {
@@ -79,6 +84,55 @@ describe('global tabs sidebar', () => {
     expect(workspaceSidebarRowActive('workspace-a', 'workspace-a', 'global-a')).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'second.test' }))
     expect(onSelect).toHaveBeenCalledWith('global-b')
+  })
+
+  it('renders cached favicons from the shared origin cache', () => {
+    faviconQueryData.current = {
+      'https://example.com': [{
+        pageOrigin: 'https://example.com',
+        iconUrl: 'https://example.com/favicon.ico',
+        dataUrl: 'data:image/png;base64,AA==',
+        mediaType: 'image/png',
+        sizeBytes: 1,
+        updatedAt: new Date(),
+        lastSeenAt: new Date(),
+      }],
+    }
+
+    const view = render(
+      <GlobalTabsSidebarSection
+        destination={{ workspace: { id: 'global-workspace', name: 'Global tabs' }, tabs, activeTabId: null }}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    expect(view.container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AA==')
+  })
+
+  it('renders different selected favicons for tabs on the same origin', () => {
+    const sameOriginTabs: WorkspaceTab[] = [
+      { id: 'plain', type: 'browser', url: 'https://github.com/issues', title: 'Issues', faviconUrl: 'https://github.com/plain.ico' },
+      { id: 'status', type: 'browser', url: 'https://github.com/pulls', title: 'Pulls', faviconUrl: 'https://github.com/status.ico' },
+    ]
+    const view = render(
+      <GlobalTabsSidebarSection
+        destination={{ workspace: { id: 'global-workspace', name: 'Global tabs' }, tabs: sameOriginTabs, activeTabId: null }}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        faviconRecords={{
+          'https://github.com': [
+            { pageOrigin: 'https://github.com', iconUrl: 'https://github.com/plain.ico', dataUrl: 'data:image/png;base64,cGxhaW4=', mediaType: 'image/png', sizeBytes: 5, updatedAt: new Date(), lastSeenAt: new Date() },
+            { pageOrigin: 'https://github.com', iconUrl: 'https://github.com/status.ico', dataUrl: 'data:image/png;base64,c3RhdHVz', mediaType: 'image/png', sizeBytes: 6, updatedAt: new Date(), lastSeenAt: new Date() },
+          ],
+        }}
+      />,
+    )
+
+    expect(Array.from(view.container.querySelectorAll('img'), (image) => image.getAttribute('src'))).toEqual([
+      'data:image/png;base64,cGxhaW4=',
+      'data:image/png;base64,c3RhdHVz',
+    ])
   })
 
   it('closing the active global tab selects the next tab or returns to the workspace fallback', () => {

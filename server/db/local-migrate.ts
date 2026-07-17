@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS workspace_tabs (
   port INTEGER,
   url TEXT,
   browser_tab_id TEXT,
+  favicon_url TEXT,
   updated_at INTEGER NOT NULL DEFAULT ${nowMs},
   PRIMARY KEY (workspace_id, id)
 );
@@ -134,13 +135,14 @@ CREATE INDEX IF NOT EXISTS bookmarks_updated_idx
   ON bookmarks(updated_at);
 
 CREATE TABLE IF NOT EXISTS favicon_cache (
-  page_origin TEXT PRIMARY KEY,
+  page_origin TEXT NOT NULL,
   icon_url TEXT NOT NULL,
   data_url TEXT NOT NULL,
   media_type TEXT NOT NULL,
   size_bytes INTEGER NOT NULL,
   updated_at INTEGER NOT NULL DEFAULT ${nowMs},
-  last_seen_at INTEGER NOT NULL DEFAULT ${nowMs}
+  last_seen_at INTEGER NOT NULL DEFAULT ${nowMs},
+  PRIMARY KEY (page_origin, icon_url)
 );
 
 CREATE TABLE IF NOT EXISTS agent_notifications (
@@ -666,6 +668,30 @@ function migrateSystemWorkspaces(sqlite: Database.Database) {
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_system_key_unique ON workspaces(system_key);')
 }
 
+function migrateFaviconAssetsPerTab(sqlite: Database.Database) {
+  if (tableExists(sqlite, 'workspace_tabs') && !columnExists(sqlite, 'workspace_tabs', 'favicon_url')) {
+    sqlite.exec('ALTER TABLE workspace_tabs ADD COLUMN favicon_url TEXT')
+  }
+  sqlite.exec(`
+    CREATE TABLE favicon_cache_next (
+      page_origin TEXT NOT NULL,
+      icon_url TEXT NOT NULL,
+      data_url TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT ${nowMs},
+      last_seen_at INTEGER NOT NULL DEFAULT ${nowMs},
+      PRIMARY KEY (page_origin, icon_url)
+    );
+    INSERT INTO favicon_cache_next (
+      page_origin, icon_url, data_url, media_type, size_bytes, updated_at, last_seen_at
+    ) SELECT page_origin, icon_url, data_url, media_type, size_bytes, updated_at, last_seen_at
+      FROM favicon_cache;
+    DROP TABLE favicon_cache;
+    ALTER TABLE favicon_cache_next RENAME TO favicon_cache;
+  `)
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
@@ -817,6 +843,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
         sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(systemWorkspacesMigrationName)
       })()
       applied.push(systemWorkspacesMigrationName)
+    }
+
+    const faviconAssetsMigrationName = '0013_favicon_assets_per_tab'
+    const faviconAssetsMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(faviconAssetsMigrationName)
+    if (!faviconAssetsMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateFaviconAssetsPerTab(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(faviconAssetsMigrationName)
+      })()
+      applied.push(faviconAssetsMigrationName)
     }
 
     return { sqlitePath, applied }

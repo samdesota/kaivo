@@ -47,24 +47,30 @@ describe('favicon cache service', () => {
         iconUrl: 'https://example.com/favicon.ico',
         dataUrl: PNG_1X1,
       })
+      await service.upsert({
+        pageOrigin: 'https://example.com/status',
+        iconUrl: 'https://example.com/status-favicon.ico',
+        dataUrl: 'data:image/png;base64,aGk=',
+      })
 
       const rows = await service.getByOrigins(['https://example.com/other'])
 
-      expect(rows['https://example.com']).toMatchObject({
+      const defaultAsset = rows['https://example.com']?.find((asset) => asset.iconUrl === 'https://example.com/favicon.ico')
+      expect(defaultAsset).toMatchObject({
         pageOrigin: 'https://example.com',
         iconUrl: 'https://example.com/favicon.ico',
         dataUrl: PNG_1X1,
         mediaType: 'image/png',
       })
-      expect(browserTabIconForUrl({ url: 'https://example.com/restored', records: rows })).toEqual({
+      expect(browserTabIconForUrl({ url: 'https://example.com/restored', faviconUrl: 'https://example.com/favicon.ico', records: rows })).toEqual({
         kind: 'favicon',
         url: PNG_1X1,
         fallback: { kind: 'pane', pane: 'browser' },
       })
-      expect(rows['https://example.com']!.sizeBytes).toBeGreaterThan(0)
+      expect(defaultAsset!.sizeBytes).toBeGreaterThan(0)
       const readonly = new Database(sqlitePath, { readonly: true })
       try {
-        expect(readonly.prepare('SELECT COUNT(*) AS count FROM favicon_cache').get()).toEqual({ count: 1 })
+        expect(readonly.prepare('SELECT COUNT(*) AS count FROM favicon_cache').get()).toEqual({ count: 2 })
       } finally {
         readonly.close()
       }
@@ -95,7 +101,7 @@ describe('favicon cache service', () => {
       })
       expect(row.dataUrl).toBe('data:image/png;base64,iVBORw==')
       const rows = await service.getByOrigins(['https://www.google.com/'])
-      expect(rows['https://www.google.com']?.dataUrl).toBe(row.dataUrl)
+      expect(rows['https://www.google.com']?.[0]?.dataUrl).toBe(row.dataUrl)
     } finally {
       sqlite.close()
     }

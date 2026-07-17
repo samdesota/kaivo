@@ -14,6 +14,8 @@ import {
 } from './collection'
 import type { WorkspaceTab, WorkspaceTabRecord } from './types'
 
+const workspaceTabUpdateQueues = new Map<string, Promise<void>>()
+
 export async function openWorkspaceTab(input: { workspaceId: string; tab: WorkspaceTab; activate?: boolean }): Promise<WorkspaceTab> {
   const before = workspaceTabsCollection.getRows()
   const existing = findDuplicateWorkspaceTab(input.workspaceId, input.tab, before)
@@ -98,6 +100,17 @@ export async function setWorkspaceTabUrl(input: { workspaceId: string; tabId: st
   await updateWorkspaceTabRecord(input.workspaceId, input.tabId, (row) => row.type === 'browser' ? { ...row, url: input.url, updatedAt: Date.now() } : row)
 }
 
+export async function setWorkspaceTabBrowserMetadata(input: { workspaceId: string; tabId: string; url?: string; title?: string; faviconUrl?: string | null }): Promise<void> {
+  await updateWorkspaceTabRecord(input.workspaceId, input.tabId, (row) => {
+    if (row.type !== 'browser') return row
+    const url = input.url ?? row.url
+    const title = input.title?.trim() || row.title
+    const faviconUrl = input.faviconUrl === undefined ? row.faviconUrl : input.faviconUrl
+    if (url === row.url && title === row.title && faviconUrl === row.faviconUrl) return row
+    return { ...row, url, title, faviconUrl, updatedAt: Date.now() }
+  })
+}
+
 export async function setWorkspaceTabTitle(input: { workspaceId: string; tabId: string; title: string; source?: 'auto' | 'explicit' }): Promise<void> {
   await updateWorkspaceTabRecord(input.workspaceId, input.tabId, (row) => {
     if (input.source === 'auto' && row.type === 'shell' && row.titleSource === 'explicit') return row
@@ -117,6 +130,18 @@ export function applyWorkspaceTabRowsForTests(rows: WorkspaceTabRecord[]): void 
 }
 
 async function updateWorkspaceTabRecord(workspaceId: string, tabId: string, update: (row: WorkspaceTabRecord) => WorkspaceTabRecord): Promise<void> {
+  const key = workspaceTabRecordKey({ workspaceId, id: tabId })
+  const previous = workspaceTabUpdateQueues.get(key) ?? Promise.resolve()
+  const operation = previous.catch(() => undefined).then(() => applyWorkspaceTabRecordUpdate(workspaceId, tabId, update))
+  workspaceTabUpdateQueues.set(key, operation)
+  try {
+    await operation
+  } finally {
+    if (workspaceTabUpdateQueues.get(key) === operation) workspaceTabUpdateQueues.delete(key)
+  }
+}
+
+async function applyWorkspaceTabRecordUpdate(workspaceId: string, tabId: string, update: (row: WorkspaceTabRecord) => WorkspaceTabRecord): Promise<void> {
   const before = workspaceTabsCollection.getRows()
   const current = before.find((row) => row.workspaceId === workspaceId && row.id === tabId)
   if (!current) return

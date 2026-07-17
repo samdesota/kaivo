@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo } from 'react'
 import { paneTabIconForType } from '../../../../components/tab-icon'
-import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../../../../lib/favicon-cache'
+import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheByOrigin } from '../../../../lib/favicon-cache'
 import { trpc } from '../../../../trpc'
 import { UniversalMenuResultList, selectResult } from '../shared'
 import type { UniversalMenuContextItem, UniversalMenuResult, UniversalScopeModule, UniversalScopeProps } from '../types'
@@ -20,7 +20,7 @@ export function WebScope(props: UniversalScopeProps) {
   const { activeIndex, contextItems, mouseMoved, onActiveChange, onClose, onMouseMoved, onOpenContent, query, setScopeApi } = props
   const faviconOrigins = useMemo(() => Array.from(new Set(contextItems.filter((item) => item.kind === 'browser-tab' && item.content.type === 'browser').map((item) => item.content.type === 'browser' ? faviconOriginForUrl(item.content.url) : null).filter((origin): origin is string => Boolean(origin)))), [contextItems])
   const faviconCache = trpc.favicon.getByOrigins.useQuery({ origins: faviconOrigins }, { enabled: faviconOrigins.length > 0, staleTime: 60_000 })
-  const results = useMemo(() => webScopeResults({ items: contextItems, query, faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>, openContent: (content) => onOpenContent?.(content) }), [contextItems, faviconCache.data, onOpenContent, query])
+  const results = useMemo(() => webScopeResults({ items: contextItems, query, faviconRecords: (faviconCache.data ?? {}) as FaviconCacheByOrigin, openContent: (content) => onOpenContent?.(content) }), [contextItems, faviconCache.data, onOpenContent, query])
 
   useLayoutEffect(() => {
     setScopeApi({ resultCount: results.length, selectActive: (event) => selectResult(results, activeIndex, onClose, event) })
@@ -29,7 +29,7 @@ export function WebScope(props: UniversalScopeProps) {
   return <UniversalMenuResultList results={results} activeIndex={activeIndex} mouseMoved={mouseMoved} onMouseMoved={onMouseMoved} onActiveChange={onActiveChange} onSelect={(index, event) => void selectResult(results, index, onClose, event)} loading={faviconCache.isFetching} />
 }
 
-function webScopeResults({ items, query, faviconRecords, openContent }: { items: UniversalMenuContextItem[]; query: string; faviconRecords: Record<string, FaviconCacheRecord>; openContent: (content: PaneContent) => void }): UniversalMenuResult[] {
+function webScopeResults({ items, query, faviconRecords, openContent }: { items: UniversalMenuContextItem[]; query: string; faviconRecords: FaviconCacheByOrigin; openContent: (content: PaneContent) => void }): UniversalMenuResult[] {
   const q = query.trim().toLowerCase()
   const directUrl = webQueryUrl(query)
   const rows: UniversalMenuResult[] = []
@@ -41,7 +41,7 @@ function webScopeResults({ items, query, faviconRecords, openContent }: { items:
     kind: 'browser-tab',
     label: item.label,
     detail: item.detail,
-    icon: item.content.type === 'browser' ? browserTabIconForUrl({ url: item.content.url, records: faviconRecords }) : paneTabIconForType('browser'),
+    icon: item.content.type === 'browser' ? browserTabIconForUrl({ url: item.content.url, faviconUrl: item.content.faviconUrl, records: faviconRecords }) : paneTabIconForType('browser'),
     haystack: `${item.label} ${item.detail ?? ''}`,
     run: () => openContent(item.content),
   })))

@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef } from 'react'
 export type PaneContent =
   | { type: 'shell'; shellId: string }
   | { type: 'file'; path: string; absolute?: boolean }
-  | { type: 'browser'; url?: string; browserTabId?: string }
+  | { type: 'browser'; url?: string; browserTabId?: string; faviconUrl?: string }
 
 export interface Tab {
   id: string

@@ -267,6 +267,7 @@ function tabRecord(input: Partial<WorkspaceTabRecord> & Pick<WorkspaceTabRecord,
     browserTabId: null,
     updatedAt: 1,
     ...input,
+    faviconUrl: input.faviconUrl ?? null,
   }
 }
 

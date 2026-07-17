@@ -16,5 +16,6 @@ export type WorkspaceTabRecord = {
   port: number | null
   url: string | null
   browserTabId: string | null
+  faviconUrl: string | null
   updatedAt: number
 }

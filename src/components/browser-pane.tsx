@@ -69,6 +69,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   const pendingCreateRef = useRef<PendingBrowserTabCreate | null>(null)
   const findQueryRef = useRef('')
   const zoomLevelRef = useRef(0)
+  const addressRef = useRef(url ?? '')
   const [address, setAddress] = useState(url ?? '')
   const [pageTitle, setPageTitle] = useState(title ?? '')
   const [pageFaviconUrl, setPageFaviconUrl] = useState(faviconUrl ?? null)
@@ -88,6 +89,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
   onNativeFocusRef.current = onNativeFocus
   findQueryRef.current = findQuery
   zoomLevelRef.current = zoomLevel
+  addressRef.current = address
 
   useEffect(() => {
     setAddress(url ?? '')
@@ -219,7 +221,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
     if (!browserApi.isAvailable()) return
     return browserApi.onTabChange((event) => {
       if (event.browserTabId !== browserTabIdRef.current) return
-      const nextPageUrl = typeof event.patch.url === 'string' ? event.patch.url : address || url || ''
+      const nextPageUrl = typeof event.patch.url === 'string' ? event.patch.url : addressRef.current
       if (typeof event.patch.url === 'string') {
         setAddress(event.patch.url)
         onUrlChangeRef.current?.(event.patch.url)
@@ -233,7 +235,7 @@ export function BrowserPane({ paneId, workspaceId, url, title, browserTabId, act
         onFaviconChangeRef.current?.({ pageUrl: nextPageUrl, faviconUrl: event.patch.favicon })
       }
     })
-  }, [address, url])
+  }, [])
 
   useEffect(() => {
     if (!browserApi.isAvailable()) return

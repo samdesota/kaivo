@@ -33,6 +33,7 @@ export function normalizeWorkspaceTabRecord(raw: unknown): WorkspaceTabRecord {
     port: typeof row.port === 'number' ? row.port : null,
     url: nullableString(row.url),
     browserTabId: nullableString(row.browserTabId),
+    faviconUrl: nullableString(row.faviconUrl),
     updatedAt: coerceTime(row.updatedAt),
   }
 }
@@ -45,7 +46,7 @@ export function recordToWorkspaceTab(record: WorkspaceTabRecord): WorkspaceTab |
     return { id: record.id, type: 'file', envId: record.envId, path: record.path, sessionId: record.sessionId ?? undefined, title: record.title }
   }
   if (record.type === 'browser' && record.url) {
-    return { id: record.id, type: 'browser', url: record.url, browserTabId: record.browserTabId ?? undefined, title: record.title }
+    return { id: record.id, type: 'browser', url: record.url, browserTabId: record.browserTabId ?? undefined, faviconUrl: record.faviconUrl ?? undefined, title: record.title }
   }
   return null
 }
@@ -65,6 +66,7 @@ export function workspaceTabToRecord(workspaceId: string, tab: WorkspaceTab, pos
     port: null,
     url: tab.type === 'browser' ? tab.url : null,
     browserTabId: tab.type === 'browser' ? (tab.browserTabId ?? null) : null,
+    faviconUrl: tab.type === 'browser' ? (tab.faviconUrl ?? null) : null,
     updatedAt: Date.now(),
   }
 }
