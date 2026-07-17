@@ -69,6 +69,7 @@ export function getAppRealtime(): SqliteRealtimeEngine {
         { name: 'port' },
         { name: 'url' },
         { name: 'browser_tab_id', jsonName: 'browserTabId' },
+        { name: 'favicon_url', jsonName: 'faviconUrl' },
         { name: 'updated_at', jsonName: 'updatedAt' },
       ],
     },

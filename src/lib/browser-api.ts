@@ -32,10 +32,19 @@ export type BrowserFoundInPage = {
   finalUpdate: boolean
 }
 
+export type BrowserTabSnapshot = {
+  browserTabId: string
+  url: string
+  title: string
+  favicon?: string
+  presentation?: 'embedded' | 'popup'
+}
+
 export type BrowserApi = {
   isAvailable(): boolean
   getWindowId(): Promise<string>
-  listTabs(): Promise<Array<{ browserTabId: string; url?: string; favicon?: string; presentation?: 'embedded' | 'popup' }>>
+  listTabs(): Promise<BrowserTabSnapshot[]>
+  getTab(input: { browserTabId: string }): Promise<BrowserTabSnapshot | null>
   createTab(input: { paneId: string; url?: string }): Promise<{ browserTabId: string; favicon?: string }>
   attachTab(input: { paneId: string; browserTabId: string }): Promise<void>
   focusTab(input: { browserTabId: string }): Promise<void>
@@ -73,7 +82,8 @@ type WebframeGlobal = {
       setSlots: { mutate: (input: unknown) => Promise<unknown> }
     }
     tabs: {
-      list?: { query: (input?: unknown) => Promise<Array<{ id: string; url?: string; favicon?: string; presentation?: 'embedded' | 'popup' }>> }
+      list?: { query: (input?: unknown) => Promise<Array<{ id: string; url: string; title: string; favicon?: string; presentation?: 'embedded' | 'popup' }>> }
+      get?: { query: (input: unknown) => Promise<{ id: string; url: string; title: string; favicon?: string; presentation?: 'embedded' | 'popup' } | null> }
       create: { mutate: (input: unknown) => Promise<{ id: string; favicon?: string }> }
       move: { mutate: (input: unknown) => Promise<unknown> }
       setActive: { mutate: (input: unknown) => Promise<unknown> }
@@ -168,7 +178,14 @@ export function createBrowserApi(win: BrowserWindowLike | undefined = getWindow(
       const webframe = getWebframe(win)
       if (!webframe.trpc.tabs.list) return []
       const records = await webframe.trpc.tabs.list.query()
-      return records.map((record) => ({ browserTabId: record.id, url: record.url, favicon: record.favicon, presentation: record.presentation }))
+      return records.map(browserTabSnapshot)
+    },
+
+    async getTab(input) {
+      const webframe = getWebframe(win)
+      if (!webframe.trpc.tabs.get) return null
+      const record = await webframe.trpc.tabs.get.query({ tabId: input.browserTabId })
+      return record ? browserTabSnapshot(record) : null
     },
 
     async createTab(input) {
@@ -414,6 +431,16 @@ export function paneSlotName(paneId: string): string {
 
 function getWindow(): BrowserWindowLike | undefined {
   return typeof window === 'undefined' ? undefined : (window as BrowserWindowLike)
+}
+
+function browserTabSnapshot(record: { id: string; url: string; title: string; favicon?: string; presentation?: 'embedded' | 'popup' }): BrowserTabSnapshot {
+  return {
+    browserTabId: record.id,
+    url: record.url,
+    title: record.title,
+    favicon: record.favicon,
+    presentation: record.presentation,
+  }
 }
 
 function getWebframe(win: BrowserWindowLike | undefined): WebframeGlobal {

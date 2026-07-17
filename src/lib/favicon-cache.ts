@@ -10,6 +10,8 @@ export type FaviconCacheRecord = {
   lastSeenAt: Date
 }
 
+export type FaviconCacheByOrigin = Record<string, FaviconCacheRecord[] | undefined>
+
 export function faviconOriginForUrl(input: string | undefined): string | null {
   if (!input) return null
   try {
@@ -23,15 +25,30 @@ export function faviconOriginForUrl(input: string | undefined): string | null {
 
 export function browserTabIconForUrl(input: {
   url: string | undefined
-  records: Record<string, FaviconCacheRecord | undefined>
+  faviconUrl?: string
+  records: FaviconCacheByOrigin
   liveDataUrls?: Record<string, string | undefined>
 }): TabIcon {
   const origin = faviconOriginForUrl(input.url)
   const liveUrl = origin ? input.liveDataUrls?.[origin] : undefined
-  const cachedUrl = origin ? input.records[origin]?.dataUrl : undefined
-  return liveUrl || cachedUrl
-    ? { kind: 'favicon', url: liveUrl ?? cachedUrl!, fallback: { kind: 'pane', pane: 'browser' } }
+  const asset = faviconAssetForUrl(input)
+  const iconUrl = liveUrl ?? asset?.dataUrl ?? input.faviconUrl
+  return iconUrl
+    ? { kind: 'favicon', url: iconUrl, fallback: { kind: 'pane', pane: 'browser' } }
     : { kind: 'pane', pane: 'browser' }
+}
+
+export function faviconAssetForUrl(input: {
+  url: string | undefined
+  faviconUrl?: string
+  records: FaviconCacheByOrigin
+}): FaviconCacheRecord | undefined {
+  const origin = faviconOriginForUrl(input.url)
+  const assets = origin ? input.records[origin] : undefined
+  if (!assets?.length) return undefined
+  return input.faviconUrl
+    ? assets.find((asset) => asset.iconUrl === input.faviconUrl)
+    : assets[0]
 }
 
 export async function fetchFaviconDataUrl(iconUrl: string, maxBytes = 128 * 1024): Promise<{ dataUrl: string; mediaType: string; sizeBytes: number }> {

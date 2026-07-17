@@ -480,7 +480,7 @@ export class TabManager {
     wc.on('page-title-updated', (_evt, title) => {
       tab.record.title = title;
       void persist();
-      this.deps.bus.emit('tab:change', { tabId: tab.id, patch: { title } });
+      this.deps.bus.emit('tab:change', { tabId: tab.id, patch: { url: tab.record.url, title } });
     });
     wc.on('page-favicon-updated', (_evt, favicons) => {
       const favicon = selectFaviconCandidate({
@@ -491,7 +491,7 @@ export class TabManager {
       if (!favicon) return;
       tab.record.favicon = favicon;
       void persist();
-      this.deps.bus.emit('tab:change', { tabId: tab.id, patch: { favicon } });
+      this.deps.bus.emit('tab:change', { tabId: tab.id, patch: { url: tab.record.url, favicon } });
     });
     wc.on('did-navigate', (_evt, url) => {
       tab.record.url = url;

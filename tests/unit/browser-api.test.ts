@@ -5,7 +5,8 @@ function makeWindow() {
   const calls: Record<string, ReturnType<typeof vi.fn>> = {
     setSlots: vi.fn(async () => ({ ok: true })),
     create: vi.fn(async () => ({ id: 'tab-1', favicon: 'https://example.com/favicon.ico' })),
-    list: vi.fn(async () => [{ id: 'tab-1', url: 'https://example.com', favicon: 'https://example.com/favicon.ico', presentation: 'embedded' }]),
+    list: vi.fn(async () => [{ id: 'tab-1', url: 'https://example.com', title: 'Example title', favicon: 'https://example.com/favicon.ico', presentation: 'embedded' }]),
+    get: vi.fn(async () => ({ id: 'tab-1', url: 'https://example.com', title: 'Example title', favicon: 'https://example.com/favicon.ico', presentation: 'embedded' })),
     move: vi.fn(async () => ({ ok: true })),
     setActive: vi.fn(async () => ({ ok: true })),
     close: vi.fn(async () => ({ ok: true })),
@@ -23,6 +24,7 @@ function makeWindow() {
         tabs: {
           create: { mutate: calls.create },
           list: { query: calls.list },
+          get: { query: calls.get },
           move: { mutate: calls.move },
           setActive: { mutate: calls.setActive },
           close: { mutate: calls.close },
@@ -53,9 +55,18 @@ describe('browser API adapter', () => {
     await expect(api.listTabs()).resolves.toEqual([{
       browserTabId: 'tab-1',
       url: 'https://example.com',
+      title: 'Example title',
       favicon: 'https://example.com/favicon.ico',
       presentation: 'embedded',
     }])
+    await expect(api.getTab({ browserTabId: 'tab-1' })).resolves.toEqual({
+      browserTabId: 'tab-1',
+      url: 'https://example.com',
+      title: 'Example title',
+      favicon: 'https://example.com/favicon.ico',
+      presentation: 'embedded',
+    })
+    expect(calls.get).toHaveBeenLastCalledWith({ tabId: 'tab-1' })
     await api.setSlot({ paneId: 'pane-1', rect: { x: 1, y: 2, width: 300, height: 200 } })
     expect(calls.setSlots).toHaveBeenLastCalledWith({
       windowId: 'window-1',

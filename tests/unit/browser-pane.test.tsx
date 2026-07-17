@@ -428,6 +428,7 @@ describe('BrowserPane', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(api.navigate).not.toHaveBeenCalled()
     expect(api.reload).not.toHaveBeenCalled()
+    expect(api.onTabChange).toHaveBeenCalledTimes(1)
   })
 
   it('reports matching native focus events', async () => {

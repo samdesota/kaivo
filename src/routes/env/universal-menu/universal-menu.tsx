@@ -7,7 +7,7 @@ import { FilePathLabel } from '../../../components/file-path-label'
 import { paneTabIconForType, TabIconView, type TabIcon } from '../../../components/tab-icon'
 import { envTrpc } from '../../../env-trpc'
 import { trpc } from '../../../trpc'
-import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheRecord } from '../../../lib/favicon-cache'
+import { browserTabIconForUrl, faviconOriginForUrl, type FaviconCacheByOrigin } from '../../../lib/favicon-cache'
 import { buildWebSearchUrl, matchBookmarks, resolveBrowserAddress } from '../../../lib/browser-navigation'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
@@ -651,7 +651,7 @@ export function UniversalMenu({
         items: contextItems,
         bookmarks: bookmarksStore.bookmarks,
         query,
-        faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
+        faviconRecords: (faviconCache.data ?? {}) as FaviconCacheByOrigin,
         openContent: (content) => onOpenContent?.(content, globalIntent ? 'global' : initialOpenTarget),
       })
     }
@@ -674,7 +674,7 @@ export function UniversalMenu({
     return normalSearchResults({
       bookmarks: bookmarksStore.bookmarks,
       commandResults: [...globalWorkspaceResults, ...commandResults],
-      faviconRecords: (faviconCache.data ?? {}) as Record<string, FaviconCacheRecord>,
+      faviconRecords: (faviconCache.data ?? {}) as FaviconCacheByOrigin,
       query,
       openContent: (content) => onOpenContent?.(content, globalIntent ? 'global' : initialOpenTarget),
     })
@@ -1802,7 +1802,7 @@ function normalSearchResults({
 }: {
   bookmarks: BookmarkRecord[]
   commandResults: UniversalMenuResult[]
-  faviconRecords: Record<string, FaviconCacheRecord>
+  faviconRecords: FaviconCacheByOrigin
   query: string
   openContent: (content: PaneContent) => void
 }): UniversalMenuResult[] {
@@ -1866,7 +1866,7 @@ function webScopeResults({
   items: UniversalMenuContextItem[]
   bookmarks: BookmarkRecord[]
   query: string
-  faviconRecords: Record<string, FaviconCacheRecord>
+  faviconRecords: FaviconCacheByOrigin
   openContent: (content: PaneContent) => void
 }): UniversalMenuResult[] {
   const q = query.trim().toLowerCase()
@@ -1892,7 +1892,7 @@ function webScopeResults({
       kind: 'browser-tab',
       label: item.label,
       detail: item.detail,
-      icon: item.content.type === 'browser' ? browserTabIconForUrl({ url: item.content.url, records: faviconRecords }) : paneTabIconForType('browser'),
+      icon: item.content.type === 'browser' ? browserTabIconForUrl({ url: item.content.url, faviconUrl: item.content.faviconUrl, records: faviconRecords }) : paneTabIconForType('browser'),
       haystack: `${item.label} ${item.detail ?? ''}`,
       run: () => openContent(item.content),
     })))
@@ -1919,7 +1919,7 @@ function webScopeResults({
   return rows.length ? rows : [disabledRow('web-empty', q ? 'No matching pages or bookmarks.' : 'No browser pages or bookmarks.')]
 }
 
-function bookmarkIcon(bookmark: BookmarkRecord, faviconRecords: Record<string, FaviconCacheRecord>): TabIcon {
+function bookmarkIcon(bookmark: BookmarkRecord, faviconRecords: FaviconCacheByOrigin): TabIcon {
   const iconUrl = bookmark.faviconDataUrl ?? bookmark.faviconUrl
   if (iconUrl) return { kind: 'favicon', url: iconUrl, fallback: { kind: 'pane', pane: 'browser' } }
   return browserTabIconForUrl({ url: bookmark.url, records: faviconRecords })

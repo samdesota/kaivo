@@ -13,7 +13,7 @@ describe('runLocalAppMigrations', () => {
 
     expect(result).toEqual({
       sqlitePath,
-      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces'],
+      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'],
     })
     const sqlite = new Database(sqlitePath, { readonly: true })
     try {
@@ -22,6 +22,13 @@ describe('runLocalAppMigrations', () => {
         .all() as { name: string }[]
       const tableNames = new Set(rows.map((row) => row.name))
       for (const table of localAppTables) expect(tableNames.has(table)).toBe(true)
+      expect(sqlite.prepare('PRAGMA table_info(workspace_tabs)').all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'favicon_url' }),
+      ]))
+      expect(sqlite.prepare('PRAGMA table_info(favicon_cache)').all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'page_origin', pk: 1 }),
+        expect.objectContaining({ name: 'icon_url', pk: 2 }),
+      ]))
     } finally {
       sqlite.close()
     }
@@ -34,6 +41,57 @@ describe('runLocalAppMigrations', () => {
     const result = runLocalAppMigrations(sqlitePath)
 
     expect(result).toEqual({ sqlitePath, applied: [] })
+  })
+
+  it('preserves cached favicons while upgrading to multiple assets per origin', () => {
+    const sqlitePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cc-app-sqlite-test-')), 'app.db')
+    const sqlite = new Database(sqlitePath)
+    try {
+      sqlite.exec(`
+        CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, run_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000));
+        CREATE TABLE workspace_tabs (
+          workspace_id TEXT NOT NULL, id TEXT NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL,
+          title_source TEXT, position INTEGER NOT NULL, env_id TEXT, shell_id TEXT, path TEXT,
+          session_id TEXT, port INTEGER, url TEXT, browser_tab_id TEXT, updated_at INTEGER NOT NULL,
+          PRIMARY KEY (workspace_id, id)
+        );
+        CREATE TABLE favicon_cache (
+          page_origin TEXT PRIMARY KEY, icon_url TEXT NOT NULL, data_url TEXT NOT NULL,
+          media_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL
+        );
+        INSERT INTO favicon_cache VALUES (
+          'https://github.com', 'https://github.com/plain.ico', 'data:image/png;base64,cGxhaW4=',
+          'image/png', 5, 1, 1
+        );
+      `)
+      for (const name of [
+        '0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs',
+        '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles',
+        '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source',
+        '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces',
+      ]) sqlite.prepare('INSERT INTO schema_migrations (name) VALUES (?)').run(name)
+    } finally {
+      sqlite.close()
+    }
+
+    expect(runLocalAppMigrations(sqlitePath).applied).toEqual(['0013_favicon_assets_per_tab'])
+    const migrated = new Database(sqlitePath)
+    try {
+      expect(migrated.prepare('SELECT page_origin, icon_url FROM favicon_cache').all()).toEqual([
+        { page_origin: 'https://github.com', icon_url: 'https://github.com/plain.ico' },
+      ])
+      migrated.prepare(`
+        INSERT INTO favicon_cache (page_origin, icon_url, data_url, media_type, size_bytes, updated_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('https://github.com', 'https://github.com/status.ico', 'data:image/png;base64,c3RhdHVz', 'image/png', 6, 2, 2)
+      expect(migrated.prepare('SELECT COUNT(*) AS count FROM favicon_cache WHERE page_origin = ?').get('https://github.com')).toEqual({ count: 2 })
+      expect(migrated.prepare('PRAGMA table_info(workspace_tabs)').all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'favicon_url' }),
+      ]))
+    } finally {
+      migrated.close()
+    }
   })
 
   it('migrates legacy workspace UI JSON into normalized tables', () => {
@@ -77,7 +135,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT * FROM workspace_view_states').get()).toMatchObject({
@@ -137,7 +195,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()
@@ -203,7 +261,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0011_bookmarks', '0012_system_workspaces'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT id, title, url, normalized_url, origin, favicon_data_url, favicon_url, created_at, updated_at FROM bookmarks').all()).toEqual([

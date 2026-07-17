@@ -147,6 +147,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
     port: null,
     url: tab.type === 'browser' ? tab.url : null,
     browserTabId: tab.type === 'browser' ? (tab.browserTabId ?? null) : null,
+    faviconUrl: tab.type === 'browser' ? (tab.faviconUrl ?? null) : null,
     updatedAt,
   }
 }
@@ -165,6 +166,7 @@ function sameWorkspaceTabRow(left: WorkspaceTabRow, right: WorkspaceTabRow): boo
     && left.port === right.port
     && left.url === right.url
     && left.browserTabId === right.browserTabId
+    && left.faviconUrl === right.faviconUrl
 }
 
 function sameWorkspaceViewStateValues(left: WorkspaceViewState, right: Pick<WorkspaceViewState, 'activeAgentSessionId' | 'activeWorkspaceTabId' | 'splitRatio' | 'agentCollapsed'>): boolean {
@@ -182,7 +184,7 @@ function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
     return { id: row.id, type: 'file', envId: row.envId, path: row.path, sessionId: row.sessionId ?? undefined, title: row.title }
   }
   if (row.type === 'browser' && row.url) {
-    return { id: row.id, type: 'browser', url: row.url, browserTabId: row.browserTabId ?? undefined, title: row.title }
+    return { id: row.id, type: 'browser', url: row.url, browserTabId: row.browserTabId ?? undefined, faviconUrl: row.faviconUrl ?? undefined, title: row.title }
   }
   return null
 }
@@ -578,6 +580,7 @@ export function createWorkspaceService(database: Db = db) {
           port: sql`excluded.port`,
           url: sql`excluded.url`,
           browserTabId: sql`excluded.browser_tab_id`,
+          faviconUrl: sql`excluded.favicon_url`,
           updatedAt: sql`excluded.updated_at`,
         },
       })
