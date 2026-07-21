@@ -26,8 +26,8 @@ export async function openWorkspaceTab(input: { workspaceId: string; tab: Worksp
   const position = nextWorkspaceTabPosition(input.workspaceId, before)
   const record = workspaceTabToRecord(input.workspaceId, input.tab, position)
   workspaceTabsCollection.applySnapshot(workspaceTabsSnapshot([...before, record]))
+  await upsertWorkspaceTabRecord(record, before)
   if (input.activate !== false) await setActiveWorkspaceTab({ workspaceId: input.workspaceId, tabId: record.id })
-  void upsertWorkspaceTabRecord(record, before)
   return input.tab
 }
 

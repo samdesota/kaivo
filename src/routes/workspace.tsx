@@ -50,6 +50,7 @@ import { emptyFileEditorState, type FileEditorState } from './env/file-editor-st
 import { ShellTabContent } from './env/tabs/shell-tab'
 import { FileTabContent } from './env/tabs/file-tab'
 import { BrowserTabContent } from './env/tabs/browser-tab'
+import { GitDiffTab } from './env/tabs/git-diff-tab'
 import type { PaneContent } from './env/shell/tab-state'
 import {
   createWorkspaceEnvClientResolver,
@@ -3277,6 +3278,7 @@ function workspaceTabLabel(tab: WorkspaceTab): string {
   if (isPendingShellTab(tab)) return 'Starting shell…'
   if (tab.type === 'shell') return `shell ${tab.shellId}`
   if (tab.type === 'file') return tab.path
+  if (tab.type === 'git-diff') return tab.repoRoot
   return tab.url
 }
 
@@ -3330,6 +3332,26 @@ function WorkspaceTabContent({
             absolute
             editorState={fileEditorState}
             onEditorStateChange={onFileEditorStateChange}
+          />
+        </WorkspaceEnvTargetProvider>
+      </div>
+    )
+  }
+  if (tab.type === 'git-diff') {
+    return (
+      <div className="h-full min-h-0 w-full">
+        <WorkspaceEnvTargetProvider>
+          <GitDiffTab
+            tabId={tab.id}
+            cwd={tab.repoRoot}
+            onRepositoryRootChange={(repoRoot) => {
+              if (repoRoot === tab.repoRoot) return
+              void replaceWorkspaceTab({
+                workspaceId: contentWorkspaceId,
+                tabId: tab.id,
+                tab: { ...tab, repoRoot },
+              })
+            }}
           />
         </WorkspaceEnvTargetProvider>
       </div>

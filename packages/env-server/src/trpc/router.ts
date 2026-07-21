@@ -12,6 +12,7 @@ import { agentUiRouter } from './routers/agent-ui.js'
 import { agentRuntimeRouter } from './routers/agent-runtime.js'
 import { previewRouter } from './routers/preview.js'
 import { syncRouter } from './routers/sync.js'
+import { gitRouter } from './routers/git.js'
 
 export const appRouter = router({
   meta: metaRouter,
@@ -27,6 +28,7 @@ export const appRouter = router({
   agentRuntime: agentRuntimeRouter,
   preview: previewRouter,
   sync: syncRouter,
+  git: gitRouter,
 })
 
 export type AppRouter = typeof appRouter

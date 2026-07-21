@@ -47,14 +47,17 @@ type WorkspaceTabRow = {
   id: string
   type: string
   title: string
+  titleSource: 'auto' | 'explicit' | null
   position: number
   envId: string | null
   shellId: string | null
   path: string | null
+  repoRoot: string | null
   sessionId: string | null
   port: number | null
   url: string | null
   browserTabId: string | null
+  faviconUrl: string | null
   updatedAt: Date
 }
 
@@ -185,6 +188,7 @@ vi.mock('../db/schema.js', () => ({
     workspaceId: { _col: 'workspaceId' },
     id: { _col: 'id' },
     position: { _col: 'position' },
+    repoRoot: { _col: 'repoRoot' },
   },
   workspaceAgentTabs: {
     _table: 'workspace_agent_tabs',
@@ -368,6 +372,18 @@ beforeEach(() => {
 })
 
 describe('workspace service', () => {
+  it('round trips git diff rows and includes repoRoot in equality', async () => {
+    const { rowToTab, sameWorkspaceTabRow, tabToRow } = await import('./service.js')
+    const updatedAt = new Date(1234)
+    const tab = { id: 'diff-1', type: 'git-diff' as const, envId: 'env-1', repoRoot: '/repo', title: 'Git Diff' }
+    const row = tabToRow('workspace-1', tab, 3, updatedAt)
+
+    expect(row).toMatchObject({ type: 'git-diff', envId: 'env-1', repoRoot: '/repo', position: 3 })
+    expect(rowToTab(row)).toEqual(tab)
+    expect(sameWorkspaceTabRow(row, { ...row, updatedAt: new Date(9999) })).toBe(true)
+    expect(sameWorkspaceTabRow(row, { ...row, repoRoot: '/other' })).toBe(false)
+  })
+
   it('creates, renames, archives, and keeps stable workspace order', async () => {
     const { workspaceService } = await import('./service.js')
 
@@ -694,6 +710,18 @@ describe('workspace service', () => {
 })
 
 describe('workspace router', () => {
+  it('validates git diff pane and tab contracts', async () => {
+    const { paneContentSchema } = await import('../trpc/routers/agent-ui-schema.js')
+    const { workspaceTabSchema } = await import('../trpc/routers/workspace.js')
+
+    expect(paneContentSchema.parse({ type: 'git-diff', cwd: '/repo' })).toEqual({ type: 'git-diff', cwd: '/repo' })
+    expect(workspaceTabSchema.parse({ id: 'diff-1', type: 'git-diff', envId: 'env-1', repoRoot: '/repo', title: 'Git Diff' })).toEqual({
+      id: 'diff-1', type: 'git-diff', envId: 'env-1', repoRoot: '/repo', title: 'Git Diff',
+    })
+    expect(() => paneContentSchema.parse({ type: 'git-diff', cwd: '' })).toThrow()
+    expect(() => workspaceTabSchema.parse({ id: 'diff-1', type: 'git-diff', envId: 'env-1', title: 'Git Diff' })).toThrow()
+  })
+
   it('persists and reloads UI state for a workspace', async () => {
     const { workspaceRouter } = await import('../trpc/routers/workspace.js')
     const caller = workspaceRouter.createCaller(makeCtx())
@@ -762,6 +790,11 @@ describe('workspace router', () => {
     })
     await caller.upsertTab({
       workspaceId: workspace.id,
+      position: 2,
+      tab: { id: 'tab-3', type: 'git-diff', envId: 'env-1', repoRoot: '/repo', title: 'Git Diff' },
+    })
+    await caller.upsertTab({
+      workspaceId: workspace.id,
       position: 0,
       tab: { id: 'tab-1', type: 'browser', url: 'https://example.com', browserTabId: 'browser-1', title: 'Updated' },
     })
@@ -769,11 +802,13 @@ describe('workspace router', () => {
     await expect(caller.listTabs({ workspaceId: workspace.id })).resolves.toMatchObject([
       { id: 'tab-1', title: 'Updated', position: 0, browserTabId: 'browser-1' },
       { id: 'tab-2', title: 'Shell', position: 1, shellId: 'shell-1' },
+      { id: 'tab-3', title: 'Git Diff', position: 2, repoRoot: '/repo' },
     ])
 
     await caller.deleteTab({ workspaceId: workspace.id, tabId: 'tab-1' })
     await expect(caller.listTabs({ workspaceId: workspace.id })).resolves.toMatchObject([
       { id: 'tab-2', title: 'Shell' },
+      { id: 'tab-3', title: 'Git Diff', repoRoot: '/repo' },
     ])
   })
 
@@ -812,6 +847,35 @@ describe('workspace router', () => {
     expect(second.id).toBe(first.id)
     expect(tabRows).toHaveLength(2)
     expect(viewStateRows.find((row) => row.workspaceId === workspace.id)?.activeWorkspaceTabId).toBe(first.id)
+  })
+
+  it('deduplicates git diff panes by environment and repository root', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Git diff pane workspace' })
+
+    const first = await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'git-diff', cwd: '/repo' },
+    })
+    const duplicate = await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'git-diff', cwd: '/repo' },
+    })
+    await workspaceService.openPane(workspace.id, {
+      envId: 'env-2',
+      content: { type: 'git-diff', cwd: '/repo' },
+    })
+    await workspaceService.openPane(workspace.id, {
+      envId: 'env-1',
+      content: { type: 'git-diff', cwd: '/other' },
+    })
+
+    expect(duplicate.id).toBe(first.id)
+    expect(tabRows.map((row) => [row.envId, row.repoRoot])).toEqual([
+      ['env-1', '/repo'],
+      ['env-2', '/repo'],
+      ['env-1', '/other'],
+    ])
   })
 
   it('opens a backend-owned pane tab without changing active tab when activate is false', async () => {

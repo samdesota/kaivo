@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS workspace_tabs (
   env_id TEXT,
   shell_id TEXT,
   path TEXT,
+  repo_root TEXT,
   session_id TEXT,
   port INTEGER,
   url TEXT,
@@ -383,6 +384,7 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
       env_id TEXT,
       shell_id TEXT,
       path TEXT,
+      repo_root TEXT,
       session_id TEXT,
       port INTEGER,
       url TEXT,
@@ -692,6 +694,12 @@ function migrateFaviconAssetsPerTab(sqlite: Database.Database) {
   `)
 }
 
+function migrateWorkspaceTabRepoRoot(sqlite: Database.Database) {
+  if (tableExists(sqlite, 'workspace_tabs') && !columnExists(sqlite, 'workspace_tabs', 'repo_root')) {
+    sqlite.exec('ALTER TABLE workspace_tabs ADD COLUMN repo_root TEXT')
+  }
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
@@ -855,6 +863,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
         sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(faviconAssetsMigrationName)
       })()
       applied.push(faviconAssetsMigrationName)
+    }
+
+    const workspaceTabRepoRootMigrationName = '0014_workspace_tab_repo_root'
+    const workspaceTabRepoRootMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceTabRepoRootMigrationName)
+    if (!workspaceTabRepoRootMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceTabRepoRoot(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceTabRepoRootMigrationName)
+      })()
+      applied.push(workspaceTabRepoRootMigrationName)
     }
 
     return { sqlitePath, applied }

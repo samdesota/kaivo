@@ -22,6 +22,21 @@ describe('workspace tab state', () => {
     )
   })
 
+  it('restores git diff tabs and deduplicates them by env and repository root', () => {
+    const tab: WorkspaceTab = { id: 'diff-1', type: 'git-diff', envId: 'env-a', repoRoot: '/repo', title: 'Git Diff' }
+    let state = workspaceUiReducer(emptyWorkspaceUiState(), {
+      type: 'hydrate',
+      state: { ...emptyWorkspaceUiState(), workspaceTabs: [tab], activeWorkspaceTabId: 'diff-1' },
+    })
+    state = workspaceUiReducer(state, {
+      type: 'openTab',
+      tab: { ...tab, id: 'diff-2' },
+    })
+
+    expect(state.workspaceTabs).toEqual([tab])
+    expect(state.activeWorkspaceTabId).toBe('diff-1')
+  })
+
   it('restores active chat, active workspace tab, split ratio, and agent collapsed state from persisted state', () => {
     const state = workspaceUiReducer(emptyWorkspaceUiState(), {
       type: 'hydrate',

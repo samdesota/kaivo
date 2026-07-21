@@ -132,7 +132,7 @@ function normalizeWorkspaceUiState(state: WorkspaceUiState): WorkspaceUiState {
   }
 }
 
-function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, updatedAt: Date): WorkspaceTabRow {
+export function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, updatedAt: Date): WorkspaceTabRow {
   return {
     workspaceId,
     id: tab.id,
@@ -143,6 +143,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
     envId: 'envId' in tab ? tab.envId : null,
     shellId: tab.type === 'shell' ? tab.shellId : null,
     path: tab.type === 'file' ? tab.path : null,
+    repoRoot: tab.type === 'git-diff' ? tab.repoRoot : null,
     sessionId: tab.type === 'file' ? (tab.sessionId ?? null) : null,
     port: null,
     url: tab.type === 'browser' ? tab.url : null,
@@ -152,7 +153,7 @@ function tabToRow(workspaceId: string, tab: WorkspaceTab, position: number, upda
   }
 }
 
-function sameWorkspaceTabRow(left: WorkspaceTabRow, right: WorkspaceTabRow): boolean {
+export function sameWorkspaceTabRow(left: WorkspaceTabRow, right: WorkspaceTabRow): boolean {
   return left.workspaceId === right.workspaceId
     && left.id === right.id
     && left.type === right.type
@@ -162,6 +163,7 @@ function sameWorkspaceTabRow(left: WorkspaceTabRow, right: WorkspaceTabRow): boo
     && left.envId === right.envId
     && left.shellId === right.shellId
     && left.path === right.path
+    && left.repoRoot === right.repoRoot
     && left.sessionId === right.sessionId
     && left.port === right.port
     && left.url === right.url
@@ -176,12 +178,15 @@ function sameWorkspaceViewStateValues(left: WorkspaceViewState, right: Pick<Work
     && left.agentCollapsed === right.agentCollapsed
 }
 
-function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
+export function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
   if (row.type === 'shell' && row.envId && row.shellId) {
     return { id: row.id, type: 'shell', envId: row.envId, shellId: row.shellId, title: row.title, titleSource: row.titleSource ?? 'auto' }
   }
   if (row.type === 'file' && row.envId && row.path) {
     return { id: row.id, type: 'file', envId: row.envId, path: row.path, sessionId: row.sessionId ?? undefined, title: row.title }
+  }
+  if (row.type === 'git-diff' && row.envId && row.repoRoot) {
+    return { id: row.id, type: 'git-diff', envId: row.envId, repoRoot: row.repoRoot, title: row.title }
   }
   if (row.type === 'browser' && row.url) {
     return { id: row.id, type: 'browser', url: row.url, browserTabId: row.browserTabId ?? undefined, faviconUrl: row.faviconUrl ?? undefined, title: row.title }
@@ -576,6 +581,7 @@ export function createWorkspaceService(database: Db = db) {
           envId: sql`excluded.env_id`,
           shellId: sql`excluded.shell_id`,
           path: sql`excluded.path`,
+          repoRoot: sql`excluded.repo_root`,
           sessionId: sql`excluded.session_id`,
           port: sql`excluded.port`,
           url: sql`excluded.url`,

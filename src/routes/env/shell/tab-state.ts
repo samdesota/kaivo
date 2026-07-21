@@ -4,6 +4,7 @@ export type PaneContent =
   | { type: 'shell'; shellId: string }
   | { type: 'file'; path: string; absolute?: boolean }
   | { type: 'browser'; url?: string; browserTabId?: string; faviconUrl?: string }
+  | { type: 'git-diff'; cwd: string }
 
 export interface Tab {
   id: string
@@ -40,6 +41,7 @@ export function defaultTitle(c: PaneContent): string {
     return parts[parts.length - 1] ?? c.path
   }
   if (c.type === 'browser') return browserTitle(c)
+  if (c.type === 'git-diff') return 'Git Diff'
   return 'Tab'
 }
 
@@ -52,6 +54,7 @@ function sameContent(a: PaneContent, b: PaneContent): boolean {
     if (a.browserTabId && b.browserTabId) return a.browserTabId === b.browserTabId
     return (a.url ?? '') === (b.url ?? '')
   }
+  if (a.type === 'git-diff' && b.type === 'git-diff') return a.cwd === b.cwd
   return false
 }
 
@@ -204,6 +207,7 @@ function loadStored(envId: string): RightPaneState | null {
           (c.browserTabId === undefined || typeof c.browserTabId === 'string')
         )
       }
+      if (c.type === 'git-diff' && typeof c.cwd === 'string') return true
       return false
     })
     if (tabs.length === 0) return { tabs: [], activeTabId: '' }

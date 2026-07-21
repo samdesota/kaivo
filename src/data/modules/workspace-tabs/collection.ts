@@ -18,7 +18,7 @@ export function workspaceTabRecordKey(record: Pick<WorkspaceTabRecord, 'workspac
 
 export function normalizeWorkspaceTabRecord(raw: unknown): WorkspaceTabRecord {
   const row = raw as Partial<WorkspaceTabRecord> & Record<string, unknown>
-  const type = row.type === 'shell' || row.type === 'file' || row.type === 'browser' ? row.type : 'browser'
+  const type = row.type === 'shell' || row.type === 'file' || row.type === 'browser' || row.type === 'git-diff' ? row.type : 'browser'
   return {
     workspaceId: String(row.workspaceId),
     id: String(row.id),
@@ -29,6 +29,7 @@ export function normalizeWorkspaceTabRecord(raw: unknown): WorkspaceTabRecord {
     envId: nullableString(row.envId),
     shellId: nullableString(row.shellId),
     path: nullableString(row.path),
+    repoRoot: nullableString(row.repoRoot),
     sessionId: nullableString(row.sessionId),
     port: typeof row.port === 'number' ? row.port : null,
     url: nullableString(row.url),
@@ -44,6 +45,9 @@ export function recordToWorkspaceTab(record: WorkspaceTabRecord): WorkspaceTab |
   }
   if (record.type === 'file' && record.envId && record.path) {
     return { id: record.id, type: 'file', envId: record.envId, path: record.path, sessionId: record.sessionId ?? undefined, title: record.title }
+  }
+  if (record.type === 'git-diff' && record.envId && record.repoRoot) {
+    return { id: record.id, type: 'git-diff', envId: record.envId, repoRoot: record.repoRoot, title: record.title }
   }
   if (record.type === 'browser' && record.url) {
     return { id: record.id, type: 'browser', url: record.url, browserTabId: record.browserTabId ?? undefined, faviconUrl: record.faviconUrl ?? undefined, title: record.title }
@@ -62,6 +66,7 @@ export function workspaceTabToRecord(workspaceId: string, tab: WorkspaceTab, pos
     envId: 'envId' in tab ? tab.envId : null,
     shellId: tab.type === 'shell' ? tab.shellId : null,
     path: tab.type === 'file' ? tab.path : null,
+    repoRoot: tab.type === 'git-diff' ? tab.repoRoot : null,
     sessionId: tab.type === 'file' ? (tab.sessionId ?? null) : null,
     port: null,
     url: tab.type === 'browser' ? tab.url : null,
@@ -115,5 +120,6 @@ function coerceTime(value: unknown): number {
 function defaultTitle(type: WorkspaceTabRecord['type'], row: Partial<WorkspaceTabRecord> & Record<string, unknown>): string {
   if (type === 'shell') return `shell ${String(row.shellId ?? '').slice(-8)}`
   if (type === 'file') return String(row.path ?? 'File').split('/').pop() ?? 'File'
+  if (type === 'git-diff') return 'Git Diff'
   return String(row.url ?? 'Browser')
 }

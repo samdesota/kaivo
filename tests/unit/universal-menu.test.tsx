@@ -37,6 +37,12 @@ const mocks = vi.hoisted(() => ({
   worktrees: [] as Array<{ id: string; name: string; slug: string; worktreeName: string; worktreeSlug: string; workingDir: string; githubFullName: string | null }>,
   shells: [] as Array<{ id: string; cwd: string; title: string | null; alive?: boolean }>,
   gitFiles: [] as Array<{ root: string; path: string; relativePath: string }>,
+  discoverGit: vi.fn(async ({ cwd }: { cwd: string }) => ({
+    root: cwd,
+    gitDir: `${cwd}/.git`,
+    headOid: '1234567890abcdef',
+    branch: 'main',
+  })),
   workspaceTree: [] as Array<unknown>,
   bookmarks: [] as Array<{
     id: string
@@ -57,6 +63,7 @@ vi.mock('../../src/env-trpc', () => ({
       agent: { sessionList: { invalidate: vi.fn(async () => undefined) } },
       shell: { list: { invalidate: vi.fn(async () => undefined) } },
       fs: { browseHome: { invalidate: vi.fn(async () => undefined) } },
+      git: { discoverGit: { fetch: mocks.discoverGit } },
     }),
     agent: {
       sessionList: {
@@ -219,6 +226,47 @@ describe('UniversalMenu baseline shell', () => {
 
     expect(screen.getByText('Collapse sidebar')).toBeTruthy()
     expect(screen.queryByText('Shells')).toBeNull()
+  })
+
+  it('disables Open Git Diff without an active working directory', () => {
+    render(<UniversalMenu open workspaceId="workspace-1" hasActiveTab={false} onClose={vi.fn()} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'git diff' } })
+
+    expect((screen.getByRole('button', { name: /Open Git Diff/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('No active working directory')).toBeTruthy()
+  })
+
+  it('opens Git Diff for the active session working directory', async () => {
+    const onOpenContent = vi.fn()
+    const onClose = vi.fn()
+    mocks.sessions = [
+      { id: 'session-active', workingDir: '/Users/sam/d/project/packages/app' },
+      { id: 'session-other', workingDir: '/Users/sam/d/other' },
+    ]
+    mocks.discoverGit.mockResolvedValueOnce({
+      root: '/Users/sam/d/project',
+      gitDir: '/Users/sam/d/project/.git',
+      headOid: '1234567890abcdef',
+      branch: 'main',
+    })
+    render(
+      <UniversalMenu
+        open
+        workspaceId="workspace-1"
+        activeSessionId="session-active"
+        hasActiveTab={false}
+        onOpenContent={onOpenContent}
+        onClose={onClose}
+        onCloseTab={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'git diff' } })
+    fireEvent.click(screen.getByRole('button', { name: /Open Git Diff/ }))
+
+    await waitFor(() => expect(onOpenContent).toHaveBeenCalledWith({ type: 'git-diff', cwd: '/Users/sam/d/project' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
   })
 
   it('navigates rows with the keyboard and runs the active command', () => {

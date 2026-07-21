@@ -118,6 +118,7 @@ const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 32
 const RUN_ONCE_STREAM_BUFFER_BYTES = 200 * 1024
 const DEFAULT_RUN_ONCE_RETENTION_MS = 10 * 60 * 1000
+const TERMINAL_DISPOSE_GRACE_MS = 10_000
 const DEFAULT_LOGIN_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 const ENV_CAPTURE_DELIMITER = '_CLOUD_CODE_SHELL_ENV_DELIMITER_'
 const ZSH_COMMAND_OSC_PREFIX = '\x1b]777;kaivo-command;'
@@ -255,6 +256,23 @@ interface ShellHandle {
   subscribers: Set<Subscriber>
   disposed: boolean
   retentionTimer: NodeJS.Timeout | null
+  shutdownTimer: NodeJS.Timeout | null
+}
+
+function disposeTerminalResources(h: ShellHandle): void {
+  if (h.integrationDir) {
+    try {
+      fs.rmSync(h.integrationDir, { recursive: true, force: true })
+    } catch {
+      // ignore
+    }
+    h.integrationDir = null
+  }
+  try {
+    h.term.dispose()
+  } catch {
+    // ignore
+  }
 }
 
 export interface RunOnceStreamOpts {
@@ -343,6 +361,7 @@ class TerminalService {
       subscribers: new Set(),
       disposed: false,
       retentionTimer: null,
+      shutdownTimer: null,
     }
 
     pty.onData((data) => {
@@ -360,6 +379,11 @@ class TerminalService {
 
     pty.onExit(({ exitCode }) => {
       handle.exitCode = exitCode
+      if (handle.disposed && handle.shutdownTimer) {
+        clearTimeout(handle.shutdownTimer)
+        handle.shutdownTimer = null
+        disposeTerminalResources(handle)
+      }
       // Leave around so late attaches can read final scrollback.
     })
 
@@ -466,8 +490,20 @@ class TerminalService {
     }
     h.subscribers.clear()
     if (h.pty) {
+      h.shutdownTimer = setTimeout(() => {
+        h.shutdownTimer = null
+        try {
+          h.pty?.kill('SIGKILL')
+        } catch {
+          // ignore
+        }
+        disposeTerminalResources(h)
+      }, TERMINAL_DISPOSE_GRACE_MS)
+      h.shutdownTimer.unref?.()
       try {
-        h.pty.kill()
+        // Deliver Ctrl-C through the terminal so the foreground process group
+        // can run the same cleanup path as an interactive interrupt.
+        h.pty.write('\x03')
       } catch {
         // ignore
       }
@@ -479,18 +515,7 @@ class TerminalService {
         // ignore
       }
     }
-    if (h.integrationDir) {
-      try {
-        fs.rmSync(h.integrationDir, { recursive: true, force: true })
-      } catch {
-        // ignore
-      }
-    }
-    try {
-      h.term.dispose()
-    } catch {
-      // ignore
-    }
+    if (!h.pty) disposeTerminalResources(h)
     db.delete(shellSessions).where(eq(shellSessions.id, id)).run()
   }
 
@@ -547,6 +572,7 @@ class TerminalService {
       subscribers: new Set(),
       disposed: false,
       retentionTimer: null,
+      shutdownTimer: null,
     }
     this.shells.set(id, handle)
 

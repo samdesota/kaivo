@@ -451,6 +451,20 @@ export function UniversalMenu({
       run: () => onCreateShell?.(activeCwd),
     })
 
+    out.push({
+      id: 'action:open-git-diff',
+      kind: 'action',
+      label: 'Open Git Diff',
+      detail: activeCwd ? undefined : 'No active working directory',
+      haystack: 'open git diff changes repository branch working tree',
+      disabled: !activeCwd,
+      run: async () => {
+        if (!activeCwd) return
+        const repository = await envUtils.git.discoverGit.fetch({ cwd: activeCwd }).catch(() => null)
+        onOpenContent?.({ type: 'git-diff', cwd: repository?.root ?? activeCwd })
+      },
+    })
+
     if (hasActiveTab) {
       out.push({
         id: 'action:close-tab',
@@ -510,7 +524,7 @@ export function UniversalMenu({
       },
     )
     return out
-  }, [activeCwd, enterScope, globalIntent, hasActiveTab, onCloseTab, onCreateShell, onOpenSettings, onToggleAgentPane, onToggleSidebar, sessions.data, workspaceId])
+  }, [activeCwd, enterScope, envUtils.git.discoverGit, globalIntent, hasActiveTab, onCloseTab, onCreateShell, onOpenContent, onOpenSettings, onToggleAgentPane, onToggleSidebar, sessions.data, workspaceId])
 
   const newWorkspaceSections = useMemo(() => {
     const configs = [...((repoConfigs.data as RepoConfigRow[] | undefined) ?? [])]

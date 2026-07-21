@@ -29,6 +29,8 @@ const shellRows: ShellRow[] = []
 const spawnedCwds: string[] = []
 const spawnedEnvs: Array<NodeJS.ProcessEnv | undefined> = []
 const runOnceSpawnedEnvs: Array<NodeJS.ProcessEnv | undefined> = []
+const ptyWrites: string[] = []
+const ptyKills: Array<string | undefined> = []
 let loginShellEnv: NodeJS.ProcessEnv = {}
 let tempRoot = ''
 
@@ -38,6 +40,8 @@ function resetState() {
   spawnedCwds.length = 0
   spawnedEnvs.length = 0
   runOnceSpawnedEnvs.length = 0
+  ptyWrites.length = 0
+  ptyKills.length = 0
   loginShellEnv = { HOME: '/Users/tester', PATH: '/login/bin:/usr/bin', SHELL: '/bin/zsh', USER: 'tester' }
 }
 
@@ -131,9 +135,15 @@ vi.mock('node-pty', () => ({
         em.on('exit', cb)
         return { dispose: () => em.off('exit', cb) }
       },
-      write: (data: string) => em.emit('data', data),
+      write: (data: string) => {
+        ptyWrites.push(data)
+        em.emit('data', data)
+      },
       resize: () => undefined,
-      kill: () => em.emit('exit', { exitCode: 0 }),
+      kill: (signal?: string) => {
+        ptyKills.push(signal)
+        em.emit('exit', { exitCode: 0 })
+      },
     }
   },
 }))
@@ -289,5 +299,27 @@ describe('terminal service workspace shells', () => {
     expect(runOnceSpawnedEnvs[0]).not.toHaveProperty('NODE_ENV')
     expect(runOnceSpawnedEnvs[0]).not.toHaveProperty('CC_IDENTITY_URL')
     expect(runOnceSpawnedEnvs[0]).not.toHaveProperty('CC_WORKING_DIR')
+  })
+
+  it('interrupts a persistent foreground job before force-closing its PTY', async () => {
+    vi.useFakeTimers()
+    try {
+      const { terminalService } = await import('./service.js')
+      const shell = await terminalService.create({ cwd: tempDir('project') })
+
+      terminalService.dispose(shell.id)
+
+      expect(terminalService.get(shell.id)).toBeNull()
+      expect(ptyWrites).toEqual(['\x03'])
+      expect(ptyKills).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(ptyKills).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ptyKills).toEqual(['SIGKILL'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

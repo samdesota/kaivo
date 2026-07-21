@@ -16,6 +16,7 @@ export type WorkspaceTabRecord = {
   envId: string | null
   shellId: string | null
   path: string | null
+  repoRoot: string | null
   sessionId: string | null
   port: number | null
   url: string | null
@@ -72,6 +73,9 @@ export function recordToWorkspaceTab(record: WorkspaceTabRecord): WorkspaceTab |
   if (record.type === 'file' && record.envId && record.path) {
     return { id: record.id, type: 'file', envId: record.envId, path: record.path, sessionId: record.sessionId ?? undefined, title: record.title }
   }
+  if (record.type === 'git-diff' && record.envId && record.repoRoot) {
+    return { id: record.id, type: 'git-diff', envId: record.envId, repoRoot: record.repoRoot, title: record.title }
+  }
   if (record.type === 'browser' && record.url) {
     return { id: record.id, type: 'browser', url: record.url, browserTabId: record.browserTabId ?? undefined, title: record.title }
   }
@@ -89,6 +93,7 @@ function workspaceTabToRecord(workspaceId: string, tab: WorkspaceTab, position: 
     envId: 'envId' in tab ? tab.envId : null,
     shellId: tab.type === 'shell' ? tab.shellId : null,
     path: tab.type === 'file' ? tab.path : null,
+    repoRoot: tab.type === 'git-diff' ? tab.repoRoot : null,
     sessionId: tab.type === 'file' ? (tab.sessionId ?? null) : null,
     port: null,
     url: tab.type === 'browser' ? tab.url : null,

@@ -1,7 +1,7 @@
-import { FileText, Globe, Terminal } from 'lucide-react'
+import { FileText, GitCompareArrows, Globe, Terminal } from 'lucide-react'
 import { useState } from 'react'
 
-export type PaneIconKind = 'shell' | 'file' | 'browser'
+export type PaneIconKind = 'shell' | 'file' | 'browser' | 'git-diff'
 
 export type TabIcon =
   | { kind: 'pane'; pane: PaneIconKind }
@@ -28,6 +28,6 @@ export function TabIconView({ icon }: { icon: TabIcon }) {
     )
   }
 
-  const Icon = icon.pane === 'shell' ? Terminal : icon.pane === 'file' ? FileText : Globe
+  const Icon = icon.pane === 'shell' ? Terminal : icon.pane === 'file' ? FileText : icon.pane === 'git-diff' ? GitCompareArrows : Globe
   return <Icon aria-hidden="true" size={12} strokeWidth={1.8} className="shrink-0" />
 }

@@ -13,7 +13,7 @@ describe('runLocalAppMigrations', () => {
 
     expect(result).toEqual({
       sqlitePath,
-      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'],
+      applied: ['0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab', '0014_workspace_tab_repo_root'],
     })
     const sqlite = new Database(sqlitePath, { readonly: true })
     try {
@@ -24,6 +24,7 @@ describe('runLocalAppMigrations', () => {
       for (const table of localAppTables) expect(tableNames.has(table)).toBe(true)
       expect(sqlite.prepare('PRAGMA table_info(workspace_tabs)').all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'favicon_url' }),
+        expect.objectContaining({ name: 'repo_root' }),
       ]))
       expect(sqlite.prepare('PRAGMA table_info(favicon_cache)').all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'page_origin', pk: 1 }),
@@ -64,6 +65,10 @@ describe('runLocalAppMigrations', () => {
           'https://github.com', 'https://github.com/plain.ico', 'data:image/png;base64,cGxhaW4=',
           'image/png', 5, 1, 1
         );
+        INSERT INTO workspace_tabs (
+          workspace_id, id, type, title, title_source, position, env_id, shell_id, path,
+          session_id, port, url, browser_tab_id, updated_at
+        ) VALUES ('workspace-1', 'file-1', 'file', 'File', NULL, 0, 'env-1', NULL, '/tmp/a.ts', NULL, NULL, NULL, NULL, 1);
       `)
       for (const name of [
         '0001_local_app_schema', '0002_normalized_workspace_state', '0003_workspace_agent_tabs',
@@ -75,7 +80,7 @@ describe('runLocalAppMigrations', () => {
       sqlite.close()
     }
 
-    expect(runLocalAppMigrations(sqlitePath).applied).toEqual(['0013_favicon_assets_per_tab'])
+    expect(runLocalAppMigrations(sqlitePath).applied).toEqual(['0013_favicon_assets_per_tab', '0014_workspace_tab_repo_root'])
     const migrated = new Database(sqlitePath)
     try {
       expect(migrated.prepare('SELECT page_origin, icon_url FROM favicon_cache').all()).toEqual([
@@ -88,7 +93,11 @@ describe('runLocalAppMigrations', () => {
       expect(migrated.prepare('SELECT COUNT(*) AS count FROM favicon_cache WHERE page_origin = ?').get('https://github.com')).toEqual({ count: 2 })
       expect(migrated.prepare('PRAGMA table_info(workspace_tabs)').all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'favicon_url' }),
+        expect.objectContaining({ name: 'repo_root' }),
       ]))
+      expect(migrated.prepare('SELECT id, type, path, repo_root FROM workspace_tabs').get()).toEqual({
+        id: 'file-1', type: 'file', path: '/tmp/a.ts', repo_root: null,
+      })
     } finally {
       migrated.close()
     }
@@ -135,7 +144,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0002_normalized_workspace_state', '0003_workspace_agent_tabs', '0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab', '0014_workspace_tab_repo_root'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT * FROM workspace_view_states').get()).toMatchObject({
@@ -195,7 +204,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0004_workspace_folders', '0005_agent_notifications', '0006_agent_notification_titles', '0007_agent_notification_kinds', '0008_workspace_resources', '0009_workspace_tab_title_source', '0010_favicon_cache', '0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab', '0014_workspace_tab_repo_root'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_folders'").get()).toBeTruthy()
@@ -261,7 +270,7 @@ describe('runLocalAppMigrations', () => {
 
     const result = runLocalAppMigrations(sqlitePath)
 
-    expect(result).toEqual({ sqlitePath, applied: ['0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab'] })
+    expect(result).toEqual({ sqlitePath, applied: ['0011_bookmarks', '0012_system_workspaces', '0013_favicon_assets_per_tab', '0014_workspace_tab_repo_root'] })
     const migrated = new Database(sqlitePath, { readonly: true })
     try {
       expect(migrated.prepare('SELECT id, title, url, normalized_url, origin, favicon_data_url, favicon_url, created_at, updated_at FROM bookmarks').all()).toEqual([

@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { workspaceSearchSyncAction } from '../../src/data/modules/workspace-view-state'
 import { applyWorkspaceViewStateRowsForTests, setWorkspaceSplitRatio } from '../../src/data/modules/workspace-view-state/commands'
 import { workspaceViewStateCollection } from '../../src/data/modules/workspace-view-state/collection'
-import { applyWorkspaceTabRowsForTests, closeWorkspaceTab, openWorkspaceTab, reorderWorkspaceTabs } from '../../src/data/modules/workspace-tabs/commands'
+import { applyWorkspaceTabRowsForTests, closeWorkspaceTab, openWorkspaceTab, openWorkspaceTabLocal, reorderWorkspaceTabs } from '../../src/data/modules/workspace-tabs/commands'
 import { getWorkspaceTabs } from '../../src/data/modules/workspace-tabs/selectors'
-import { workspaceTabsCollection } from '../../src/data/modules/workspace-tabs/collection'
+import { recordToWorkspaceTab, workspaceTabsCollection, workspaceTabToRecord } from '../../src/data/modules/workspace-tabs/collection'
 import type { WorkspaceTabRecord } from '../../src/data/modules/workspace-tabs'
 import { buildWorkspaceSidebarTree, type WorkspaceFolderRecord } from '../../src/data/modules/workspace-folders'
 import { applyWorkspaceFolderRowsForTests, moveWorkspaceSidebarNode, renameWorkspaceFolder } from '../../src/data/modules/workspace-folders/commands'
@@ -126,9 +126,24 @@ describe('workspace and folder commands', () => {
 })
 
 describe('workspace tab commands', () => {
+  it('round trips and restores a git diff tab record', () => {
+    const tab = { id: 'diff-1', type: 'git-diff' as const, envId: 'env-1', repoRoot: '/repo', title: 'Git Diff' }
+    const record = workspaceTabToRecord('workspace-1', tab, 2)
+
+    expect(record).toMatchObject({ type: 'git-diff', envId: 'env-1', repoRoot: '/repo', position: 2 })
+    expect(recordToWorkspaceTab(record)).toEqual(tab)
+    expect(recordToWorkspaceTab({ ...record, repoRoot: null })).toBeNull()
+  })
+
   it('calculates positions and avoids duplicate tabs by workspaceTabKey', async () => {
     applyWorkspaceTabRowsForTests([tabRecord({ id: 'shell-1', shellId: 'shell-1', position: 0 })])
-    vi.mocked(appTrpcMutation).mockResolvedValue({ ok: true })
+    vi.mocked(appTrpcMutation).mockImplementation(async (procedure, input) => {
+      if (procedure === 'workspace.upsertTab') {
+        const value = input as { workspaceId: string; tab: Parameters<typeof workspaceTabToRecord>[1]; position: number }
+        return workspaceTabToRecord(value.workspaceId, value.tab, value.position)
+      }
+      return { ok: true }
+    })
 
     await openWorkspaceTab({ workspaceId: 'workspace-1', tab: { id: 'shell-duplicate', type: 'shell', envId: 'env-1', shellId: 'shell-1', title: 'Duplicate' } })
     expect(workspaceTabsCollection.getRows()).toHaveLength(1)
@@ -138,6 +153,59 @@ describe('workspace tab commands', () => {
 
     const rows = workspaceTabsCollection.getRows().sort((a, b) => a.position - b.position)
     expect(rows.map((row) => [row.id, row.position])).toEqual([['shell-1', 0], ['browser-1', 1]])
+  })
+
+  it('persists a new tab before making it active', async () => {
+    applyWorkspaceTabRowsForTests([tabRecord({ id: 'shell-1', shellId: 'shell-1', position: 0 })])
+    applyWorkspaceViewStateRowsForTests([viewState({ activeWorkspaceTabId: 'shell-1' })])
+    const calls: string[] = []
+    let finishTabWrite: ((record: WorkspaceTabRecord) => void) | undefined
+    vi.mocked(appTrpcMutation).mockImplementation(async (procedure, _input) => {
+      calls.push(procedure)
+      if (procedure === 'workspace.upsertTab') {
+        return await new Promise<WorkspaceTabRecord>((resolve) => {
+          finishTabWrite = resolve
+        })
+      }
+      return { ...viewState({}), activeWorkspaceTabId: 'diff-1' }
+    })
+
+    const opened = openWorkspaceTab({
+      workspaceId: 'workspace-1',
+      tab: { id: 'diff-1', type: 'git-diff', envId: 'env-1', repoRoot: '/repo', title: 'Git Diff' },
+    })
+
+    expect(getWorkspaceTabs('workspace-1').map((tab) => tab.id)).toEqual(['shell-1', 'diff-1'])
+    expect(workspaceViewStateCollection.getRows()[0]?.activeWorkspaceTabId).toBe('shell-1')
+    expect(calls).toEqual(['workspace.upsertTab'])
+
+    finishTabWrite?.(tabRecord({ id: 'diff-1', type: 'git-diff', envId: 'env-1', repoRoot: '/repo', position: 1 }))
+    await opened
+
+    expect(calls).toEqual(['workspace.upsertTab', 'workspace.saveViewState'])
+    expect(workspaceViewStateCollection.getRows()[0]?.activeWorkspaceTabId).toBe('diff-1')
+  })
+
+  it('deduplicates git diff tabs by environment and canonical repository root', async () => {
+    applyWorkspaceTabRowsForTests([
+      tabRecord({ id: 'diff-1', type: 'git-diff', envId: 'env-1', repoRoot: '/repo', position: 0 }),
+    ])
+
+    const existing = await openWorkspaceTabLocal({
+      workspaceId: 'workspace-1',
+      tab: { id: 'diff-duplicate', type: 'git-diff', envId: 'env-1', repoRoot: '/repo', title: 'Git Diff' },
+    })
+    await openWorkspaceTabLocal({
+      workspaceId: 'workspace-1',
+      tab: { id: 'diff-other-env', type: 'git-diff', envId: 'env-2', repoRoot: '/repo', title: 'Git Diff' },
+    })
+    await openWorkspaceTabLocal({
+      workspaceId: 'workspace-1',
+      tab: { id: 'diff-other-root', type: 'git-diff', envId: 'env-1', repoRoot: '/other', title: 'Git Diff' },
+    })
+
+    expect(existing.id).toBe('diff-1')
+    expect(getWorkspaceTabs('workspace-1').map((tab) => tab.id)).toEqual(['diff-1', 'diff-other-env', 'diff-other-root'])
   })
 
   it('chooses active fallback on close and persists reorder positions', async () => {
@@ -261,6 +329,7 @@ function tabRecord(input: Partial<WorkspaceTabRecord> & Pick<WorkspaceTabRecord,
     envId: type === 'browser' ? null : 'env-1',
     shellId: type === 'shell' ? input.id : null,
     path: type === 'file' ? '/tmp/file.txt' : null,
+    repoRoot: type === 'git-diff' ? '/repo' : null,
     sessionId: null,
     port: null,
     url: type === 'browser' ? 'https://example.com' : null,

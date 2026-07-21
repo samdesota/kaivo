@@ -12,6 +12,7 @@ export type WorkspaceTabRecord = {
   envId: string | null
   shellId: string | null
   path: string | null
+  repoRoot: string | null
   sessionId: string | null
   port: number | null
   url: string | null
