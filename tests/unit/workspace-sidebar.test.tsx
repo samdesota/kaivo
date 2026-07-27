@@ -56,6 +56,20 @@ const agentRuntimeData = vi.hoisted(() => [] as Array<{
   lastActivityAt: Date
   updatedAt: Date
 }>)
+const orchestrationByWorkspace = vi.hoisted(() => new Map<string, {
+  cursor: { generation: string; seq: number }
+  dispatches: Array<{ subtasks: Array<{
+    id: string
+    dispatchSessionId: string
+    sessionId: string | null
+    title: string
+    state: 'provisioning' | 'active' | 'returned' | 'completed' | 'failed'
+    running: boolean
+    pendingAttentionCount: number
+    latestReturn: { summary: string } | null
+    createdAt: string
+  }> }>
+}>())
 
 vi.mock('../../src/routes/workspace/context', () => ({
   useWorkspaceContext: () => ctx,
@@ -108,6 +122,10 @@ vi.mock('../../src/env-trpc', () => ({
       sessionList: { useQuery: () => ({ data: agentSessionListData }) },
       workspaceChatSummary: { useQuery: () => ({ data: [] }) },
       sessionStart: { useMutation: () => ({ isPending: false, mutateAsync: vi.fn() }) },
+    },
+    orchestration: {
+      snapshot: { useQuery: ({ workspaceId }: { workspaceId: string }) => ({ data: orchestrationByWorkspace.get(workspaceId), refetch: vi.fn() }) },
+      changes: { useSubscription: () => undefined },
     },
     fs: {
       browseHome: { useQuery: () => ({ data: { path: '/tmp', parent: null, dirs: [] }, error: null }) },
@@ -193,6 +211,7 @@ beforeEach(() => {
   notificationListData.length = 0
   agentSessionListData.length = 0
   agentRuntimeData.length = 0
+  orchestrationByWorkspace.clear()
   window.localStorage.clear()
   window.scrollTo = vi.fn()
 })
@@ -261,6 +280,30 @@ describe('WorkspaceSidebar', () => {
     renderSidebar()
 
     expect(await screen.findByLabelText('Chat running')).toBeTruthy()
+  })
+
+  it('renders orchestration subtasks beneath their workspace', async () => {
+    ctx.localEnvTarget = { available: true, token: 'token', env: { id: 'env-1', url: 'http://env', label: 'Local' } }
+    orchestrationByWorkspace.set('workspace-tools', {
+      cursor: { generation: 'test', seq: 1 },
+      dispatches: [{ subtasks: [
+        {
+          id: 'task-1', dispatchSessionId: 'dispatch-1', sessionId: 'session-task-1', title: 'Implement parser', state: 'returned',
+          running: false, pendingAttentionCount: 0, latestReturn: { summary: 'Parser is ready for review' }, createdAt: '2026-07-21T00:00:00Z',
+        },
+        {
+          id: 'task-2', dispatchSessionId: 'dispatch-1', sessionId: null, title: 'Prepare docs', state: 'provisioning',
+          running: false, pendingAttentionCount: 0, latestReturn: null, createdAt: '2026-07-21T00:00:01Z',
+        },
+      ] }],
+    })
+
+    renderSidebar()
+
+    const task = await screen.findByRole('button', { name: 'Implement parser, Parser is ready for review' })
+    expect(task).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Prepare docs, preparing' }).hasAttribute('disabled')).toBe(true)
+    expect(task.compareDocumentPosition(screen.getByText('kaivo-app')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 
   it('renders finished-chat dot for inactive workspace with unread runtime activity', async () => {

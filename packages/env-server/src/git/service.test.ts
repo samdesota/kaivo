@@ -67,6 +67,28 @@ describe('GitService', () => {
     await expect(new GitService().discoverGit(links)).resolves.toBeNull()
   })
 
+  it('inspects safe origins and refuses embedded HTTP credentials', async () => {
+    const root = await initRepo()
+    const service = new GitService()
+    await git(root, 'remote', 'add', 'origin', 'git@github.com:acme/repo.git')
+    await expect(service.inspectCheckout(root)).resolves.toMatchObject({
+      originUrl: 'git@github.com:acme/repo.git',
+      originError: null,
+      repository: { root: await fs.realpath(root) },
+    })
+    await git(root, 'remote', 'set-url', 'origin', 'https://token:secret@github.com/acme/repo.git')
+    await expect(service.inspectCheckout(root)).resolves.toMatchObject({
+      originUrl: null,
+      originError: 'unsafe_origin',
+      repository: { root: await fs.realpath(root) },
+    })
+    await expect(service.inspectCheckout(await tempDir())).resolves.toEqual({
+      repository: null,
+      originUrl: null,
+      originError: 'not_repository',
+    })
+  })
+
   it('enumerates only local origin refs and prefers symbolic origin/HEAD', async () => {
     const root = await initRepo()
     await write(root, 'file.txt', 'base\n')

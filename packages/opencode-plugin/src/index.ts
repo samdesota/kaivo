@@ -111,9 +111,88 @@ export function buildHooks(opts: BuildHookOpts = {}): Hooks {
     fetchImpl: opts.fetchImpl,
     backoffMs: opts.backoffMs,
   })
+  type BoundSession = {
+    client: AgentShellClient
+    principal: { sessionKind: 'chat' | 'dispatch' | 'subtask' }
+  }
+  const sessionClients = new Map<string, Promise<BoundSession>>()
+
+  function sessionClient(opencodeSessionId: string): Promise<BoundSession> {
+    const existing = sessionClients.get(opencodeSessionId)
+    if (existing) return existing
+    const next = client.mutate<{ token: string; principal: BoundSession['principal'] }>('orchestration.bindAgentSession', { opencodeSessionId })
+      .then(({ token, principal }) => ({ client: client.withToken(token), principal }))
+      .catch((error) => {
+        sessionClients.delete(opencodeSessionId)
+        throw error
+      })
+    sessionClients.set(opencodeSessionId, next)
+    return next
+  }
 
   return {
+    'experimental.chat.system.transform': async (input, output) => {
+      if (!input.sessionID) return
+      try {
+        const bound = await sessionClient(input.sessionID)
+        if (bound.principal.sessionKind === 'subtask') return
+        const result = await bound.client.queryOnce<{ context: string }>('orchestration.dispatcherContext', {})
+        if (!result.context) return
+        if (output.system.length === 0) output.system.push(result.context)
+        else output.system[0] = `${output.system[0]}\n\n${result.context}`
+      } catch (error) {
+        console.error('[kaivo-opencode-plugin] dispatcher context unavailable', error instanceof Error ? error.message : String(error))
+      }
+    },
     tool: {
+      kaivo_dispatch_subtask: tool({
+        description: 'Launch one independently interactive Kaivo subtask in a dedicated clone of the current Git repository. Kaivo will ask the user to configure the repository if needed. Choose an explicit source ref and branch. Reuse operationId when retrying the same launch.',
+        args: {
+          operationId: z.string().min(1).max(200),
+          title: z.string().min(1).max(200),
+          instruction: z.string().min(1).max(100_000),
+          sourceRef: z.string().min(1).max(500),
+          branchName: z.string().min(1).max(250),
+          deliveryMode: z.enum(['pull_request', 'dispatcher_integration']),
+        },
+        async execute(args, context) {
+          const ctx = context as unknown as ToolCtxLike
+          try {
+            const bound = await sessionClient(ctx.sessionID)
+            const result = await bound.client.mutate<Record<string, unknown>>('orchestration.dispatchFromAgent', args)
+            ctx.metadata({ title: `Dispatch: ${args.title}`, metadata: { ...result, status: result.state } })
+            return { output: JSON.stringify(result), metadata: { ...result, status: result.state } }
+          } catch (error) {
+            return {
+              output: '',
+              metadata: { status: 'error', stderr: error instanceof Error ? error.message : String(error) },
+            }
+          }
+        },
+      }),
+      kaivo_report_subtask_delivery: tool({
+        description: 'Report the current subtask delivery result to its dispatcher. Include a concise summary and the PR URL or head commit when available.',
+        args: {
+          pullRequestUrl: z.string().url().max(2_000).optional(),
+          headCommit: z.string().min(1).max(200).optional(),
+          summary: z.string().min(1).max(4_000).optional(),
+        },
+        async execute(args, context) {
+          const ctx = context as unknown as ToolCtxLike
+          if (args.pullRequestUrl === undefined && args.headCommit === undefined && args.summary === undefined) {
+            return { output: '', metadata: { status: 'error', stderr: 'at least one delivery field is required' } }
+          }
+          try {
+            const bound = await sessionClient(ctx.sessionID)
+            if (bound.principal.sessionKind !== 'subtask') throw new Error('subtask agent session required')
+            const result = await bound.client.mutate<Record<string, unknown>>('orchestration.reportDelivery', args)
+            ctx.metadata({ title: 'Report subtask delivery', metadata: { status: 'success', ...args } })
+            return { output: JSON.stringify(result), metadata: { status: 'success', ...args } }
+          } catch (error) {
+            return { output: '', metadata: { status: 'error', stderr: error instanceof Error ? error.message : String(error) } }
+          }
+        },
+      }),
       kaivo_bash: tool({
         description:
           'Run a finite shell command inside the Kaivo sandbox and wait for it to exit. Good for build steps, tests, git, curl probes, and any command that terminates on its own. For long-running or interactive processes (dev servers, watch modes, REPLs, tail -f) use `kaivo_pty` instead so the human can see and interact with them.',

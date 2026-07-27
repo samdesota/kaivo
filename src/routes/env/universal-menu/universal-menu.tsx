@@ -97,6 +97,7 @@ interface AgentSessionRow {
   workingDir: string | null
   title?: string | null
   status?: string
+  kind?: 'chat' | 'dispatch' | 'subtask'
   lastActivityAt?: Date | string
 }
 
@@ -349,9 +350,10 @@ export function UniversalMenu({
     { enabled: open && faviconOrigins.length > 0, staleTime: 60_000 },
   )
   const fileRoots = useMemo(() => Array.from(new Set(((sessions.data as AgentSessionRow[] | undefined) ?? []).map((session) => session.workingDir).filter((dir): dir is string => Boolean(dir)))), [sessions.data])
-  const activeCwd = activeSessionId
-    ? ((sessions.data as AgentSessionRow[] | undefined) ?? []).find((session) => session.id === activeSessionId)?.workingDir ?? undefined
+  const activeSession = activeSessionId
+    ? ((sessions.data as AgentSessionRow[] | undefined) ?? []).find((session) => session.id === activeSessionId)
     : undefined
+  const activeCwd = activeSession?.workingDir ?? undefined
   const gitFiles = envTrpc.fs.searchGitTrackedFiles.useQuery(
     { roots: fileRoots, query, limit: 160 },
     { enabled: open && scope?.definition.id === 'find-files' && fileRoots.length > 0, staleTime: 10_000 },

@@ -78,6 +78,7 @@ describe('repo service', () => {
         source TEXT NOT NULL CHECK (source IN ('github','url')),
         github_repo_id TEXT,
         github_full_name TEXT,
+        workspace_id TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `)

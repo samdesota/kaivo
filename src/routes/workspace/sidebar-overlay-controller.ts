@@ -7,6 +7,7 @@ export type WorkspaceSidebarOverlayAction =
   | { type: 'hide-sidebar' }
   | { type: 'new-workspace' }
   | { type: 'navigate-workspace'; workspaceId: string }
+  | { type: 'select-session'; workspaceId: string; sessionId: string }
   | { type: 'navigate-settings' }
   | { type: 'select-global-tab'; tabId: string }
   | { type: 'leave-global-tabs' }
@@ -175,6 +176,7 @@ export async function openWorkspaceSidebarOverlay(input: {
     input.onAction(event.data)
     if (
       event.data.type === 'navigate-workspace'
+      || event.data.type === 'select-session'
       || event.data.type === 'navigate-settings'
       || event.data.type === 'select-global-tab'
       || event.data.type === 'leave-global-tabs'

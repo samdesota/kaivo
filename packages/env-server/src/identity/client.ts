@@ -61,6 +61,7 @@ export interface OpenPaneInput {
 }
 
 export interface AgentNotificationInput {
+  idempotencyKey?: string
   workspaceId: string
   sessionId: string
   kind?: 'finished' | 'question' | 'permission' | 'error'

@@ -63,6 +63,24 @@ describe('runDevSeed', () => {
     }
   })
 
+  it('does not seed provider credentials or a model by default', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-seed-dev-empty-test-'))
+    const sqlitePath = path.join(dataDir, 'app.db')
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.stubEnv('DATA_DIR', dataDir)
+    vi.stubEnv('APP_SQLITE_PATH', sqlitePath)
+
+    const { runDevSeed } = await import('../../scripts/seed-dev')
+    await runDevSeed({ cwd: '/tmp/worktree-empty', log: () => {} })
+
+    const sqlite = new Database(sqlitePath, { readonly: true })
+    try {
+      expect(sqlite.prepare("SELECT name FROM secrets WHERE name LIKE 'provider.%' OR name = 'agent.default_model'").all()).toEqual([])
+    } finally {
+      sqlite.close()
+    }
+  })
+
   it('refuses production seeding without the force flag', async () => {
     const { runDevSeed } = await import('../../scripts/seed-dev')
 

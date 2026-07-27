@@ -4,6 +4,7 @@ import { workspaceTabFromPaneContent, workspaceTabKey, type PaneContent } from '
 import { db, type Db } from '../db/client.js'
 import {
   agentNotifications,
+  agentNotificationReceipts,
   workspaceAgentTabs,
   workspaceFolders,
   workspaceResources,
@@ -91,6 +92,8 @@ export type WorkspaceAgentTabInput = {
 }
 
 export type AgentNotificationInput = {
+  idempotencyKey?: string
+  idempotencyNamespace?: string
   workspaceId: string
   sessionId: string
   kind?: AgentNotificationRow['kind']
@@ -703,6 +706,26 @@ export function createWorkspaceService(database: Db = db) {
 
   async function createAgentNotification(input: AgentNotificationInput): Promise<AgentNotificationRow> {
     await get(input.workspaceId)
+    const receiptKey = input.idempotencyKey && input.idempotencyNamespace
+      ? `${input.idempotencyNamespace}:${input.idempotencyKey}`
+      : null
+    if (receiptKey) {
+      const existing = await database.select().from(agentNotificationReceipts)
+        .where(eq(agentNotificationReceipts.key, receiptKey)).limit(1)
+      if (existing[0]) {
+        const notification = await database.select().from(agentNotifications)
+          .where(eq(agentNotifications.id, existing[0].notificationId)).limit(1)
+        return notification[0] ?? {
+          id: existing[0].notificationId,
+          workspaceId: input.workspaceId,
+          sessionId: input.sessionId,
+          kind: input.kind ?? 'finished',
+          title: input.title.trim().slice(0, 120) || 'Chat finished',
+          summary: input.summary.trim().slice(0, 120) || 'Chat finished',
+          createdAt: existing[0].createdAt,
+        }
+      }
+    }
     const row: AgentNotificationRow = {
       id: ulid().toLowerCase(),
       workspaceId: input.workspaceId,
@@ -713,6 +736,9 @@ export function createWorkspaceService(database: Db = db) {
       createdAt: new Date(),
     }
     await database.insert(agentNotifications).values(row)
+    if (receiptKey) {
+      await database.insert(agentNotificationReceipts).values({ key: receiptKey, notificationId: row.id, createdAt: row.createdAt })
+    }
     return row
   }
 

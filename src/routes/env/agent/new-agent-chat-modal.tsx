@@ -230,7 +230,8 @@ function NewAgentChatOverlayContent({
           },
         })
       }
-      const session = (await start.mutateAsync(newAgentChatStartInput(targetWorkspaceId, workingDir))) as { id: string }
+       const startInput = newAgentChatStartInput(targetWorkspaceId, workingDir)
+       const session = await start.mutateAsync(startInput) as { id: string }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trpcQueryKey('agent.sessionList', { workspaceId: targetWorkspaceId }) }),
         queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.list') }),
@@ -508,14 +509,14 @@ function NewAgentChatOverlayContent({
           <>
             <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 px-3 py-2">
               <button onClick={() => setStep('choose')} className="rounded px-2 py-1 text-sm leading-none text-ui-default hover:bg-highlight hover:text-header-3" aria-label="Back">‹</button>
-              <div className="text-sm font-medium text-header-2">Create chat</div>
+                <div className="text-sm font-medium text-header-2">Create chat</div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="px-4 pb-2 pt-3">
+               <div className="px-4 pb-2 pt-3">
                 <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-label">Destination</div>
                 <div className="rounded border border-neutral-800 bg-input px-3 py-2">
                   <SelectedDestination selection={selection} config={selectedConfig} />
-                </div>
+               </div>
               </div>
               {selection?.type === 'repoConfig' && (
                 <div>
@@ -555,7 +556,7 @@ function NewAgentChatOverlayContent({
                 disabled={busy || !!validation}
                 className="mx-4 mb-4 mt-5"
               >
-                {busy ? 'Creating…' : selection?.type === 'repoConfig' ? 'Clone and create chat' : 'Create chat'}
+                  {busy ? 'Creating…' : selection?.type === 'repoConfig' ? 'Clone and create chat' : 'Create chat'}
               </Button>
             </div>
           </>

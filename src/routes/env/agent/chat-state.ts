@@ -222,6 +222,7 @@ export class ChatStateStore {
     const entry = this.sessions.get(sessionId)
     if (!entry) return
     entry.retainCount = Math.max(0, entry.retainCount - 1)
+    if (entry.retainCount === 0) this.stop(sessionId)
     this.emit(sessionId)
   }
 
@@ -297,7 +298,7 @@ export class ChatStateStore {
 
   private handleEvent(sessionId: string, evt: ChatTranscriptEvent): void {
     const entry = this.sessions.get(sessionId)
-    if (!entry) return
+    if (!entry || !this.isRetained(sessionId, entry)) return
     entry.reconnecting = false
     entry.reconnectAttempt = 0
     entry.error = null
@@ -418,7 +419,7 @@ export class ChatStateStore {
   }
 
   private isRetained(sessionId: string, entry: SessionEntry): boolean {
-    return this.sessions.get(sessionId) === entry
+    return this.sessions.get(sessionId) === entry && entry.retainCount > 0
   }
 
   private emit(sessionId: string): void {

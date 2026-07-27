@@ -108,6 +108,7 @@ const tabRows: WorkspaceTabRow[] = []
 const agentTabRows: WorkspaceAgentTabRow[] = []
 const resourceRows: WorkspaceResourceRow[] = []
 const notificationRows: AgentNotificationRow[] = []
+const notificationReceiptRows: Array<{ key: string; notificationId: string; createdAt: Date }> = []
 
 function resetState() {
   workspaceRows.length = 0
@@ -118,6 +119,7 @@ function resetState() {
   agentTabRows.length = 0
   resourceRows.length = 0
   notificationRows.length = 0
+  notificationReceiptRows.length = 0
 }
 
 vi.mock('drizzle-orm', () => ({
@@ -215,6 +217,12 @@ vi.mock('../db/schema.js', () => ({
     summary: { _col: 'summary' },
     createdAt: { _col: 'createdAt' },
   },
+  agentNotificationReceipts: {
+    _table: 'agent_notification_receipts',
+    key: { _col: 'key' },
+    notificationId: { _col: 'notificationId' },
+    createdAt: { _col: 'createdAt' },
+  },
 }))
 
 vi.mock('../envauth/service.js', () => ({
@@ -231,6 +239,7 @@ function rowsFor(table: { _table: string }) {
   if (table._table === 'workspace_agent_tabs') return agentTabRows
   if (table._table === 'workspace_resources') return resourceRows
   if (table._table === 'agent_notifications') return notificationRows
+  if (table._table === 'agent_notification_receipts') return notificationReceiptRows
   return tabRows
 }
 
@@ -275,6 +284,8 @@ vi.mock('../db/client.js', () => ({
           }
         } else if (table._table === 'agent_notifications') {
           notificationRows.push(...(values as AgentNotificationRow[]))
+        } else if (table._table === 'agent_notification_receipts') {
+          notificationReceiptRows.push(...(values as typeof notificationReceiptRows))
         }
         return {
           onConflictDoUpdate: async ({ set }: { set: Partial<UiStateRow | WorkspaceViewStateRow | WorkspaceTabRow | WorkspaceAgentTabRow> }) => {
@@ -520,6 +531,28 @@ describe('workspace service', () => {
 
     expect(notification).toMatchObject({ workspaceId: workspace.id, sessionId: 'session-1' })
     expect(notificationRows).toHaveLength(1)
+  })
+
+  it('keeps idempotent mirrored notifications dismissed without affecting durable orchestration', async () => {
+    const { workspaceService } = await import('./service.js')
+    const workspace = await workspaceService.create({ name: 'Project' })
+    const input = {
+      workspaceId: workspace.id,
+      sessionId: 'subtask-1',
+      title: 'Task returned',
+      summary: 'Ready for review',
+      idempotencyKey: 'orchestration-return:return-1',
+      idempotencyNamespace: 'env-token-hash',
+    }
+    const first = await workspaceService.createAgentNotification(input)
+    await workspaceService.createAgentNotification(input)
+    expect(notificationRows).toHaveLength(1)
+    expect(notificationReceiptRows).toHaveLength(1)
+
+    await workspaceService.dismissAgentNotification(first.id)
+    await workspaceService.createAgentNotification(input)
+    expect(notificationRows).toEqual([])
+    expect(notificationReceiptRows).toHaveLength(1)
   })
 
   it('does not rewrite view state when the patch is unchanged', async () => {

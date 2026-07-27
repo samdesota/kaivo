@@ -43,6 +43,8 @@ export class AppUnreachableError extends Error {
   }
 }
 
+class NonRetryableRequestError extends Error {}
+
 export interface RunOnceEvent {
   type: 'started' | 'stdout' | 'stderr' | 'exit'
   shellId?: string
@@ -68,6 +70,16 @@ export class AgentShellClient {
       opts.log ?? ((level, msg, data) => console[level === 'info' ? 'log' : level](msg, data ?? {}))
   }
 
+  withToken(token: string): AgentShellClient {
+    return new AgentShellClient({
+      appUrl: this.appUrl,
+      token,
+      fetchImpl: this.fetchImpl,
+      backoffMs: this.backoff,
+      log: this.log,
+    })
+  }
+
   private url(procedure: string): string {
     return `${this.appUrl}/trpc/${procedure}`
   }
@@ -88,6 +100,7 @@ export class AgentShellClient {
         return await fn()
       } catch (err) {
         lastErr = err
+        if (err instanceof NonRetryableRequestError) throw err
         if (i === this.backoff.length) break
         const delay = this.backoff[i]!
         this.log('warn', `${label} failed, retrying in ${delay}ms`, { err: (err as Error).message })
@@ -108,11 +121,15 @@ export class AgentShellClient {
         body: JSON.stringify(sjEncode(input)),
       })
       if (res.status === 401 || res.status === 403) {
-        throw new Error(`auth rejected: ${res.status}`)
+        throw new NonRetryableRequestError(`auth rejected: ${res.status}`)
       }
       if (!res.ok) {
         const body = await res.text().catch(() => '')
-        throw new Error(`http ${res.status}: ${body.slice(0, 200)}`)
+        const message = `http ${res.status}: ${body.slice(0, 200)}`
+        if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+          throw new NonRetryableRequestError(message)
+        }
+        throw new Error(message)
       }
       const json = (await res.json()) as { result?: { data?: unknown }; error?: { message?: string } }
       if (json.error) throw new Error(json.error.message ?? 'trpc error')
@@ -129,7 +146,7 @@ export class AgentShellClient {
         headers: this.headers(),
       })
       if (res.status === 401 || res.status === 403) {
-        throw new Error(`auth rejected: ${res.status}`)
+        throw new NonRetryableRequestError(`auth rejected: ${res.status}`)
       }
       if (!res.ok) {
         const body = await res.text().catch(() => '')
@@ -139,6 +156,26 @@ export class AgentShellClient {
       if (json.error) throw new Error(json.error.message ?? 'trpc error')
       return sjDecode(json.result?.data) as T
     })
+  }
+
+  /** Best-effort query for prompt hooks: no retries and a strict timeout. */
+  async queryOnce<T>(procedure: string, input: Record<string, unknown>, timeoutMs = 1_500): Promise<T> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const qp = new URLSearchParams({ input: JSON.stringify(sjEncode(input)) })
+      const res = await this.fetchImpl(`${this.url(procedure)}?${qp.toString()}`, {
+        method: 'GET',
+        headers: this.headers(),
+        signal: controller.signal,
+      })
+      if (!res.ok) throw new Error(`http ${res.status}`)
+      const json = (await res.json()) as { result?: { data?: unknown }; error?: { message?: string } }
+      if (json.error) throw new Error(json.error.message ?? 'trpc error')
+      return sjDecode(json.result?.data) as T
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   /**

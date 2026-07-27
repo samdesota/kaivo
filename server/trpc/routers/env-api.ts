@@ -61,10 +61,11 @@ export const envApiRouter = router({
       kind: z.enum(['finished', 'question', 'permission', 'error']).optional(),
       title: z.string().min(1).max(120),
       summary: z.string().min(1).max(120),
+      idempotencyKey: z.string().min(1).max(250).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       try {
-        return await workspaceService.createAgentNotification(input)
+        return await workspaceService.createAgentNotification({ ...input, idempotencyNamespace: ctx.envAuth.tokenHash })
       } catch (err) {
         throw toWorkspaceTrpcError(err)
       }

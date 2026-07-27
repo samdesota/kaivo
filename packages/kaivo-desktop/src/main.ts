@@ -7,11 +7,13 @@ import { desktopBrowserSocketPath, readOrCreateDesktopAuthToken } from './instan
 import { ensureDesktopServices, type ServiceSupervisor } from './service-supervisor'
 import { startBrowserAgentBridge, type BrowserAgentBridge } from './browser-agent-bridge'
 import { createOnePasswordRuntime, resolveOnePasswordTriggerTabId, type OnePasswordRuntime } from './onepassword'
+import { createBufferedFileLogger } from './desktop-logger'
 
-type DesktopLogKind = 'main' | 'chrome-renderer' | 'tab-renderer' | 'crash' | 'exception'
+type DesktopLogKind = 'main' | 'chrome-renderer' | 'overlay-renderer' | 'crash' | 'exception'
 
 const logPath = process.env.CC_DESKTOP_TEST_LOG ?? path.join(app.getPath('logs'), 'desktop.log')
 const stateDir = process.env.CC_DESKTOP_TEST_STATE_DIR
+const desktopLogger = createBufferedFileLogger(logPath)
 
 let webframeApp: WebframeApp | undefined
 let serviceSupervisor: ServiceSupervisor | undefined
@@ -81,8 +83,20 @@ type FindInPageResult = {
 
 function writeLog(kind: DesktopLogKind, level: 'info' | 'error', msg: string, ctx?: Record<string, unknown>): void {
   if (!logPath) return
-  fs.mkdirSync(path.dirname(logPath), { recursive: true })
-  fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), kind, level, msg, ctx })}\n`)
+  desktopLogger.write(`${JSON.stringify({ ts: new Date().toISOString(), kind, level, msg, ctx })}\n`)
+}
+
+function kaivoRendererKind(contents: WebContents): 'chrome-renderer' | 'overlay-renderer' | null {
+  if (chromeWebContentsIds.has(contents.id)) return 'chrome-renderer'
+  const bridge = webframeApp?._debug.bridge as unknown as {
+    callerForWebContents?: (contents: WebContents) => { kind: string }
+  } | undefined
+  if (bridge?.callerForWebContents?.(contents).kind === 'overlay') return 'overlay-renderer'
+  try {
+    return new URL(contents.getURL()).pathname === '/internal/overlay-layer' ? 'overlay-renderer' : null
+  } catch {
+    return null
+  }
 }
 
 function trackWindow(win: BrowserWindow): void {
@@ -144,7 +158,8 @@ function trackWebContents(contents: WebContents): void {
     } satisfies FindInPageResult)
   })
   contents.on('console-message', (_event, level, message, line, sourceId) => {
-    const kind = chromeWebContentsIds.has(contents.id) ? 'chrome-renderer' : 'tab-renderer'
+    const kind = kaivoRendererKind(contents)
+    if (!kind) return
     writeLog(kind, level === 2 ? 'error' : 'info', message, { webContentsId: contents.id, line, sourceId })
   })
   contents.on('render-process-gone', (_event, details) => {
@@ -823,7 +838,10 @@ async function main(): Promise<void> {
       tabUserAgent: browserTabUserAgent,
       ...onePasswordWebFrameOptions,
       logger: {
-        warn: (message: unknown, ctx?: unknown) => writeLog('main', 'info', 'webframe warn', { message: String(message), ctx }),
+        warn: (message: unknown, ctx?: unknown) => {
+          if (message === 'tab console') return
+          writeLog('main', 'info', 'webframe warn', { message: String(message), ctx })
+        },
         error: (message: unknown, ctx?: unknown) => writeLog('main', 'error', 'webframe error', { message: String(message), ctx }),
       },
     })
@@ -877,6 +895,7 @@ async function main(): Promise<void> {
 
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
+  void desktopLogger.close().catch(() => undefined)
   void serviceSupervisor?.stop().catch((error) => {
     writeLog('exception', 'error', 'service supervisor shutdown failed', {
       message: error instanceof Error ? error.message : String(error),

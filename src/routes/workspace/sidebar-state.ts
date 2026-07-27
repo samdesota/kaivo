@@ -24,6 +24,18 @@ export type WorkspaceSidebarChatRollup = {
   newResponseCount: number
 }
 
+export type WorkspaceSidebarSubtask = {
+  id: string
+  dispatchSessionId: string
+  sessionId: string | null
+  title: string
+  state: 'provisioning' | 'active' | 'returned' | 'completed' | 'failed'
+  running: boolean
+  pendingAttentionCount: number
+  latestReturnSummary: string | null
+  createdAt: string
+}
+
 export type WorkspaceSidebarStateSnapshot = {
   currentWorkspaceId: string
   activeSessionId: string | null
@@ -33,6 +45,7 @@ export type WorkspaceSidebarStateSnapshot = {
   resources: WorkspaceResourceRecord[]
   globalTabsDestination: GlobalTabDestination
   chatRollups: Record<string, WorkspaceSidebarChatRollup>
+  subtasks: Record<string, WorkspaceSidebarSubtask[]>
   notifications: AgentNotificationRecord[]
 }
 

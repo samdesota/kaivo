@@ -4,12 +4,14 @@ import superjson from 'superjson'
 import { hashEnvToken, hasEnvTokenHash, isPaired } from '../envmeta/service.js'
 import { config } from '../config.js'
 import { opencodeSupervisor } from '../agent/opencode.js'
+import type { EnvPrincipal } from '../auth/principal.js'
 
 export interface Context {
   req: FastifyRequest
   res: FastifyReply
   envTokenPresent: boolean
   agentShellTokenPresent: boolean
+  principal?: EnvPrincipal | null
 }
 
 export async function createContext({
@@ -37,7 +39,7 @@ export async function createContext({
   const token = fromHeader || fromConnectionParams
 
   if (!token) {
-    return { req, res, envTokenPresent: false, agentShellTokenPresent: false }
+    return { req, res, envTokenPresent: false, agentShellTokenPresent: false, principal: null }
   }
 
   // Order: check envToken (webapp) first, then agent-shell token (plugin).
@@ -46,11 +48,19 @@ export async function createContext({
   envTokenPresent = hasEnvTokenHash(incoming)
 
   let agentShellTokenPresent = false
+  let principal: EnvPrincipal | null = envTokenPresent ? { kind: 'user' } : null
   if (!envTokenPresent) {
-    agentShellTokenPresent = opencodeSupervisor.verifyAgentShellToken(token)
+    const { resolveAgentSessionPrincipal } = await import('../auth/session-credentials.js')
+    principal = resolveAgentSessionPrincipal(token)
+    if (!principal) agentShellTokenPresent = opencodeSupervisor.verifyAgentShellToken(token)
   }
 
-  return { req, res, envTokenPresent, agentShellTokenPresent }
+  return { req, res, envTokenPresent, agentShellTokenPresent, principal }
+}
+
+export function contextPrincipal(ctx: Context): EnvPrincipal | null {
+  // Preserve direct createCaller test contexts and existing user clients.
+  return ctx.principal ?? (ctx.envTokenPresent ? { kind: 'user' } : null)
 }
 
 const t = initTRPC.context<Context>().create({
@@ -87,6 +97,15 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
   if (!ctx.envTokenPresent) {
     throw new TRPCError({ code: 'UNAUTHORIZED' })
   }
+  return next({ ctx })
+})
+
+/** User or session-bound agent calls. Process-global plugin tokens are unbound. */
+export const principalProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!isPaired()) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'env is not paired' })
+  }
+  if (!contextPrincipal(ctx)) throw new TRPCError({ code: 'UNAUTHORIZED' })
   return next({ ctx })
 })
 

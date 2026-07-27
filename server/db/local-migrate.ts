@@ -700,6 +700,16 @@ function migrateWorkspaceTabRepoRoot(sqlite: Database.Database) {
   }
 }
 
+function migrateAgentNotificationReceipts(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS agent_notification_receipts (
+      key TEXT PRIMARY KEY,
+      notification_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT ${nowMs}
+    );
+  `)
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
@@ -877,6 +887,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
       applied.push(workspaceTabRepoRootMigrationName)
     }
 
+    const agentNotificationReceiptsMigrationName = '0015_agent_notification_receipts'
+    const agentNotificationReceiptsMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(agentNotificationReceiptsMigrationName)
+    if (!agentNotificationReceiptsMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateAgentNotificationReceipts(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationReceiptsMigrationName)
+      })()
+      applied.push(agentNotificationReceiptsMigrationName)
+    }
+
     return { sqlitePath, applied }
   } finally {
     sqlite.close()
@@ -897,6 +919,7 @@ export const localAppTables = [
   'bookmarks',
   'favicon_cache',
   'agent_notifications',
+  'agent_notification_receipts',
   'sandboxes',
   'github_install',
   'github_token_cache',

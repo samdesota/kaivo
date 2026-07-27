@@ -17,6 +17,9 @@ import { WorkspaceCleanupOverlay } from '../workspace/workspace-cleanup-overlay'
 import type { WorkspaceResourceRecord } from '../workspace/resources-store'
 import { bookmarkOriginForUrl, upsertBookmark } from '../workspace/bookmarks-store'
 import { resolveBrowserAddress } from '../../lib/browser-navigation'
+import { DeliveryMetadata, type DeliveryMetadataValue } from '../env/agent/delivery-metadata'
+import { extractTrpcMessage } from '../../lib/utils'
+import { trpc } from '../../trpc'
 
 /**
  * Detached modal layer rendered at /internal/overlay-layer.
@@ -36,6 +39,13 @@ export type OverlayRequest = {
   initialWorkspaceMode?: NewAgentChatWorkspaceMode
   initialSelection?: NewAgentChatSelection
   folderId?: string | null
+  env: EnvRef & { label: string }
+  envToken: string
+} | {
+  requestId: string
+  type: 'complete-orchestration-task'
+  title: string
+  task: DeliveryMetadataValue
   env: EnvRef & { label: string }
   envToken: string
 } | {
@@ -79,6 +89,10 @@ export type OverlayRequest = {
   destructive?: boolean
 } | {
   requestId: string
+  type: 'openai-device-code'
+  deviceCode: string
+} | {
+  requestId: string
   type: 'text-input'
   title: string
   message?: string
@@ -94,6 +108,12 @@ export type OverlayRequest = {
 } | {
   requestId: string
   type: 'new-repo-config'
+} | {
+  requestId: string
+  type: 'configure-repository'
+  cwd: string
+  env: EnvRef & { label: string }
+  envToken: string
 } | {
   requestId: string
   type: 'provider-credentials'
@@ -145,6 +165,8 @@ export type OverlayResponse =
   | { requestId: string; type: 'toggle-sidebar' }
   | { requestId: string; type: 'open-settings' }
   | { requestId: string; type: 'confirmed'; confirmed: boolean }
+  | { requestId: string; type: 'openai-device-code-result'; continued: boolean }
+  | { requestId: string; type: 'orchestration-task-completion'; confirmed: boolean }
   | { requestId: string; type: 'text-submitted'; value: string }
   | { requestId: string; type: 'repo-config-closed'; changed: boolean }
   | { requestId: string; type: 'repo-config-created'; configId: string }
@@ -215,9 +237,12 @@ function isOverlayRequest(message: OverlayRequest | OverlayResponse | { type: 'c
     || message.type === 'command-palette'
     || message.type === 'universal-menu'
     || message.type === 'confirm'
+    || message.type === 'openai-device-code'
+    || message.type === 'complete-orchestration-task'
     || message.type === 'text-input'
     || message.type === 'repo-config'
     || message.type === 'new-repo-config'
+    || message.type === 'configure-repository'
     || message.type === 'provider-credentials'
     || message.type === 'workspace-cleanup'
     || message.type === 'create-bookmark'
@@ -233,6 +258,12 @@ function OverlayRequestRenderer({
 }) {
   if (request.type === 'confirm') {
     return <ConfirmOverlay request={request} respond={respond} />
+  }
+  if (request.type === 'openai-device-code') {
+    return <OpenAIDeviceCodeOverlay request={request} respond={respond} />
+  }
+  if (request.type === 'complete-orchestration-task') {
+    return <CompleteOrchestrationTaskOverlay request={request} respond={respond} />
   }
   if (request.type === 'text-input') {
     return <TextInputOverlay request={request} respond={respond} />
@@ -260,7 +291,7 @@ function EnvOverlayRequestRenderer({
   request,
   respond,
 }: {
-  request: Extract<OverlayRequest, { type: 'new-agent-chat' | 'folder-picker' | 'command-palette' | 'universal-menu' | 'workspace-cleanup' }>
+  request: Extract<OverlayRequest, { type: 'new-agent-chat' | 'folder-picker' | 'command-palette' | 'universal-menu' | 'workspace-cleanup' | 'configure-repository' }>
   respond: (response: OverlayResponse) => void
 }) {
   useEffect(() => {
@@ -360,9 +391,95 @@ function EnvOverlayRequestRenderer({
               onCleaned={() => respond({ requestId: request.requestId, type: 'workspace-cleanup-complete' })}
             />
           )}
+          {request.type === 'configure-repository' && (
+            <ConfigureRepositoryOverlay request={request} respond={respond} />
+          )}
         </EnvContextProvider>
       </envTrpc.Provider>
     </QueryClientProvider>
+  )
+}
+
+function normalizedRemote(value: string): string {
+  const trimmed = value.trim()
+  const scp = trimmed.match(/^(?:[^@]+@)?([^:]+):(.+)$/)
+  if (scp) return `${scp[1]}/${scp[2]}`.replace(/\.git$/, '').replace(/\/$/, '').toLowerCase()
+  try {
+    const parsed = new URL(trimmed)
+    return `${parsed.hostname}${parsed.pathname}`.replace(/\.git$/, '').replace(/\/$/, '').toLowerCase()
+  } catch {
+    return trimmed.replace(/\.git$/, '').replace(/\/$/, '').toLowerCase()
+  }
+}
+
+function ConfigureRepositoryOverlay({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'configure-repository' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  const inspection = envTrpc.git.inspectCheckout.useQuery({ cwd: request.cwd })
+  const configs = trpc.repoConfig.list.useQuery()
+  const detected = inspection.data
+  const existing = detected?.originUrl
+    ? configs.data?.find((config) => normalizedRemote(config.originUrl) === normalizedRemote(detected.originUrl!))
+    : null
+  const close = () => respond({ requestId: request.requestId, type: 'closed' })
+  const choose = (configId: string) => respond({ requestId: request.requestId, type: 'repo-config-created', configId })
+
+  return (
+    <Modal open onClose={close} title="Configure repository for subtasks" widthClass="max-w-lg">
+      <div className="space-y-4">
+        <div className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs">
+          <div className="text-neutral-500">Current directory</div>
+          <div className="mt-1 break-all font-mono text-neutral-300">{request.cwd}</div>
+          {detected?.repository && (
+            <div className="mt-2 text-neutral-400">
+              Git repository detected at <span className="font-mono text-neutral-300">{detected.repository.root}</span>.
+            </div>
+          )}
+        </div>
+
+        {inspection.isLoading || configs.isLoading ? (
+          <p className="text-sm text-neutral-400">Inspecting the current directory…</p>
+        ) : inspection.error ? (
+          <p className="text-sm text-red-400">Could not inspect this directory: {extractTrpcMessage(inspection.error)}</p>
+        ) : existing ? (
+          <div className="space-y-3">
+            <p className="text-sm text-neutral-300">
+              This checkout matches the existing repo config <strong>{existing.name}</strong>.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={close} className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900">Cancel</button>
+              <button type="button" onClick={() => choose(existing.id)} className="rounded bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-white">Use config</button>
+            </div>
+          </div>
+        ) : detected?.originUrl ? (
+          <>
+            <p className="text-sm text-neutral-300">
+              Kaivo found the Git origin and can create the repo config required for isolated subtask clones.
+            </p>
+            <NewRepoConfigForm
+              initialDraft={{ source: 'url', url: detected.originUrl }}
+              onCreated={choose}
+              onCancel={close}
+            />
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-amber-300">
+              {detected?.originError === 'not_repository'
+                ? 'The current directory is not inside a Git repository. Enter a clone URL manually to continue.'
+                : detected?.originError === 'unsafe_origin'
+                  ? 'The Git origin contains embedded credentials and cannot be saved. Enter a safe clone URL manually.'
+                  : 'This Git repository has no origin remote. Enter a clone URL manually to continue.'}
+            </p>
+            <NewRepoConfigForm onCreated={choose} onCancel={close} />
+          </>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -648,6 +765,98 @@ function ConfirmOverlay({
           >
             {request.confirmLabel ?? 'Confirm'}
           </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function OpenAIDeviceCodeOverlay({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'openai-device-code' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
+  const close = (continued: boolean) => respond({
+    requestId: request.requestId,
+    type: 'openai-device-code-result',
+    continued,
+  })
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(request.deviceCode)
+      setCopied(true)
+      setCopyFailed(false)
+    } catch {
+      setCopyFailed(true)
+    }
+  }
+
+  return (
+    <Modal open onClose={() => close(false)} title="Connect OpenAI" widthClass="max-w-md">
+      <div className="space-y-5">
+        <div>
+          <p className="text-sm leading-6 text-neutral-300">
+            Copy this one-time code now. OpenAI will ask for it after you sign in.
+          </p>
+        </div>
+        <div className="rounded-lg border border-neutral-700 bg-neutral-950 p-4 shadow-inner">
+          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-500">Device code</div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <code className="select-all text-xl font-semibold tracking-[0.14em] text-neutral-100">{request.deviceCode}</code>
+            <button
+              type="button"
+              onClick={() => void copyCode()}
+              className="shrink-0 rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              {copied ? 'Copied' : 'Copy code'}
+            </button>
+          </div>
+          {copyFailed && <p className="mt-2 text-xs text-amber-300">Copy failed. Select the code and copy it manually.</p>}
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-neutral-500">The code expires shortly and can only be used once.</p>
+          <div className="flex shrink-0 gap-2">
+            <button type="button" onClick={() => close(false)} className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900">
+              Cancel
+            </button>
+            <button type="button" onClick={() => close(true)} className="rounded bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-white">
+              Continue to OpenAI
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function CompleteOrchestrationTaskOverlay({
+  request,
+  respond,
+}: {
+  request: Extract<OverlayRequest, { type: 'complete-orchestration-task' }>
+  respond: (response: OverlayResponse) => void
+}) {
+  const close = (confirmed: boolean) => respond({
+    requestId: request.requestId,
+    type: 'orchestration-task-completion',
+    confirmed,
+  })
+  return (
+    <Modal open onClose={() => close(false)} title="Mark task complete" widthClass="max-w-lg">
+      <div className="space-y-4">
+        <div>
+          <div className="text-sm font-medium text-neutral-100">{request.title}</div>
+          <p className="mt-1 text-xs text-neutral-500">Completion keeps the chat, worktree, return history, and unresolved attention available.</p>
+        </div>
+        <DeliveryMetadata value={request.task} showWarning />
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => close(false)} className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-800">Cancel</button>
+          <button type="button" onClick={() => close(true)} className="rounded bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-white">Mark complete</button>
         </div>
       </div>
     </Modal>

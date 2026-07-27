@@ -10,8 +10,9 @@ import { getRepoConfig, listRepoConfigs, type RepoConfigSummary } from '../ident
 
 export class RepoError extends Error {
   constructor(
-    public readonly code: 'not_found' | 'invalid_config' | 'already_exists' | 'clone_failed' | 'delete_failed',
+    public readonly code: 'not_found' | 'invalid_config' | 'already_exists' | 'ref_not_found' | 'branch_conflict' | 'clone_failed' | 'delete_failed',
     message: string,
+    public readonly residualArtifacts: string[] = [],
   ) {
     super(message)
     this.name = 'RepoError'
@@ -24,6 +25,12 @@ export interface RepoCloneResult {
   workingDir: string
   name: string
   worktreeName: string
+}
+
+export interface RepoExactRefCloneResult extends RepoCloneResult {
+  sourceRef: string
+  branchName: string
+  resolvedCommit: string
 }
 
 export interface RepoWorktreeSummary {
@@ -77,6 +84,45 @@ function runGitClone(args: string[]): Promise<void> {
       else reject(new RepoError('clone_failed', stderr.trim() || `git clone exited ${code}`))
     })
   })
+}
+
+function runGit(args: string[], cwd?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+    child.on('error', (err) => reject(new RepoError('clone_failed', err.message)))
+    child.on('exit', (code) => {
+      if (code === 0) resolve(stdout.trim())
+      else reject(new RepoError('clone_failed', stderr.trim() || `git ${args[0] ?? ''} exited ${code}`))
+    })
+  })
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.stat(target)
+    return true
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw err
+  }
+}
+
+function refCandidates(sourceRef: string): string[] {
+  if (sourceRef.startsWith('refs/heads/')) {
+    return [`refs/remotes/origin/${sourceRef.slice('refs/heads/'.length)}^{commit}`]
+  }
+  if (sourceRef.startsWith('refs/tags/') || sourceRef.startsWith('refs/remotes/')) {
+    return [`${sourceRef}^{commit}`]
+  }
+  return [
+    `refs/remotes/origin/${sourceRef}^{commit}`,
+    `refs/tags/${sourceRef}^{commit}`,
+    `${sourceRef}^{commit}`,
+  ]
 }
 
 class RepoService {
@@ -163,6 +209,127 @@ class RepoService {
     }).run()
 
     return { configId, repoId, workingDir, name: bundle.summary.name, worktreeName }
+  }
+
+  async cloneConfigAtRef(input: {
+    configId: string
+    workspaceId: string
+    worktreeName: string
+    sourceRef: string
+    branchName: string
+  }): Promise<RepoExactRefCloneResult> {
+    const worktreeName = input.worktreeName.trim()
+    const sourceRef = input.sourceRef.trim()
+    const branchName = input.branchName.trim()
+    if (!worktreeName || !sourceRef || !branchName) {
+      throw new RepoError('invalid_config', 'work tree name, source ref, and branch are required')
+    }
+    try {
+      await runGit(['check-ref-format', '--branch', branchName])
+    } catch {
+      throw new RepoError('invalid_config', `invalid branch name: ${branchName}`)
+    }
+
+    let bundle: Awaited<ReturnType<typeof getRepoConfig>>
+    try {
+      bundle = await getRepoConfig(input.configId)
+    } catch (err) {
+      const message = (err as { message?: string })?.message ?? ''
+      if (/not_found|not found|404/i.test(message)) throw new RepoError('not_found', 'repo config not found')
+      throw err
+    }
+
+    const slug = slugify(bundle.summary.name)
+    const worktreeSlug = slugify(worktreeName)
+    const repoRoot = path.join(config.CC_WORKING_DIR, 'repos', slug)
+    const workingDir = path.join(repoRoot, worktreeSlug)
+    await fs.mkdir(repoRoot, { recursive: true })
+    if (await pathExists(workingDir)) {
+      throw new RepoError('already_exists', `work tree already exists: ${slug}/${worktreeSlug}`)
+    }
+
+    const originUrl = repoUrl(bundle.summary)
+    let createdClone = false
+    let repoId: string | null = null
+    try {
+      await runGit(['clone', '--no-checkout', '--origin', 'origin', originUrl, workingDir])
+      createdClone = true
+
+      let resolvedCommit: string | null = null
+      for (const candidate of refCandidates(sourceRef)) {
+        try {
+          resolvedCommit = await runGit(['rev-parse', '--verify', candidate], workingDir)
+          break
+        } catch {
+          // Try the next exact namespace; never use the configured default ref.
+        }
+      }
+      if (!resolvedCommit) throw new RepoError('ref_not_found', `source ref not found: ${sourceRef}`)
+
+      try {
+        await runGit(['show-ref', '--verify', '--quiet', `refs/remotes/origin/${branchName}`], workingDir)
+        throw new RepoError('branch_conflict', `branch already exists: ${branchName}`)
+      } catch (err) {
+        if (err instanceof RepoError && err.code === 'branch_conflict') throw err
+      }
+      await runGit(['checkout', '-b', branchName, resolvedCommit], workingDir)
+
+      for (const file of bundle.files) {
+        const target = safeJoin(workingDir, file.path)
+        await fs.mkdir(path.dirname(target), { recursive: true })
+        await fs.writeFile(target, file.contents, 'utf8')
+      }
+
+      repoId = ulid().toLowerCase()
+      db.insert(repos).values({
+        id: repoId,
+        configId: input.configId,
+        name: bundle.summary.name,
+        slug,
+        worktreeName,
+        worktreeSlug,
+        originUrl,
+        ref: sourceRef,
+        workspacePath: workingDir,
+        source: bundle.summary.source ?? (bundle.summary.githubFullName ? 'github' : 'url'),
+        githubRepoId: null,
+        githubFullName: bundle.summary.githubFullName ?? null,
+        createdAt: new Date().toISOString(),
+        workspaceId: input.workspaceId,
+      }).run()
+
+      return {
+        configId: input.configId,
+        repoId,
+        workingDir,
+        name: bundle.summary.name,
+        worktreeName,
+        sourceRef,
+        branchName,
+        resolvedCommit,
+      }
+    } catch (err) {
+      if (repoId) db.delete(repos).where(eq(repos.id, repoId)).run()
+      let residualArtifacts: string[] = []
+      if (createdClone) {
+        try {
+          await fs.rm(workingDir, { recursive: true, force: true })
+        } catch {
+          residualArtifacts = [workingDir]
+        }
+      }
+      if (residualArtifacts.length > 0) {
+        if (err instanceof RepoError) {
+          throw new RepoError(err.code, err.message, [...err.residualArtifacts, ...residualArtifacts])
+        }
+        throw new RepoError(
+          'clone_failed',
+          err instanceof Error ? err.message : String(err),
+          residualArtifacts,
+        )
+      }
+      throw err
+    }
   }
 
   async deleteWorktree(repoId: string): Promise<{ id: string }> {

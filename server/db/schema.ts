@@ -269,6 +269,12 @@ export const agentNotifications = sqliteTable('agent_notifications', {
   createdAt: timestamp('created_at').notNull().default(nowMs),
 })
 
+export const agentNotificationReceipts = sqliteTable('agent_notification_receipts', {
+  key: text('key').primaryKey(),
+  notificationId: text('notification_id').notNull(),
+  createdAt: timestamp('created_at').notNull().default(nowMs),
+})
+
 export const sandboxes = sqliteTable('sandboxes', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),

@@ -56,6 +56,7 @@ export function Composer({
   onSendFailed,
   onSent,
   onWorkspaceAutoName,
+  sendDisabledReason,
 }: {
   sessionId: string
   pendingApprovalReason?: string | null
@@ -66,6 +67,7 @@ export function Composer({
   onSendFailed?: (optimisticId: string | undefined) => void
   onSent?: () => void
   onWorkspaceAutoName?: (message: string) => void | Promise<void>
+  sendDisabledReason?: string
 }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -174,7 +176,7 @@ export function Composer({
       running: effectiveRunning,
       slash: msg.startsWith('/'),
     })
-    if (!msg || send.isPending || pendingApprovalReason || (effectiveRunning && msg.startsWith('/'))) {
+    if (!msg || send.isPending || pendingApprovalReason || sendDisabledReason || (effectiveRunning && msg.startsWith('/'))) {
       chatDebug('composer:onSend:blocked', {
         sessionId,
         empty: !msg,
@@ -216,6 +218,7 @@ export function Composer({
 
   const disabled =
     Boolean(pendingApprovalReason) ||
+    Boolean(sendDisabledReason) ||
     send.isPending ||
     rename.isPending ||
     runCommand.isPending
@@ -293,7 +296,9 @@ export function Composer({
             }
           }}
           placeholder={
-            pendingApprovalReason
+            sendDisabledReason
+              ? sendDisabledReason
+              : pendingApprovalReason
               ? 'Waiting on permission approval…'
               : effectiveRunning
                 ? 'Follow up...'

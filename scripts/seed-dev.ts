@@ -6,10 +6,6 @@ import bcrypt from 'bcrypt'
 import { runLocalAppMigrations } from '../server/db/local-migrate'
 
 const DEFAULT_PASSWORD = 'password'
-const DEFAULT_OPENAI_API_KEY = 'dev-local-llm-key'
-const DEFAULT_OPENAI_BASE_URL = 'https://llm.438d.xyz'
-const DEFAULT_OPENAI_API_KEY_OP_REF = 'op://Personal/llm.438d.xyz/password'
-const DEFAULT_MODEL = { providerID: 'openai', modelID: 'gpt-5.6-sol' }
 const BCRYPT_COST = 12
 const DESKTOP_APP_ID = 'kaivo-desktop'
 
@@ -60,25 +56,25 @@ export async function runDevSeed(options: DevSeedOptions = {}): Promise<void> {
       set: { passwordHash },
     })
 
-  const openaiApiKey = seedEnv.CC_SEED_OPENAI_API_KEY ?? readOnePasswordSecret(seedEnv) ?? DEFAULT_OPENAI_API_KEY
-  const openaiBaseUrl = seedEnv.CC_SEED_OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL
-  const model = {
-    providerID: seedEnv.CC_SEED_MODEL_PROVIDER ?? DEFAULT_MODEL.providerID,
-    modelID: seedEnv.CC_SEED_MODEL_ID ?? DEFAULT_MODEL.modelID,
-  }
+  const openaiApiKey = seedEnv.CC_SEED_OPENAI_API_KEY ?? readOnePasswordSecret(seedEnv)
+  const openaiBaseUrl = seedEnv.CC_SEED_OPENAI_BASE_URL
+  const modelProvider = seedEnv.CC_SEED_MODEL_PROVIDER
+  const modelId = seedEnv.CC_SEED_MODEL_ID
 
-  await putSecret('provider.openai.api_key', openaiApiKey)
-  await putSecret('provider.openai.base_url', openaiBaseUrl)
-  await putSecret('agent.default_model', JSON.stringify(model))
+  if (openaiApiKey) await putSecret('provider.openai.api_key', openaiApiKey)
+  if (openaiBaseUrl) await putSecret('provider.openai.base_url', openaiBaseUrl)
+  if (modelProvider && modelId) {
+    await putSecret('agent.default_model', JSON.stringify({ providerID: modelProvider, modelID: modelId }))
+  }
 
   const displayPath = path.relative(process.cwd(), sqlitePath) || sqlitePath
   log(`Seed target: ${target}`)
   log(`Seeded dev app database: ${displayPath}`)
   if (migration.applied.length > 0) log(`Applied migrations: ${migration.applied.join(', ')}`)
   log(`Admin password: ${password}`)
-  log(`OpenAI-compatible base URL: ${openaiBaseUrl}`)
-  log(`OpenAI-compatible API key: ${openaiApiKey === DEFAULT_OPENAI_API_KEY ? 'placeholder' : 'configured'}`)
-  log(`Default model: ${model.providerID}/${model.modelID}`)
+  if (openaiBaseUrl) log(`OpenAI-compatible base URL: ${openaiBaseUrl}`)
+  if (openaiApiKey) log('OpenAI-compatible API key: configured')
+  if (modelProvider && modelId) log(`Default model: ${modelProvider}/${modelId}`)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -115,8 +111,8 @@ function defaultInstanceRoot(target: string, homeDir: string, cwd: string, insta
 }
 
 function readOnePasswordSecret(seedEnv: NodeJS.ProcessEnv): string | null {
-  const ref = seedEnv.CC_SEED_OPENAI_API_KEY_OP_REF ?? DEFAULT_OPENAI_API_KEY_OP_REF
-  if (seedEnv.CC_SEED_OPENAI_API_KEY_OP_REF === '') return null
+  const ref = seedEnv.CC_SEED_OPENAI_API_KEY_OP_REF
+  if (!ref) return null
   try {
     const value = execFileSync('op', ['read', ref], {
       encoding: 'utf8',

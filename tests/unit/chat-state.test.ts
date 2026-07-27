@@ -298,7 +298,7 @@ describe('ChatStateStore', () => {
     expect([...store.getSnapshot('s1').state.parts.values()].filter((part) => part.type === 'session-error')).toHaveLength(1)
   })
 
-  it('keeps chat readers alive after view subscribers release them', async () => {
+  it('stops chat subscriptions after the final retain releases', async () => {
     const api = new MockChatApi()
     const store = new ChatStateStore(api)
     const releaseA = store.retainSession('s1')
@@ -310,7 +310,7 @@ describe('ChatStateStore', () => {
     expect(api.subscriptions[0]?.unsubscribed).toBe(false)
 
     releaseB()
-    expect(api.subscriptions[0]?.unsubscribed).toBe(false)
+    expect(api.subscriptions[0]?.unsubscribed).toBe(true)
 
     api.subscriptions[0]?.handlers.onData({
       seq: 1,
@@ -318,10 +318,27 @@ describe('ChatStateStore', () => {
       payload: { part: { id: 'p1', type: 'text', messageID: 'm1', text: 'still reading', sessionID: 'oc1' } },
     })
 
-    expect(store.getSnapshot('s1').state.parts.get('p1')?.text).toBe('still reading')
+    expect(store.getSnapshot('s1').state.parts.get('p1')).toBeUndefined()
 
     store.dispose()
     expect(api.subscriptions[0]?.unsubscribed).toBe(true)
+  })
+
+  it('does not poll or reconnect released sessions and can reacquire cached state', async () => {
+    const api = new MockChatApi()
+    const store = new ChatStateStore(api)
+    const release = store.retainSession('s1')
+    await flush()
+    release()
+    const statusCalls = api.sessionStatus.mock.calls.length
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(api.sessionStatus).toHaveBeenCalledTimes(statusCalls)
+
+    const reacquired = store.retainSession('s1')
+    await flush()
+    expect(api.subscriptions).toHaveLength(2)
+    expect(api.subscriptions[1]?.unsubscribed).toBe(false)
+    reacquired()
   })
 
   it('reconciles status into pending approvals, questions, and todos', async () => {

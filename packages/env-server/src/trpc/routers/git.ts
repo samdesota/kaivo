@@ -35,6 +35,10 @@ export const gitRouter = router({
     .input(z.object({ cwd: cwdSchema }).strict())
     .query(({ input }) => call(() => gitService.discoverGit(input.cwd))),
 
+  inspectCheckout: authedProcedure
+    .input(z.object({ cwd: cwdSchema }).strict())
+    .query(({ input }) => call(() => gitService.inspectCheckout(input.cwd))),
+
   originBranches: authedProcedure
     .input(z.object({ cwd: cwdSchema }).strict())
     .query(({ input }) => call(() => gitService.originBranches(input.cwd))),

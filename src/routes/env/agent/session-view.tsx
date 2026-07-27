@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { trpc } from '../../../trpc'
 import { envTrpc } from '../../../env-trpc'
 import { handleAgentUiOpenPaneEvent } from '../../../lib/agent-ui-open-pane'
-import { openConfirmOverlay } from '../../../lib/overlay-layer-controller'
+import { openConfigureRepositoryOverlay, openConfirmOverlay } from '../../../lib/overlay-layer-controller'
 import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { extractTrpcMessage } from '../../../lib/utils'
 import type { PaneContent } from '../shell/tab-state'
@@ -20,8 +20,11 @@ import { EmptySessionState } from './empty-session-state'
 import { ModelEffortPicker } from './model-picker'
 import { selectActiveWorkspaceSession } from './workspace-session-state'
 import { BottomAnchoredLazyList } from './bottom-anchored-lazy-list'
-import { useChatSession, useChatStateStore, useRetainChatSessions } from './chat-state'
+import { useChatSession, useChatStateStore } from './chat-state'
 import { chatDebug } from './chat-debug'
+import { OrchestrationSessionView, usesOrchestrationView } from './orchestration-session-view'
+import { explicitChildSessionId } from './child-transcript-link'
+import { useEnv } from '../env-context'
 
 interface OpenPaneOptions {
   title?: string
@@ -39,6 +42,7 @@ interface SessionSummary {
   title?: string | null
   workspaceId?: string | null
   workingDir?: string | null
+  kind: 'chat' | 'dispatch' | 'subtask'
 }
 
 export function AgentSessionView({
@@ -78,6 +82,10 @@ export function AgentSessionView({
   const status = envTrpc.agent.agentStatus.useQuery(undefined, { refetchInterval: 5_000 })
   const sessionListInput = workspaceId ? { workspaceId } : undefined
   const sessions = envTrpc.agent.sessionList.useQuery(sessionListInput, { refetchInterval: 5_000 })
+  const orchestration = envTrpc.orchestration.snapshot.useQuery(
+    { workspaceId: workspaceId ?? '' },
+    { enabled: Boolean(workspaceId) },
+  )
   const queryClient = useQueryClient()
   const maybeAutoNameWorkspace = trpc.workspace.maybeAutoNameFromPrompt.useMutation({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trpcQueryKey('workspace.listTree') }),
@@ -104,12 +112,18 @@ export function AgentSessionView({
     : undefined
 
   const sessionsData = sessions.data as SessionSummary[] | undefined
-  const activeSession = sessionsData?.find((session) => session.id === sessionId) ?? null
-  const retainedChatSessionIds = useMemo(
-    () => (sessionsData ?? []).filter((s) => s.status !== 'archived').map((s) => s.id),
-    [sessionsData],
-  )
-  useRetainChatSessions(retainedChatSessionIds)
+  const selectedSubtask = orchestration.data?.dispatches
+    .flatMap((dispatch) => dispatch.subtasks)
+    .find((task) => task.sessionId === sessionId) ?? null
+  const activeSession = sessionsData?.find((session) => session.id === sessionId) ?? (selectedSubtask ? {
+    id: selectedSubtask.sessionId!,
+    status: selectedSubtask.sessionStatus ?? 'active',
+    title: selectedSubtask.title,
+    workspaceId,
+    workingDir: selectedSubtask.worktreePath,
+    kind: 'subtask' as const,
+  } : null)
+  const activeChatCount = (sessionsData ?? []).filter((s) => s.status !== 'archived').length
 
   useEffect(() => {
     if (sessionsData) onSessionListChange?.(sessionsData.length)
@@ -117,9 +131,12 @@ export function AgentSessionView({
 
   useEffect(() => {
     if (!sessionsData) return
-    const next = selectActiveWorkspaceSession(sessionsData, sessionId)
+    if (workspaceId && !orchestration.data) return
+    const selected = sessionsData.find((session) => session.id === sessionId)
+    if (!selected && selectedSubtask) return
+    const next = selected?.kind === 'dispatch' ? selected.id : selectActiveWorkspaceSession(sessionsData, sessionId)
     if (next !== sessionId) setSessionId(next)
-  }, [sessionId, sessionsData, setSessionId])
+  }, [orchestration.data, selectedSubtask, sessionId, sessionsData, setSessionId, workspaceId])
 
   if (status.isLoading) {
     return <div className="flex h-full items-center justify-center text-sm text-neutral-500">Checking agent…</div>
@@ -171,6 +188,7 @@ export function AgentSessionView({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {workspaceId && <RepoConfigRequestLauncher workspaceId={workspaceId} />}
       <div className="flex flex-none basis-8 items-stretch border-b border-neutral-800 bg-neutral-975">
         {headerLeading && <div className="flex items-center pl-3 pr-2">{headerLeading}</div>}
         <SessionTabs
@@ -184,8 +202,26 @@ export function AgentSessionView({
         {trailing && <div className="flex items-center px-2">{trailing}</div>}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        {sessionId ? (
-          <SessionPane
+        {sessionId && usesOrchestrationView(activeSession?.kind, workspaceId, Boolean(selectedSubtask)) ? (
+          <OrchestrationSessionView
+            workspaceId={workspaceId!}
+            sessionId={sessionId}
+            sessionWorkingDir={activeSession?.workingDir ?? undefined}
+            renderChat={(selectedSessionId, workingDir, options) => (
+              <AgentChatSurface
+                key={selectedSessionId}
+                sessionId={selectedSessionId}
+                workingDir={workingDir}
+                sendDisabledReason={options?.sendDisabledReason}
+                workspaceId={workspaceId}
+                onOpenPane={onOpenPane}
+                onOpenPaneRefreshHint={onOpenPaneRefreshHint}
+                footerTrailing={footerTrailing}
+              />
+            )}
+          />
+        ) : sessionId ? (
+          <AgentChatSurface
             key={sessionId}
             sessionId={sessionId}
             workingDir={activeSession?.workingDir ?? undefined}
@@ -193,7 +229,7 @@ export function AgentSessionView({
             onWorkspaceAutoName={workspaceId ? (message) => maybeAutoNameWorkspace.mutateAsync({
               id: workspaceId,
               prompt: message,
-              isFirstChat: retainedChatSessionIds.length === 1,
+                isFirstChat: activeChatCount === 1,
               chatHadExplicitTitle: Boolean(activeSession?.title),
             }) : undefined}
             onOpenPane={onOpenPane}
@@ -206,6 +242,52 @@ export function AgentSessionView({
       </div>
     </div>
   )
+}
+
+export function RepoConfigRequestLauncher({ workspaceId }: { workspaceId: string }) {
+  const { env, envToken } = useEnv()
+  const pending = envTrpc.orchestration.pendingRepoConfigRequest.useQuery(
+    { workspaceId },
+    { refetchInterval: 1_000 },
+  )
+  const claim = envTrpc.orchestration.claimRepoConfigRequest.useMutation()
+  const complete = envTrpc.orchestration.completeRepoConfigRequest.useMutation()
+  const cancel = envTrpc.orchestration.cancelRepoConfigRequest.useMutation()
+  const opening = useRef<string | null>(null)
+
+  useEffect(() => {
+    const request = pending.data
+    if (!request || opening.current === request.id) return
+    const claimId = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    opening.current = request.id
+    void (async () => {
+      let claimedRequest = false
+      try {
+        const claimed = await claim.mutateAsync({ workspaceId, requestId: request.id, claimId })
+        claimedRequest = true
+        const configId = await openConfigureRepositoryOverlay({ env, envToken, cwd: claimed.workingDir })
+        if (configId) {
+          await complete.mutateAsync({ workspaceId, requestId: request.id, claimId, configId })
+        } else {
+          await cancel.mutateAsync({ workspaceId, requestId: request.id, claimId })
+        }
+      } catch (error) {
+        console.warn('repository setup request failed', error)
+        if (claimedRequest) {
+          await cancel.mutateAsync({ workspaceId, requestId: request.id, claimId }).catch((cancelError) => {
+            console.warn('repository setup request cancellation failed', cancelError)
+          })
+        }
+      } finally {
+        opening.current = null
+        await pending.refetch().catch(() => undefined)
+      }
+    })()
+  }, [cancel, claim, complete, env, envToken, pending, workspaceId])
+
+  return null
 }
 
 function formatTokenCount(n: number): string {
@@ -450,7 +532,7 @@ function AgentConnectivityMenu() {
   )
 }
 
-function SessionPane({
+export function AgentChatSurface({
   sessionId,
   workingDir,
   workspaceId,
@@ -458,6 +540,7 @@ function SessionPane({
   onOpenPane,
   onOpenPaneRefreshHint,
   footerTrailing,
+  sendDisabledReason,
 }: {
   sessionId: string
   workingDir?: string
@@ -466,6 +549,7 @@ function SessionPane({
   onOpenPane?: (content: PaneContent, options?: OpenPaneOptions) => void
   onOpenPaneRefreshHint?: () => void
   footerTrailing?: ReactNode
+  sendDisabledReason?: string
 }) {
   const chat = useChatSession(sessionId)
   const chatStore = useChatStateStore()
@@ -563,16 +647,14 @@ function SessionPane({
 
   const parts = useMemo(() => flattenParts(state), [state])
   const renderables = useMemo(() => {
-    let taskIdx = 0
     const out: Array<{ part: typeof parts[number]; role: string; childTranscript?: TranscriptState }> = []
     let skippedSynthetic = 0
     let skippedSystem = 0
     for (const p of parts) {
       let childTranscript: TranscriptState | undefined
       if (p.type === 'tool' && (p as { tool?: string }).tool === 'task') {
-        const childOcId = state.childOrder[taskIdx]
+        const childOcId = explicitChildSessionId(p)
         if (childOcId) childTranscript = state.childTranscripts.get(childOcId)
-        taskIdx++
       }
       if (p.type === 'step-start' || p.type === 'snapshot' || p.type === 'step-finish') {
         skippedSystem++
@@ -674,6 +756,7 @@ function SessionPane({
         {queuedMessages.length > 0 && <QueuedFollowUps messages={queuedMessages} />}
         <Composer
           sessionId={sessionId}
+          sendDisabledReason={sendDisabledReason}
           pendingApprovalReason={
             activeQuestions.length > 0
               ? `Agent is asking ${activeQuestions.length} question${activeQuestions.length === 1 ? '' : 's'}.`

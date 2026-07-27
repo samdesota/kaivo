@@ -7,6 +7,7 @@ import { OVERLAY_CHANNEL, OverlayLayerApp, type BrowserUrlPopoverResult, type Ov
 import type { PaneContent } from '../routes/env/shell/tab-state'
 import type { NewAgentChatSelection, NewAgentChatWorkspaceMode } from '../routes/env/agent/new-agent-chat-state'
 import type { WorkspaceResourceRecord } from '../routes/workspace/resources-store'
+import type { DeliveryMetadataValue } from '../routes/env/agent/delivery-metadata'
 import type { UniversalMenuChatBootstrap, UniversalMenuContextItem, UniversalMenuInitialIntent, UniversalMenuInitialScope, UniversalMenuOpenTarget, UniversalMenuWorkspaceBootstrapRequest } from '../routes/env/universal-menu/universal-menu'
 
 /**
@@ -184,6 +185,31 @@ export async function openConfirmOverlay(input: {
   throw new Error(`unexpected overlay response: ${response.type}`)
 }
 
+export async function openOpenAIDeviceCodeOverlay(input: { deviceCode: string }): Promise<boolean> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'openai-device-code',
+    ...input,
+  })
+  if (response.type === 'openai-device-code-result') return response.continued
+  if (response.type === 'closed') return false
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openTaskCompletionOverlay(input: EnvOverlayInput & {
+  title: string
+  task: DeliveryMetadataValue
+}): Promise<boolean> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'complete-orchestration-task',
+    ...input,
+  })
+  if (response.type === 'orchestration-task-completion') return response.confirmed
+  if (response.type === 'closed') return false
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
 export async function openTextInputOverlay(input: {
   title: string
   message?: string
@@ -218,6 +244,17 @@ export async function openNewRepoConfigOverlay(): Promise<string | null> {
   const response = await openOverlayRequest({
     requestId: makeOverlayRequestId(),
     type: 'new-repo-config',
+  })
+  if (response.type === 'repo-config-created') return response.configId
+  if (response.type === 'closed') return null
+  throw new Error(`unexpected overlay response: ${response.type}`)
+}
+
+export async function openConfigureRepositoryOverlay(input: EnvOverlayInput & { cwd: string }): Promise<string | null> {
+  const response = await openOverlayRequest({
+    requestId: makeOverlayRequestId(),
+    type: 'configure-repository',
+    ...input,
   })
   if (response.type === 'repo-config-created') return response.configId
   if (response.type === 'closed') return null
@@ -307,6 +344,7 @@ export async function openBrowserUrlPopoverOverlay(input: BrowserUrlPopoverInput
 async function openOverlayRequest(request: OverlayRequest): Promise<OverlayResponse> {
   console.info('[overlay] open request', { requestId: request.requestId, type: request.type })
   if (request.type !== 'confirm'
+    && request.type !== 'openai-device-code'
     && request.type !== 'text-input'
     && request.type !== 'repo-config'
     && request.type !== 'new-repo-config'

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { trpc } from '../../trpc'
 import { Button, FormError } from '../../components/ui'
-import { openConfirmOverlay, openProviderCredentialsOverlay } from '../../lib/overlay-layer-controller'
+import { openConfirmOverlay, openOpenAIDeviceCodeOverlay, openProviderCredentialsOverlay } from '../../lib/overlay-layer-controller'
 import { extractTrpcMessage } from '../../lib/utils'
 import { makeEnvClient, type EnvRef } from '../../lib/env-client'
 import { SettingsPanel } from './panel'
@@ -10,7 +10,7 @@ type ProviderId = 'anthropic' | 'openai' | 'zai'
 type EnvOAuthClient = {
   agent: {
     openAIOAuthStatus: { query: () => Promise<{ state: 'idle' | 'pending' | 'connected' | 'failed'; message: string | null }> }
-    openAIOAuthStart: { mutate: () => Promise<{ url: string }> }
+    openAIOAuthStart: { mutate: () => Promise<{ url: string; deviceCode: string }> }
   }
 }
 
@@ -90,6 +90,14 @@ function OpenAIOAuthSection({ env, envToken }: { env: EnvRef | null; envToken: s
     try {
       const client = makeEnvClient(env, envToken) as unknown as EnvOAuthClient
       const result = await client.agent.openAIOAuthStart.mutate()
+      if (!result.url.trim()) throw new Error('OpenAI OAuth did not return a login URL.')
+      if (!result.deviceCode.trim()) throw new Error('OpenAI OAuth did not return a device code.')
+      const shouldContinue = await openOpenAIDeviceCodeOverlay({ deviceCode: result.deviceCode })
+      if (!shouldContinue) {
+        setState('idle')
+        setMessage('OpenAI login canceled.')
+        return
+      }
       window.open(result.url, '_blank', 'noopener,noreferrer')
       setMessage('Finish the OpenAI login in the browser window. This page will update automatically.')
       const deadline = Date.now() + 180_000

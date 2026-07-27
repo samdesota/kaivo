@@ -3,17 +3,21 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { authedProcedure, router } from '../trpc.js'
 import { AgentError, agentService, type TranscriptEvent } from '../../agent/service.js'
+import { OrchestrationError, orchestrationService } from '../../orchestration/service.js'
 
 const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
 
 function toTrpcError(err: unknown): TRPCError {
+  if (err instanceof OrchestrationError) {
+    return new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message, cause: err })
+  }
   if (err instanceof AgentError) {
     const code: TRPCError['code'] =
       err.code === 'not_found'
         ? 'NOT_FOUND'
         : err.code === 'no_provider'
           ? 'BAD_REQUEST'
-          : err.code === 'not_ready' || err.code === 'unavailable'
+          : err.code === 'not_ready' || err.code === 'unavailable' || err.code === 'invalid_state'
             ? 'PRECONDITION_FAILED'
             : 'INTERNAL_SERVER_ERROR'
     return new TRPCError({ code, message: err.message, cause: err })
@@ -109,6 +113,16 @@ export const agentRouter = router({
       }
     }),
 
+  sessionConvertToDispatch: authedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await agentService.sessionConvertToDispatch(input)
+      } catch (err) {
+        throw toTrpcError(err)
+      }
+    }),
+
   sessionSend: authedProcedure
     .input(
       z.object({
@@ -118,6 +132,7 @@ export const agentRouter = router({
     )
     .mutation(async ({ input }) => {
       try {
+        await orchestrationService.assertSessionSendable(input.sessionId)
         return { ok: true as const, ...(await agentService.sessionSend(input)) }
       } catch (err) {
         throw toTrpcError(err)

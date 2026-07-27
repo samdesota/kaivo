@@ -106,6 +106,192 @@ describe('Kaivo opencode plugin', () => {
     ])
   })
 
+  it('dispatch tool binds tool-context identity and preserves operation ids across transport retries', async () => {
+    const calls: Array<{ procedure: string; body: Record<string, unknown>; authorization: string }> = []
+    let dispatchAttempts = 0
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const requestUrl = new URL(String(url))
+      const procedure = requestUrl.pathname.split('/trpc/')[1] ?? ''
+      const body = (JSON.parse(String(init?.body)) as { json: Record<string, unknown> }).json
+      const authorization = (init?.headers as Record<string, string>).Authorization ?? ''
+      calls.push({ procedure, body, authorization })
+      if (procedure === 'orchestration.bindAgentSession') {
+        return new Response(JSON.stringify({ result: { data: { json: { token: 'session-token' } } } }), { status: 200 })
+      }
+      dispatchAttempts++
+      if (dispatchAttempts === 1) throw new Error('connection reset')
+      return new Response(JSON.stringify({
+        result: { data: { json: { subtaskId: 'task-1', sessionId: 'session-1', state: 'active' } } },
+      }), { status: 200 })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 'process-token', appUrlOverride: 'http://app:3000', fetchImpl, backoffMs: [1] })
+
+    const result = await hooks.tool!.kaivo_dispatch_subtask!.execute({
+      operationId: 'stable-operation',
+      title: 'Inspect parser',
+      instruction: 'Review the parser.',
+      sourceRef: 'refs/heads/main',
+      branchName: 'task/parser',
+      deliveryMode: 'pull_request',
+    }, makeCtx('oc-dispatch') as never) as { metadata: Record<string, unknown> }
+
+    expect(result.metadata).toMatchObject({ subtaskId: 'task-1', sessionId: 'session-1', status: 'active' })
+    expect(calls[0]).toMatchObject({
+      procedure: 'orchestration.bindAgentSession',
+      body: { opencodeSessionId: 'oc-dispatch' },
+      authorization: 'Bearer process-token',
+    })
+    const dispatchCalls = calls.filter((call) => call.procedure === 'orchestration.dispatchFromAgent')
+    expect(dispatchCalls).toHaveLength(2)
+    expect(dispatchCalls.every((call) => call.body.operationId === 'stable-operation')).toBe(true)
+    expect(dispatchCalls.every((call) => !('repositoryId' in call.body))).toBe(true)
+    expect(dispatchCalls.every((call) => call.authorization === 'Bearer session-token')).toBe(true)
+    expect(dispatchCalls.every((call) => !('workspaceId' in call.body) && !('dispatchSessionId' in call.body))).toBe(true)
+  })
+
+  it.each(['provisioning', 'active', 'failed'] as const)('dispatch tool returns %s results', async (state) => {
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      const procedure = new URL(String(url)).pathname.split('/trpc/')[1]
+      const json = procedure === 'orchestration.bindAgentSession'
+        ? { token: `token-${state}` }
+        : { subtaskId: `task-${state}`, state, ...(state === 'failed' ? { failure: { message: 'clone failed' } } : {}) }
+      return new Response(JSON.stringify({ result: { data: { json } } }), { status: 200 })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 'process-token', appUrlOverride: 'http://app:3000', fetchImpl })
+    const result = await hooks.tool!.kaivo_dispatch_subtask!.execute({
+      operationId: `operation-${state}`,
+      title: 'Task',
+      instruction: 'Do it.',
+      sourceRef: 'main',
+      branchName: `task/${state}`,
+      deliveryMode: 'dispatcher_integration',
+    }, makeCtx(`oc-${state}`) as never) as { metadata: Record<string, unknown> }
+    expect(result.metadata).toMatchObject({ subtaskId: `task-${state}`, status: state })
+  })
+
+  it('surfaces cancelled repository setup without retrying it as an outage', async () => {
+    let dispatchCalls = 0
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      const procedure = new URL(String(url)).pathname.split('/trpc/')[1]
+      if (procedure === 'orchestration.bindAgentSession') {
+        return new Response(JSON.stringify({ result: { data: { json: { token: 'session-token' } } } }), { status: 200 })
+      }
+      dispatchCalls++
+      return new Response('repository setup was cancelled', { status: 400 })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({
+      tokenOverride: 'process-token', appUrlOverride: 'http://app:3000', fetchImpl, backoffMs: [1, 1],
+    })
+    const result = await hooks.tool!.kaivo_dispatch_subtask!.execute({
+      operationId: 'operation-cancelled', title: 'Task', instruction: 'Do it.', sourceRef: 'main',
+      branchName: 'task/cancelled', deliveryMode: 'dispatcher_integration',
+    }, makeCtx('oc-cancelled') as never) as { metadata: Record<string, unknown> }
+    expect(result.metadata).toMatchObject({ status: 'error' })
+    expect(result.metadata.stderr).toContain('repository setup was cancelled')
+    expect(dispatchCalls).toBe(1)
+  })
+
+  it('reports delivery with subtask-bound identity and rejects non-subtask callers', async () => {
+    const calls: Array<{ procedure: string; body: Record<string, unknown>; authorization: string }> = []
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const procedure = new URL(String(url)).pathname.split('/trpc/')[1] ?? ''
+      const body = (JSON.parse(String(init?.body)) as { json: Record<string, unknown> }).json
+      calls.push({ procedure, body, authorization: (init?.headers as Record<string, string>).Authorization ?? '' })
+      const json = procedure === 'orchestration.bindAgentSession'
+        ? { token: 'subtask-token', principal: { sessionKind: body.opencodeSessionId === 'oc-subtask' ? 'subtask' : 'dispatch' } }
+        : { id: 'task-1', delivery: body }
+      return new Response(JSON.stringify({ result: { data: { json } } }), { status: 200 })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 'process-token', appUrlOverride: 'http://app:3000', fetchImpl })
+
+    const result = await hooks.tool!.kaivo_report_subtask_delivery!.execute({
+      pullRequestUrl: 'https://github.com/acme/repo/pull/42', headCommit: 'abc123', summary: 'Ready',
+    }, makeCtx('oc-subtask') as never) as { metadata: Record<string, unknown> }
+    expect(result.metadata.status).toBe('success')
+    expect(calls[1]).toEqual({
+      procedure: 'orchestration.reportDelivery',
+      body: { pullRequestUrl: 'https://github.com/acme/repo/pull/42', headCommit: 'abc123', summary: 'Ready' },
+      authorization: 'Bearer subtask-token',
+    })
+    const denied = await hooks.tool!.kaivo_report_subtask_delivery!.execute({ summary: 'No' }, makeCtx('oc-dispatch') as never) as { metadata: Record<string, unknown> }
+    expect(denied.metadata).toMatchObject({ status: 'error', stderr: 'subtask agent session required' })
+  })
+
+  it('regenerates bounded dispatcher context on every hook without persisting stale state', async () => {
+    const calls: Array<{ procedure: string; authorization: string }> = []
+    let contextCall = 0
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const procedure = new URL(String(url)).pathname.split('/trpc/')[1] ?? ''
+      calls.push({ procedure, authorization: (init?.headers as Record<string, string>).Authorization ?? '' })
+      if (procedure === 'orchestration.bindAgentSession') {
+        return new Response(JSON.stringify({ result: { data: { json: {
+          token: 'bound-token', principal: { sessionKind: 'dispatch' },
+        } } } }), { status: 200 })
+      }
+      contextCall++
+      if (contextCall === 3) return new Response('failed', { status: 500 })
+      return new Response(JSON.stringify({ result: { data: { json: { context: `snapshot-${contextCall}` } } } }), { status: 200 })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 'process-token', appUrlOverride: 'http://app:3000', fetchImpl })
+    const transform = hooks['experimental.chat.system.transform']!
+    const first = { system: ['base system'] }
+    await transform({ sessionID: 'oc-dispatch', model: {} as never }, first)
+    expect(first.system).toEqual(['base system\n\nsnapshot-1'])
+    const second = { system: ['base system'] }
+    await transform({ sessionID: 'oc-dispatch', model: {} as never }, second)
+    expect(second.system).toEqual(['base system\n\nsnapshot-2'])
+    const failed = { system: ['base system'] }
+    await expect(transform({ sessionID: 'oc-dispatch', model: {} as never }, failed)).resolves.toBeUndefined()
+    expect(failed.system).toEqual(['base system'])
+    expect(calls.filter((call) => call.procedure === 'orchestration.bindAgentSession')).toHaveLength(1)
+    expect(calls.filter((call) => call.procedure === 'orchestration.dispatcherContext')).toHaveLength(3)
+    expect(calls[0]?.authorization).toBe('Bearer process-token')
+    expect(calls.slice(1).every((call) => call.authorization === 'Bearer bound-token')).toBe(true)
+  })
+
+  it('keeps a chat-bound credential usable after lazy dispatch initialization', async () => {
+    const procedures: string[] = []
+    let initialized = false
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      const procedure = new URL(String(url)).pathname.split('/trpc/')[1] ?? ''
+      procedures.push(procedure)
+      const json = procedure === 'orchestration.bindAgentSession'
+        ? { token: 'chat-token', principal: { sessionKind: 'chat' } }
+        : procedure === 'orchestration.dispatchFromAgent'
+          ? (initialized = true, { subtaskId: 'task-1', sessionId: 'task-session-1', state: 'active' })
+          : { context: initialized ? '<kaivo-orchestration-status>active</kaivo-orchestration-status>' : '' }
+      return new Response(JSON.stringify({ result: { data: { json } } }), { status: 200 })
+    }) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 'process-token', appUrlOverride: 'http://app:3000', fetchImpl })
+    const transform = hooks['experimental.chat.system.transform']!
+
+    const before = { system: ['base'] }
+    await transform({ sessionID: 'oc-chat', model: {} as never }, before)
+    expect(before.system).toEqual(['base'])
+    await hooks.tool!.kaivo_dispatch_subtask!.execute({
+      operationId: 'lazy-1', title: 'Task', instruction: 'Do it', sourceRef: 'main', branchName: 'task/lazy', deliveryMode: 'dispatcher_integration',
+    }, makeCtx('oc-chat') as never)
+    const after = { system: ['base'] }
+    await transform({ sessionID: 'oc-chat', model: {} as never }, after)
+    expect(after.system[0]).toContain('<kaivo-orchestration-status>active')
+    expect(procedures.filter((procedure) => procedure === 'orchestration.bindAgentSession')).toHaveLength(1)
+  })
+
+  it('leaves system context unchanged for missing or subtask sessions', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ result: { data: { json: {
+      token: 'bound-token', principal: { sessionKind: 'subtask' },
+    } } } }), { status: 200 })) as unknown as typeof fetch
+    const hooks = buildHooks({ tokenOverride: 'process-token', appUrlOverride: 'http://app:3000', fetchImpl })
+    const transform = hooks['experimental.chat.system.transform']!
+    const missing = { system: ['base'] }
+    await transform({ model: {} as never }, missing)
+    const subtask = { system: ['base'] }
+    await transform({ sessionID: 'oc-subtask', model: {} as never }, subtask)
+    expect(missing.system).toEqual(['base'])
+    expect(subtask.system).toEqual(['base'])
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it('browser tools call expected procedures with opencodeSessionId', async () => {
     const calls: Array<{ url: string; body: unknown }> = []
     const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
@@ -441,7 +627,6 @@ describe('Kaivo opencode plugin', () => {
       makeCtx() as never,
     )) as { output: string; metadata: Record<string, unknown> }
     expect(result.metadata.status).toBe('error')
-    // The exact message goes through backoff wrapper -> "Kaivo app unreachable".
     expect(typeof result.metadata.stderr).toBe('string')
   })
 })

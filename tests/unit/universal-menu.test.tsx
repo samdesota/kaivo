@@ -5,7 +5,7 @@ import { cleanup } from '@testing-library/react'
 import { UniversalMenu } from '../../src/routes/env/universal-menu/universal-menu'
 
 const mocks = vi.hoisted(() => ({
-  sessions: [] as Array<{ id: string; workingDir: string | null }>,
+  sessions: [] as Array<{ id: string; workingDir: string | null; kind?: 'chat' | 'dispatch' | 'subtask'; status?: string }>,
   browse: {
     data: {
       path: '/Users/sam',
@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   browseInputs: [] as Array<{ path?: string }>,
   startChat: vi.fn(async () => ({ id: 'session-new' })),
   reopenChat: vi.fn(async () => ({ ok: true })),
+  convertChatToDispatch: vi.fn(async () => ({ id: 'session-active', kind: 'dispatch' })),
   createDirectory: vi.fn(async ({ parentPath, name }: { parentPath: string; name: string }) => ({ name, path: `${parentPath}/${name}` })),
   createShell: vi.fn(async () => ({ id: 'shell-new' })),
   disposeShell: vi.fn(async () => ({ ok: true })),
@@ -74,6 +75,9 @@ vi.mock('../../src/env-trpc', () => ({
       },
       sessionReopen: {
         useMutation: () => ({ mutateAsync: mocks.reopenChat, isPending: false }),
+      },
+      sessionConvertToDispatch: {
+        useMutation: () => ({ mutateAsync: mocks.convertChatToDispatch, isPending: false }),
       },
     },
     fs: {
@@ -171,6 +175,7 @@ beforeEach(() => {
   mocks.browseInputs = []
   mocks.startChat.mockClear()
   mocks.reopenChat.mockClear()
+  mocks.convertChatToDispatch.mockClear()
   mocks.createDirectory.mockClear()
   mocks.createShell.mockClear()
   mocks.disposeShell.mockClear()

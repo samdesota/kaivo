@@ -17,12 +17,13 @@ export interface NewConfigDraft {
   name: string
 }
 
-const emptyDraft = (): NewConfigDraft => ({
+const emptyDraft = (initial?: Partial<NewConfigDraft>): NewConfigDraft => ({
   source: 'url',
   url: '',
   repoFullName: '',
   ref: '',
   name: '',
+  ...initial,
 })
 
 /**
@@ -32,11 +33,13 @@ const emptyDraft = (): NewConfigDraft => ({
 export function NewRepoConfigForm({
   onCreated,
   onCancel,
+  initialDraft,
 }: {
   onCreated: (configId: string) => void
   onCancel?: () => void
+  initialDraft?: Partial<NewConfigDraft>
 }) {
-  const [draft, setDraft] = useState<NewConfigDraft>(emptyDraft)
+  const [draft, setDraft] = useState<NewConfigDraft>(() => emptyDraft(initialDraft))
   const [err, setErr] = useState<string | null>(null)
   const create = trpc.repoConfig.create.useMutation()
   const ghStatus = trpc.github.status.useQuery()

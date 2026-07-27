@@ -28,6 +28,12 @@ export interface OriginBranchesResult {
   defaultSource: 'symbolic-ref' | 'heuristic' | 'none'
 }
 
+export interface GitCheckoutInspection {
+  repository: GitRepository | null
+  originUrl: string | null
+  originError: 'not_repository' | 'missing_origin' | 'unsafe_origin' | null
+}
+
 export type GitDiffInput =
   | { cwd: string; kind: 'branch'; originBranch: string; includeUncommitted: boolean }
   | { cwd: string; kind: 'working-tree' }
@@ -316,6 +322,24 @@ export class GitService {
       headOid: headResult.code === 0 ? headResult.stdout.toString('utf8').trim() : null,
       branch: branchResult.code === 0 ? branchResult.stdout.toString('utf8').trim() : null,
     }
+  }
+
+  async inspectCheckout(cwd: string): Promise<GitCheckoutInspection> {
+    const repository = await this.discoverGit(cwd)
+    if (!repository) return { repository: null, originUrl: null, originError: 'not_repository' }
+    const remote = await this.run(repository.root, ['remote', 'get-url', 'origin'], { allowCodes: [0, 2, 128] })
+    if (remote.code !== 0) return { repository, originUrl: null, originError: 'missing_origin' }
+    const originUrl = remote.stdout.toString('utf8').trim()
+    if (!originUrl) return { repository, originUrl: null, originError: 'missing_origin' }
+    try {
+      const parsed = new URL(originUrl)
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && (parsed.username || parsed.password)) {
+        return { repository, originUrl: null, originError: 'unsafe_origin' }
+      }
+    } catch {
+      // SCP-style SSH remotes are valid and intentionally do not parse as URLs.
+    }
+    return { repository, originUrl, originError: null }
   }
 
   private async requireRepository(cwd: string): Promise<GitRepository> {

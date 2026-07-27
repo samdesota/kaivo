@@ -6,6 +6,7 @@ type AgentRow = {
   opencodeSessionId: string
   title: string | null
   status: 'active' | 'archived'
+  kind: 'chat' | 'dispatch' | 'subtask'
   workingDir: string | null
   selectedProviderId: string | null
   selectedModelId: string | null
@@ -26,6 +27,9 @@ const agentRows: AgentRow[] = []
 const transcriptRows: TranscriptRow[] = []
 const recentRows: Array<{ path: string; label: string | null; lastOpenedAt: string }> = []
 let opencodeSessionSeq = 0
+let agentInsertError = false
+let opencodeDeleteError = false
+const deletedOpencodeSessions: string[] = []
 const createAgentNotificationMock = vi.hoisted(() => vi.fn())
 const opencodeMessagesData = vi.hoisted(() => [] as Array<{
   info?: { role?: string; providerID?: string; modelID?: string; tokens?: { input?: number; total?: number; cache?: { read?: number } } }
@@ -40,6 +44,18 @@ const opencodeProviderCalls = vi.hoisted(() => [] as unknown[])
 const opencodePermissionCalls = vi.hoisted(() => [] as Array<{ sessionId: string; permissionId: string; response: string }>)
 const opencodePermissionFetchCalls = vi.hoisted(() => [] as Array<{ url: string; reply: string }>)
 const opencodePermissionError = vi.hoisted(() => ({ value: null as Error | null }))
+const opencodePromptCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+const opencodeAuthMethods = vi.hoisted(() => ({
+  openai: [
+    { type: 'oauth', label: 'Codex OAuth (ChatGPT Plus/Pro)' },
+    { type: 'oauth', label: 'Codex OAuth (Device Code)' },
+    { type: 'oauth', label: 'Codex OAuth (Manual URL Paste)' },
+  ],
+}))
+const opencodeOAuthAuthorizeCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+const opencodeOAuthCallbackCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+const opencodeOAuthAuthorizeUrl = vi.hoisted(() => ({ value: 'https://auth.openai.com/device' }))
+const opencodeOAuthInstructions = vi.hoisted(() => ({ value: 'Enter this one-time code: ABCD-EFGH' }))
 
 function resetState() {
   agentRows.length = 0
@@ -55,7 +71,15 @@ function resetState() {
   opencodePermissionCalls.length = 0
   opencodePermissionFetchCalls.length = 0
   opencodePermissionError.value = null
+  opencodePromptCalls.length = 0
+  opencodeOAuthAuthorizeCalls.length = 0
+  opencodeOAuthCallbackCalls.length = 0
+  opencodeOAuthAuthorizeUrl.value = 'https://auth.openai.com/device'
+  opencodeOAuthInstructions.value = 'Enter this one-time code: ABCD-EFGH'
   opencodeSessionSeq = 0
+  agentInsertError = false
+  opencodeDeleteError = false
+  deletedOpencodeSessions.length = 0
   createAgentNotificationMock.mockReset()
 }
 
@@ -76,6 +100,7 @@ vi.mock('../db/schema.js', () => ({
     opencodeSessionId: { _col: 'opencodeSessionId' },
     title: { _col: 'title' },
     status: { _col: 'status' },
+    kind: { _col: 'kind' },
     workingDir: { _col: 'workingDir' },
     selectedProviderId: { _col: 'selectedProviderId' },
     selectedModelId: { _col: 'selectedModelId' },
@@ -137,7 +162,13 @@ vi.mock('../db/client.js', () => ({
     insert: () => ({
       values: (value: Record<string, unknown>) => ({
         run: () => {
-          if ('opencodeSessionId' in value) agentRows.push(value as AgentRow)
+          if ('opencodeSessionId' in value) {
+            if (agentInsertError) {
+              agentInsertError = false
+              throw new Error('agent row insert failed')
+            }
+            agentRows.push(value as AgentRow)
+          }
           else if ('contentJson' in value) transcriptRows.push(value as TranscriptRow)
           else recentRows.push(value as { path: string; label: string | null; lastOpenedAt: string })
         },
@@ -194,7 +225,14 @@ vi.mock('@opencode-ai/sdk', () => ({
         opencodeAbortCalls.push(path.id)
         opencodeStatusData.delete(path.id)
       },
-      promptAsync: async () => undefined,
+      promptAsync: async (options: Record<string, unknown>) => {
+        opencodePromptCalls.push(options)
+      },
+      delete: async ({ path }: { path: { id: string } }) => {
+        if (opencodeDeleteError) throw new Error('delete failed')
+        deletedOpencodeSessions.push(path.id)
+        return { data: true }
+      },
     },
     config: {
       providers: async (options: unknown) => {
@@ -211,6 +249,24 @@ vi.mock('@opencode-ai/sdk', () => ({
             ],
           },
         }
+      },
+    },
+    provider: {
+      auth: async () => ({ data: opencodeAuthMethods }),
+      oauth: {
+        authorize: async (options: Record<string, unknown>) => {
+          opencodeOAuthAuthorizeCalls.push(options)
+          return {
+            data: {
+              url: opencodeOAuthAuthorizeUrl.value,
+              instructions: opencodeOAuthInstructions.value,
+            },
+          }
+        },
+        callback: async (options: Record<string, unknown>) => {
+          opencodeOAuthCallbackCalls.push(options)
+          return { data: true }
+        },
       },
     },
     postSessionIdPermissionsPermissionId: async ({
@@ -284,6 +340,31 @@ describe('agent context usage limits', () => {
   })
 })
 
+describe('OpenAI OAuth', () => {
+  it('uses the Device Code method instead of the blocking browser method', async () => {
+    const { agentService } = await import('./service.js')
+
+    await expect(agentService.openAIOAuthStart()).resolves.toEqual({
+      url: 'https://auth.openai.com/device',
+      deviceCode: 'ABCD-EFGH',
+      methodIndex: 1,
+    })
+    expect(opencodeOAuthAuthorizeCalls[0]).toMatchObject({ body: { method: 1 } })
+    expect(opencodeOAuthCallbackCalls[0]).toMatchObject({ body: { method: 1 } })
+  })
+
+  it('rejects an empty authorization URL before starting the callback', async () => {
+    const { agentService } = await import('./service.js')
+    opencodeOAuthAuthorizeUrl.value = '   '
+
+    await expect(agentService.openAIOAuthStart()).rejects.toMatchObject({
+      code: 'unavailable',
+      message: 'OpenAI OAuth did not return a login URL',
+    })
+    expect(opencodeOAuthCallbackCalls).toEqual([])
+  })
+})
+
 describe('agent service workspace sessions', () => {
   it('session creation persists workspaceId and workingDir', async () => {
     const { agentService } = await import('./service.js')
@@ -296,10 +377,12 @@ describe('agent service workspace sessions', () => {
 
     expect(session.workspaceId).toBe('workspace-a')
     expect(session.workingDir).toBe('/tmp/project-a')
+    expect(session.kind).toBe('chat')
     expect(agentRows[0]).toMatchObject({
       workspaceId: 'workspace-a',
       workingDir: '/tmp/project-a',
       title: 'Project A',
+      kind: 'chat',
     })
   })
 
@@ -309,6 +392,7 @@ describe('agent service workspace sessions', () => {
     await agentService.sessionStart({ workspaceId: 'workspace-a', directory: '/tmp/a' })
     await agentService.sessionStart({ workspaceId: 'workspace-b', directory: '/tmp/b' })
     await agentService.sessionStart({ directory: '/tmp/legacy' })
+    await agentService.sessionStartInternal({ workspaceId: 'workspace-a', directory: '/tmp/task', kind: 'subtask' })
 
     const scoped = await agentService.sessionList({ workspaceId: 'workspace-a' })
     expect(scoped).toHaveLength(1)
@@ -316,6 +400,84 @@ describe('agent service workspace sessions', () => {
 
     const all = await agentService.sessionList()
     expect(all).toHaveLength(3)
+    expect(await agentService.sessionList({ includeSubtasks: true })).toHaveLength(4)
+  })
+
+  it('exposes dispatch to workspace agents and delivery only to subtasks', async () => {
+    const { agentService } = await import('./service.js')
+    const chat = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    const dispatch = await agentService.sessionStartInternal({ workspaceId: 'workspace-a', kind: 'dispatch' })
+    const subtask = await agentService.sessionStartInternal({ workspaceId: 'workspace-a', kind: 'subtask' })
+    const unscoped = await agentService.sessionStart({})
+
+    await agentService.sessionSend({ sessionId: chat.id, message: 'chat' })
+    await agentService.sessionSend({ sessionId: dispatch.id, message: 'dispatch' })
+    await agentService.sessionSend({ sessionId: subtask.id, message: 'subtask' })
+    await agentService.sessionSend({ sessionId: unscoped.id, message: 'unscoped' })
+
+    const toolFlags = opencodePromptCalls.map((call) =>
+      ((call.body as { tools: Record<string, boolean> }).tools).kaivo_dispatch_subtask,
+    )
+    expect(toolFlags).toEqual([true, true, false, false])
+    const deliveryFlags = opencodePromptCalls.map((call) =>
+      ((call.body as { tools: Record<string, boolean> }).tools).kaivo_report_subtask_delivery,
+    )
+    expect(deliveryFlags).toEqual([false, false, true, false])
+  })
+
+  it('converts only active workspace chats to dispatch sessions', async () => {
+    const { agentService } = await import('./service.js')
+    const chat = await agentService.sessionStart({ workspaceId: 'workspace-a', directory: '/tmp/a' })
+
+    await expect(agentService.sessionConvertToDispatch({ sessionId: chat.id }))
+      .resolves.toMatchObject({ id: chat.id, workspaceId: 'workspace-a', kind: 'dispatch' })
+    expect(agentRows[0]?.kind).toBe('dispatch')
+    await expect(agentService.sessionConvertToDispatch({ sessionId: chat.id }))
+      .rejects.toMatchObject({ code: 'invalid_state' })
+
+    const archived = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    await agentService.sessionSetStatus({ sessionId: archived.id, status: 'archived' })
+    await expect(agentService.sessionConvertToDispatch({ sessionId: archived.id }))
+      .rejects.toMatchObject({ code: 'invalid_state' })
+
+    const unscoped = await agentService.sessionStart({ directory: '/tmp/unscoped' })
+    await expect(agentService.sessionConvertToDispatch({ sessionId: unscoped.id }))
+      .rejects.toMatchObject({ code: 'invalid_state' })
+  })
+
+  it('keeps archived transcripts readable but rejects sends until reopen', async () => {
+    const { agentService } = await import('./service.js')
+    const subtask = await agentService.sessionStartInternal({ workspaceId: 'workspace-a', kind: 'subtask' })
+    await agentService.sessionSetStatus({ sessionId: subtask.id, status: 'archived' })
+
+    await expect(agentService.sessionSend({ sessionId: subtask.id, message: 'must not send' }))
+      .rejects.toMatchObject({ code: 'invalid_state' })
+    await expect(agentService.openCodeSessionMessages(subtask.id)).resolves.toEqual([])
+
+    await agentService.sessionSetStatus({ sessionId: subtask.id, status: 'active' })
+    await expect(agentService.sessionSend({ sessionId: subtask.id, message: 'resumed' })).resolves.toEqual({ queued: false })
+  })
+
+  it('compensates an OpenCode session when persisting its agent row fails', async () => {
+    const { agentService } = await import('./service.js')
+    agentInsertError = true
+
+    await expect(agentService.sessionStartInternal({ workspaceId: 'workspace-a', kind: 'subtask' }))
+      .rejects.toThrow('agent row insert failed')
+    expect(agentRows).toEqual([])
+    expect(deletedOpencodeSessions).toEqual(['oc-1'])
+  })
+
+  it('reports an orphan OpenCode session when compensation fails', async () => {
+    const { agentService } = await import('./service.js')
+    agentInsertError = true
+    opencodeDeleteError = true
+
+    await expect(agentService.sessionStartInternal({ workspaceId: 'workspace-a', kind: 'subtask' }))
+      .rejects.toMatchObject({
+        code: 'start_failed',
+        residualArtifacts: ['opencode_session:oc-1'],
+      })
   })
 
   it('keeps OpenCode message events live-only without replay rows', async () => {
