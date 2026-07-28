@@ -6,7 +6,7 @@ import { agentSessions, agentTranscripts, type AgentSessionKind, type AgentSessi
 import { logger } from '../logger.js'
 import { recentFolderService } from '../recent-folders/service.js'
 import { getMeta, setDefaultModel as setEnvDefaultModel } from '../envmeta/service.js'
-import { AGENT_SESSION_RUNTIME_TABLE, getAgentRuntimeRealtime } from './runtime-realtime.js'
+import { AGENT_SESSION_RUNTIME_TABLE, getAgentRuntimeRealtime, type AgentSessionRuntimeRow } from './runtime-realtime.js'
 import {
   OpenCodeError,
   hasOpenAIOAuthMarker,
@@ -294,6 +294,7 @@ class AgentService {
   private runningOpencodeSessions = new Set<string>()
   private userAbortedOpencodeSessions = new Set<string>()
   private queuedFollowUps = new Map<string, QueuedFollowUp[]>()
+  private queuedFollowUpDrains = new Set<string>()
   private blockingNotificationKeys = new Set<string>()
   private surfacedStatusErrors = new Map<string, string>()
   private openAIOAuthStatus: OpenAIOAuthStatus = {
@@ -578,8 +579,18 @@ class AgentService {
       })
     }
 
+    this.ensureSubscription(input.directory ?? '')
+    this.upsertAgentRuntime({
+      id,
+      workspaceId: input.workspaceId ?? null,
+      opencodeSessionId: ocSession.id,
+      status: 'active',
+      lastActivityAt: now.toISOString(),
+    }, { running: Boolean(input.prompt), lastActivityAt: now })
+
     if (input.prompt) {
       const prompt = input.prompt
+      this.runningOpencodeSessions.add(ocSession.id)
       void client.session
         .promptAsync({
           path: { id: ocSession.id },
@@ -592,17 +603,11 @@ class AgentService {
           }),
           ...directoryOpts(input.directory),
         })
-        .catch((err) => logger.warn({ err, id }, 'session prompt failed'))
+        .catch((err) => {
+          this.reconcileOpencodeSessionRunning(ocSession.id, false)
+          logger.warn({ err, id }, 'session prompt failed')
+        })
     }
-
-    this.ensureSubscription(input.directory ?? '')
-    this.upsertAgentRuntime({
-      id,
-      workspaceId: input.workspaceId ?? null,
-      opencodeSessionId: ocSession.id,
-      status: 'active',
-      lastActivityAt: now.toISOString(),
-    }, { running: Boolean(input.prompt), lastActivityAt: now })
 
     const summary: AgentSessionSummary = {
       id,
@@ -1065,7 +1070,10 @@ class AgentService {
       const st = statuses[row.opencodeSessionId]
       running = st?.type === 'busy'
       if (st?.type === 'retry') await this.handleRetryStatus(row.opencodeSessionId, st, client, dirOpts)
-      else this.surfacedStatusErrors.delete(row.opencodeSessionId)
+      else {
+        this.surfacedStatusErrors.delete(row.opencodeSessionId)
+        this.reconcileOpencodeSessionRunning(row.opencodeSessionId, running)
+      }
     } catch {
       // opencode down
     }
@@ -1212,6 +1220,7 @@ class AgentService {
         ...dirOpts,
         throwOnError: true,
       })
+      this.reconcileOpencodeSessionRunning(row.opencodeSessionId, false)
     } catch (err) {
       this.userAbortedOpencodeSessions.delete(row.opencodeSessionId)
       throw err
@@ -1562,7 +1571,7 @@ class AgentService {
       if (type === 'session.idle' || type === 'session.error') {
         if (hadRunningRun && type === 'session.idle') {
           const hasQueuedFollowUp = (this.queuedFollowUps.get(ocSessionId)?.length ?? 0) > 0
-          if (hasQueuedFollowUp) setTimeout(() => void this.drainQueuedFollowUps(ocSessionId), 0)
+          if (hasQueuedFollowUp) this.scheduleQueuedFollowUpDrain(ocSessionId)
           else if (!this.isSubtaskOpencodeSession(ocSessionId)) void this.createFinishedNotification(ocSessionId)
         }
         if (type === 'session.error') {
@@ -1741,22 +1750,26 @@ class AgentService {
     message: string
   }): Promise<void> {
     this.emitTranscriptEvent(input.row.opencodeSessionId, 'session.busy', { sessionID: input.row.opencodeSessionId })
-    await input.client.session.promptAsync({
-      path: { id: input.row.opencodeSessionId },
-      body: promptBody({
-        text: input.message,
-        model: input.model,
-        variant: input.variant,
-        sessionKind: input.row.kind,
-        workspaceScoped: Boolean(input.row.workspaceId),
-      }),
-      ...input.dirOpts,
-      throwOnError: true,
-    })
+    try {
+      await input.client.session.promptAsync({
+        path: { id: input.row.opencodeSessionId },
+        body: promptBody({
+          text: input.message,
+          model: input.model,
+          variant: input.variant,
+          sessionKind: input.row.kind,
+          workspaceScoped: Boolean(input.row.workspaceId),
+        }),
+        ...input.dirOpts,
+        throwOnError: true,
+      })
+    } catch (err) {
+      this.reconcileOpencodeSessionRunning(input.row.opencodeSessionId, false)
+      throw err
+    }
   }
 
   private async isOpencodeSessionRunning(client: OpencodeClient, opencodeSessionId: string, dirOpts: ReturnType<typeof directoryOpts>): Promise<boolean> {
-    if (this.runningOpencodeSessions.has(opencodeSessionId)) return true
     try {
       const statusRes = await client.session.status({ ...dirOpts, throwOnError: true })
       const statuses = statusRes.data as Record<string, OpencodeSessionStatus>
@@ -1765,10 +1778,37 @@ class AgentService {
         await this.handleRetryStatus(opencodeSessionId, st, client, dirOpts)
         return false
       }
-      return st?.type === 'busy'
+      const running = st?.type === 'busy'
+      this.reconcileOpencodeSessionRunning(opencodeSessionId, running)
+      return running
     } catch {
-      return false
+      return this.runningOpencodeSessions.has(opencodeSessionId)
     }
+  }
+
+  private reconcileOpencodeSessionRunning(opencodeSessionId: string, running: boolean): void {
+    const wasRunning = this.runningOpencodeSessions.has(opencodeSessionId)
+    if (running) this.runningOpencodeSessions.add(opencodeSessionId)
+    else this.runningOpencodeSessions.delete(opencodeSessionId)
+
+    const rootOpencodeSessionId = this.resolveRootOpencodeSessionId(opencodeSessionId)
+    const rootRunning = this.relatedOpencodeSessionIds(rootOpencodeSessionId)
+      .some((id) => this.runningOpencodeSessions.has(id))
+    if (wasRunning !== running || this.agentRuntimeRunningForOpencode(rootOpencodeSessionId) !== rootRunning) {
+      this.upsertAgentRuntimeForOpencode(rootOpencodeSessionId, { running: rootRunning, lastActivityAt: new Date() })
+    }
+    if (!running && (this.queuedFollowUps.get(opencodeSessionId)?.length ?? 0) > 0) {
+      this.scheduleQueuedFollowUpDrain(opencodeSessionId)
+    }
+  }
+
+  private scheduleQueuedFollowUpDrain(opencodeSessionId: string): void {
+    if (this.queuedFollowUpDrains.has(opencodeSessionId)) return
+    this.queuedFollowUpDrains.add(opencodeSessionId)
+    setTimeout(() => {
+      void this.drainQueuedFollowUps(opencodeSessionId)
+        .finally(() => this.queuedFollowUpDrains.delete(opencodeSessionId))
+    }, 0)
   }
 
   private async drainQueuedFollowUps(opencodeSessionId: string): Promise<void> {
@@ -2004,6 +2044,21 @@ class AgentService {
       .limit(1)
       .all()[0]
     if (row) this.upsertAgentRuntime(row, patch)
+  }
+
+  private agentRuntimeRunningForOpencode(opencodeSessionId: string): boolean | undefined {
+    const row = db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(eq(agentSessions.opencodeSessionId, opencodeSessionId))
+      .limit(1)
+      .all()[0]
+    if (!row) return undefined
+    const runtime = getAgentRuntimeRealtime()
+      .snapshot<AgentSessionRuntimeRow>(AGENT_SESSION_RUNTIME_TABLE)
+      .rows
+      .find((candidate) => candidate.sessionId === row.id)
+    return runtime?.running
   }
 
   private upsertAgentRuntime(row: {

@@ -26,12 +26,13 @@ export const agentRuntimeRouter = router({
           if (!row) return true
           return row?.workspaceId === input.workspaceId
         })
-        const missed = filter(realtime.changes(input.afterSeq, [AGENT_SESSION_RUNTIME_TABLE]))
-        if (missed.length > 0) emit.next(missed)
-        return realtime.subscribe((events) => {
+        const unsubscribe = realtime.subscribe((events) => {
           const filtered = filter(events)
           if (filtered.length > 0) emit.next(filtered)
         })
+        const missed = filter(realtime.changes(input.afterSeq, [AGENT_SESSION_RUNTIME_TABLE]))
+        if (missed.length > 0) emit.next(missed)
+        return unsubscribe
       })
     }),
 })

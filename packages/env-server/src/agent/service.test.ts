@@ -45,6 +45,7 @@ const opencodePermissionCalls = vi.hoisted(() => [] as Array<{ sessionId: string
 const opencodePermissionFetchCalls = vi.hoisted(() => [] as Array<{ url: string; reply: string }>)
 const opencodePermissionError = vi.hoisted(() => ({ value: null as Error | null }))
 const opencodePromptCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+const opencodePromptError = vi.hoisted(() => ({ value: null as Error | null }))
 const opencodeAuthMethods = vi.hoisted(() => ({
   openai: [
     { type: 'oauth', label: 'Codex OAuth (ChatGPT Plus/Pro)' },
@@ -72,6 +73,7 @@ function resetState() {
   opencodePermissionFetchCalls.length = 0
   opencodePermissionError.value = null
   opencodePromptCalls.length = 0
+  opencodePromptError.value = null
   opencodeOAuthAuthorizeCalls.length = 0
   opencodeOAuthCallbackCalls.length = 0
   opencodeOAuthAuthorizeUrl.value = 'https://auth.openai.com/device'
@@ -227,6 +229,7 @@ vi.mock('@opencode-ai/sdk', () => ({
       },
       promptAsync: async (options: Record<string, unknown>) => {
         opencodePromptCalls.push(options)
+        if (opencodePromptError.value) throw opencodePromptError.value
       },
       delete: async ({ path }: { path: { id: string } }) => {
         if (opencodeDeleteError) throw new Error('delete failed')
@@ -456,6 +459,37 @@ describe('agent service workspace sessions', () => {
 
     await agentService.sessionSetStatus({ sessionId: subtask.id, status: 'active' })
     await expect(agentService.sessionSend({ sessionId: subtask.id, message: 'resumed' })).resolves.toEqual({ queued: false })
+  })
+
+  it('rechecks OpenCode status instead of queueing from stale running state', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    await (agentService as unknown as { handleEvent(raw: unknown): Promise<void> }).handleEvent({
+      type: 'session.busy',
+      properties: { sessionID: session.opencodeSessionId },
+    })
+    opencodeStatusData.set(session.opencodeSessionId, { type: 'idle' })
+
+    await expect(agentService.sessionSend({ sessionId: session.id, message: 'send now' }))
+      .resolves.toEqual({ queued: false })
+
+    expect(opencodeStatusCalls).toHaveLength(1)
+    expect(opencodePromptCalls).toHaveLength(1)
+  })
+
+  it('clears running state when prompt submission fails', async () => {
+    const { agentService } = await import('./service.js')
+    const { AGENT_SESSION_RUNTIME_TABLE, getAgentRuntimeRealtime } = await import('./runtime-realtime.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    opencodePromptError.value = new Error('prompt rejected')
+
+    await expect(agentService.sessionSend({ sessionId: session.id, message: 'fail' }))
+      .rejects.toThrow('prompt rejected')
+
+    expect(getAgentRuntimeRealtime().snapshot(AGENT_SESSION_RUNTIME_TABLE).rows[0]).toMatchObject({
+      sessionId: session.id,
+      running: false,
+    })
   })
 
   it('compensates an OpenCode session when persisting its agent row fails', async () => {
@@ -900,6 +934,46 @@ describe('agent service workspace sessions', () => {
     expect(getAgentRuntimeRealtime().snapshot(AGENT_SESSION_RUNTIME_TABLE).rows[0]).toMatchObject({
       running: false,
       pendingAttentionCount: 0,
+    })
+  })
+
+  it('repairs stale runtime state from authoritative status polling', async () => {
+    const { agentService } = await import('./service.js')
+    const { AGENT_SESSION_RUNTIME_TABLE, getAgentRuntimeRealtime } = await import('./runtime-realtime.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    getAgentRuntimeRealtime().upsert(AGENT_SESSION_RUNTIME_TABLE, {
+      sessionId: session.id,
+      workspaceId: 'workspace-a',
+      running: true,
+      pendingAttentionCount: 0,
+      lastActivityAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    opencodeStatusData.set(session.opencodeSessionId, { type: 'idle' })
+
+    await expect(agentService.sessionStatus({ sessionId: session.id })).resolves.toMatchObject({ running: false })
+
+    expect(getAgentRuntimeRealtime().snapshot(AGENT_SESSION_RUNTIME_TABLE).rows[0]).toMatchObject({
+      sessionId: session.id,
+      running: false,
+    })
+  })
+
+  it('drains a queued follow-up when status polling discovers the session is idle', async () => {
+    const { agentService } = await import('./service.js')
+    const session = await agentService.sessionStart({ workspaceId: 'workspace-a' })
+    opencodeStatusData.set(session.opencodeSessionId, { type: 'busy' })
+
+    await expect(agentService.sessionSend({ sessionId: session.id, message: 'queued follow-up' }))
+      .resolves.toMatchObject({ queued: true })
+    expect(opencodePromptCalls).toEqual([])
+
+    opencodeStatusData.set(session.opencodeSessionId, { type: 'idle' })
+    await agentService.sessionStatus({ sessionId: session.id })
+
+    await vi.waitFor(() => expect(opencodePromptCalls).toHaveLength(1))
+    expect(opencodePromptCalls[0]).toMatchObject({
+      path: { id: session.opencodeSessionId },
     })
   })
 })
