@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS workspace_tabs (
   shell_id TEXT,
   path TEXT,
   repo_root TEXT,
+  walkthrough_id TEXT,
   session_id TEXT,
   port INTEGER,
   url TEXT,
@@ -385,6 +386,7 @@ function migrateWorkspaceUiStateBlob(sqlite: Database.Database) {
       shell_id TEXT,
       path TEXT,
       repo_root TEXT,
+      walkthrough_id TEXT,
       session_id TEXT,
       port INTEGER,
       url TEXT,
@@ -710,6 +712,12 @@ function migrateAgentNotificationReceipts(sqlite: Database.Database) {
   `)
 }
 
+function migrateWorkspaceTabWalkthroughId(sqlite: Database.Database) {
+  if (tableExists(sqlite, 'workspace_tabs') && !columnExists(sqlite, 'workspace_tabs', 'walkthrough_id')) {
+    sqlite.exec('ALTER TABLE workspace_tabs ADD COLUMN walkthrough_id TEXT')
+  }
+}
+
 export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResult {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
   const sqlite = new Database(sqlitePath)
@@ -897,6 +905,18 @@ export function runLocalAppMigrations(sqlitePath: string): LocalAppMigrationResu
         sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(agentNotificationReceiptsMigrationName)
       })()
       applied.push(agentNotificationReceiptsMigrationName)
+    }
+
+    const workspaceTabWalkthroughIdMigrationName = '0016_workspace_tab_walkthrough_id'
+    const workspaceTabWalkthroughIdMigrationAlreadyApplied = sqlite
+      .prepare('SELECT 1 FROM schema_migrations WHERE name = ?')
+      .get(workspaceTabWalkthroughIdMigrationName)
+    if (!workspaceTabWalkthroughIdMigrationAlreadyApplied) {
+      sqlite.transaction(() => {
+        migrateWorkspaceTabWalkthroughId(sqlite)
+        sqlite.prepare('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)').run(workspaceTabWalkthroughIdMigrationName)
+      })()
+      applied.push(workspaceTabWalkthroughIdMigrationName)
     }
 
     return { sqlitePath, applied }

@@ -26,6 +26,7 @@ async function main(): Promise<void> {
   console.log(`  desktop auth: enabled`)
 
   const desktopCwd = path.join(cwd, 'packages/kaivo-desktop')
+  run('npm', ['install', '--no-audit', '--no-fund', '--silent'], desktopCwd)
   run('npm', ['run', 'build'], desktopCwd)
 
   const electron = spawn('node_modules/.bin/electron', ['dist/main.js'], {

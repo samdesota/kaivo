@@ -45,6 +45,7 @@ export type WorkspaceTabRow = {
   shellId: string | null
   path: string | null
   repoRoot: string | null
+  walkthroughId: string | null
   sessionId: string | null
   port: number | null
   url: string | null
@@ -199,6 +200,7 @@ export const workspaceTabs = sqliteTable(
     shellId: text('shell_id'),
     path: text('path'),
     repoRoot: text('repo_root'),
+    walkthroughId: text('walkthrough_id'),
     sessionId: text('session_id'),
     port: integer('port'),
     url: text('url'),

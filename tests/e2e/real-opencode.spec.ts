@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { promisify } from 'node:util'
 import Database from 'better-sqlite3'
+import { closedWalkthroughDirectiveFences } from '../../shared/walkthrough-directive'
 import { expect, test, type Page } from '@playwright/test'
 import { mockLlmText, startMockLlmServer, type MockLlmServer } from './helpers/mock-llm-server'
 
@@ -12,6 +14,7 @@ type LaunchManifest = {
 }
 
 const e2eAgentEventToken = 'opencode-e2e-agent-event-token'
+const execFileAsync = promisify(execFile)
 
 test('real OpenCode stack responds through mocked LLM from the UI', async ({ page }) => {
   test.setTimeout(180_000)
@@ -97,6 +100,99 @@ test('real OpenCode stack responds through mocked LLM from the UI', async ({ pag
   }
 })
 
+test('real OpenCode streams a pinned tool-free code walkthrough', async ({ page }) => {
+  test.setTimeout(180_000)
+  const harness = await startRealOpenCodeHarness()
+  try {
+    const clientUrl = serverUrl(harness.manifest, 'client')
+    await login(page, clientUrl)
+    const workspace = await appTrpcMutation<{ id: string; name: string }>(page, 'workspace.create', {
+      name: `Real Walkthrough ${Date.now()}`,
+    })
+    await page.goto(`${clientUrl}/w/${workspace.id}`)
+    await waitForAppDataReady(page)
+    const env = await localEnvRegistration(page)
+    const walkthroughRepo = path.join(harness.manifest.storage.envWorkspacePath, 'walkthrough-repo')
+    await fs.mkdir(walkthroughRepo, { recursive: true })
+    await execFileAsync('git', ['init', '-b', 'main'], { cwd: walkthroughRepo })
+    await execFileAsync('git', ['config', 'user.email', 'walkthrough@kaivo.local'], { cwd: walkthroughRepo })
+    await execFileAsync('git', ['config', 'user.name', 'Walkthrough E2E'], { cwd: walkthroughRepo })
+    await fs.writeFile(path.join(walkthroughRepo, 'behavior.ts'), 'export const behavior = "old"\n')
+    await fs.writeFile(path.join(walkthroughRepo, 'support.ts'), 'export const support = "old"\n')
+    await execFileAsync('git', ['add', '.'], { cwd: walkthroughRepo })
+    await execFileAsync('git', ['commit', '-m', 'base'], { cwd: walkthroughRepo })
+    await fs.writeFile(path.join(walkthroughRepo, 'behavior.ts'), 'export const behavior = "new"\n')
+    await fs.writeFile(path.join(walkthroughRepo, 'support.ts'), 'export const support = "new"\n')
+    const walkthrough = await envTrpcMutation<{ walkthroughId: string }>(harness.manifest, env.envToken, 'walkthrough.start', {
+      requestKey: `real-opencode-walkthrough-${Date.now()}`,
+      cwd: walkthroughRepo,
+      comparison: { kind: 'working-tree', branch: { kind: 'branch', originBranch: null, includeUncommitted: true } },
+    })
+    await appTrpcMutation(page, 'workspace.upsertTab', {
+      workspaceId: workspace.id,
+      position: 0,
+      tab: {
+        id: 'real-walkthrough-tab',
+        type: 'code-walkthrough',
+        envId: env.id,
+        repoRoot: walkthroughRepo,
+        walkthroughId: walkthrough.walkthroughId,
+        title: 'Code Walkthrough',
+      },
+    })
+    await page.reload()
+    await waitForAppDataReady(page)
+    await expect(page.getByRole('tab', { name: /Code Walkthrough/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Conceptual walkthrough' })).toBeVisible({ timeout: 60_000 })
+    type WalkthroughSnapshot = {
+      status: string
+      markdown: string
+      runner: { providerID: string; modelID: string; variant: string | null; sessionId: string | null } | null
+      coverage: { covered: number; total: number; missing: number }
+      error: string | null
+    }
+    await expect.poll(async () => {
+      const snapshot = await envTrpcQuery<WalkthroughSnapshot>(harness.manifest, env.envToken, 'walkthrough.snapshot', { walkthroughId: walkthrough.walkthroughId })
+      if (snapshot.status === 'failed') throw new Error(`walkthrough failed: ${snapshot.error}`)
+      return snapshot.status === 'streaming' && snapshot.markdown.includes('Conceptual walkthrough')
+    }, { timeout: 60_000, intervals: [20, 50, 100] }).toBe(true)
+    await expect.poll(async () => {
+      const snapshot = await envTrpcQuery<WalkthroughSnapshot>(harness.manifest, env.envToken, 'walkthrough.snapshot', { walkthroughId: walkthrough.walkthroughId })
+      return snapshot.status
+    }, { timeout: 60_000 }).toBe('completed')
+    const snapshot = await envTrpcQuery<WalkthroughSnapshot>(harness.manifest, env.envToken, 'walkthrough.snapshot', { walkthroughId: walkthrough.walkthroughId })
+    expect(snapshot.coverage.covered).toBe(snapshot.coverage.total)
+    expect(snapshot.markdown.indexOf('## Concept 2')).toBeLessThan(snapshot.markdown.indexOf('## Concept 1'))
+    expect(snapshot.runner).toMatchObject({ providerID: 'openai', modelID: 'gpt-5.6-sol', sessionId: expect.any(String) })
+    expect(walkthroughEventTypes(harness.manifest.storage.envDbPath, walkthrough.walkthroughId)).toContain('markdown.appended')
+    const streamedEvents = walkthroughEvents(harness.manifest.storage.envDbPath, walkthrough.walkthroughId)
+    let streamedMarkdown = ''
+    let observedPendingFence = false
+    for (const event of streamedEvents) {
+      if (event.type === 'markdown.appended') {
+        streamedMarkdown += (event.data as { markdown: string }).markdown
+        if (streamedMarkdown.includes('```kaivo-diff') && closedWalkthroughDirectiveFences(streamedMarkdown).length === 0) observedPendingFence = true
+      }
+      if (event.type === 'coverage.changed') expect(closedWalkthroughDirectiveFences(streamedMarkdown).length).toBeGreaterThan(0)
+    }
+    expect(observedPendingFence).toBe(true)
+    const request = harness.llm.requests.find((candidate) => JSON.stringify(candidate.body).includes('CANONICAL MANIFEST'))
+    expect(request).toBeTruthy()
+    expect((request?.body as { tools?: unknown[] }).tools ?? []).toEqual([])
+    await expect(page.locator('[data-walkthrough-directive]')).toHaveCount(2)
+    await expect(page.getByText('export const support = "new"', { exact: true })).toBeVisible()
+    await page.setViewportSize({ width: 480, height: 800 })
+    const contained = await page.getByRole('article').evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
+    expect(contained).toBe(true)
+  } catch (err) {
+    console.error('mock LLM requests:', JSON.stringify(harness.llm.requests, null, 2))
+    console.error(await collectLaunchLogs(harness.manifest))
+    throw err
+  } finally {
+    await harness.close()
+  }
+})
+
 async function startRealOpenCodeHarness(): Promise<{
   llm: MockLlmServer
   manifest: LaunchManifest
@@ -110,6 +206,7 @@ async function startRealOpenCodeHarness(): Promise<{
   try {
     child = spawn('npm', ['run', 'dev:web'], {
       cwd: process.cwd(),
+      detached: true,
       env: {
         ...process.env,
         HOME: path.join(root, 'home'),
@@ -120,6 +217,7 @@ async function startRealOpenCodeHarness(): Promise<{
         CC_SEED_OPENAI_BASE_URL: llm.url,
         CC_SEED_MODEL_PROVIDER: 'openai',
         CC_SEED_MODEL_ID: 'gpt-5.5',
+        CC_WALKTHROUGH_EVENT_CHUNK_BYTES: '64',
         CC_SERVICE_CREDENTIAL: 'opencode-e2e-service-credential',
         CC_E2E_AGENT_EVENT_TOKEN: e2eAgentEventToken,
       },
@@ -163,7 +261,13 @@ async function waitForManifest(instanceRoot: string): Promise<LaunchManifest> {
 
 async function stopProcess(child: ChildProcessWithoutNullStreams | null): Promise<void> {
   if (!child || child.exitCode !== null) return
-  child.kill('SIGTERM')
+  const pid = child.pid
+  try {
+    if (pid === undefined) throw new Error('child process has no pid')
+    process.kill(-pid, 'SIGTERM')
+  } catch {
+    child.kill('SIGTERM')
+  }
   await new Promise<void>((resolve) => {
     child.once('exit', () => resolve())
     setTimeout(resolve, 2_000).unref()
@@ -194,6 +298,25 @@ function latestAgentSession(dbPath: string): { id: string; opencodeSessionId: st
     const row = db.prepare('select id, opencode_session_id as opencodeSessionId from agent_sessions order by last_activity_at desc limit 1').get() as { id: string; opencodeSessionId: string } | undefined
     if (!row) throw new Error('no agent session found')
     return row
+  } finally {
+    db.close()
+  }
+}
+
+function walkthroughEventTypes(dbPath: string, walkthroughId: string): string[] {
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+  try {
+    return (db.prepare('select type from walkthrough_events where walkthrough_id = ? order by sequence').all(walkthroughId) as Array<{ type: string }>).map((row) => row.type)
+  } finally {
+    db.close()
+  }
+}
+
+function walkthroughEvents(dbPath: string, walkthroughId: string): Array<{ type: string; data: unknown }> {
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+  try {
+    return (db.prepare('select type, data_json from walkthrough_events where walkthrough_id = ? order by sequence').all(walkthroughId) as Array<{ type: string; data_json: string }>)
+      .map((row) => ({ type: row.type, data: JSON.parse(row.data_json) as unknown }))
   } finally {
     db.close()
   }
@@ -314,6 +437,15 @@ async function envTrpcMutation<T>(manifest: LaunchManifest, envToken: string, pa
     headers: { 'content-type': 'application/json', authorization: `Bearer ${envToken}` },
     body: JSON.stringify({ json: input }),
   })
+  if (!res.ok) throw new Error(`${path} failed: ${res.status} ${await res.text()}`)
+  const json = await res.json() as { result?: { data?: { json?: unknown } } }
+  return json.result?.data?.json as T
+}
+
+async function envTrpcQuery<T>(manifest: LaunchManifest, envToken: string, path: string, input?: unknown): Promise<T> {
+  const url = new URL(`${serverUrl(manifest, 'env')}/trpc/${path}`)
+  url.searchParams.set('input', JSON.stringify({ json: input }))
+  const res = await fetch(url, { headers: { authorization: `Bearer ${envToken}` } })
   if (!res.ok) throw new Error(`${path} failed: ${res.status} ${await res.text()}`)
   const json = await res.json() as { result?: { data?: { json?: unknown } } }
   return json.result?.data?.json as T

@@ -274,6 +274,20 @@ describe('UniversalMenu baseline shell', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
   })
 
+  it('opens Code Walkthrough for the canonical repository root', async () => {
+    const onOpenContent = vi.fn()
+    const onClose = vi.fn()
+    mocks.sessions = [{ id: 'session-active', workingDir: '/repo/packages/app' }]
+    mocks.discoverGit.mockResolvedValueOnce({ root: '/repo', gitDir: '/repo/.git', headOid: 'abc', branch: 'feature' })
+    render(<UniversalMenu open workspaceId="workspace-1" activeSessionId="session-active" hasActiveTab={false} onOpenContent={onOpenContent} onClose={onClose} onCloseTab={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Universal menu search'), { target: { value: 'code walkthrough' } })
+    fireEvent.click(screen.getByRole('button', { name: /Open Code Walkthrough/ }))
+
+    await waitFor(() => expect(onOpenContent).toHaveBeenCalledWith({ type: 'code-walkthrough', cwd: '/repo' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+  })
+
   it('navigates rows with the keyboard and runs the active command', () => {
     const onToggleSidebar = vi.fn()
     render(

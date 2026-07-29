@@ -43,6 +43,10 @@ describe('env-server config instance id', () => {
     expect(config.CC_OPENCODE_GPT55_CONTEXT_LIMIT).toBe(1_050_000)
     expect(config.CC_OPENCODE_GPT55_OUTPUT_LIMIT).toBe(128_000)
     expect(config.CC_OPENCODE_GPT55_COMPACT_LIMIT).toBe(800_000)
+    expect(config.CC_WALKTHROUGH_EVENT_CHUNK_BYTES).toBe(8_192)
+    expect(config.CC_WALKTHROUGH_EVENT_FLUSH_MS).toBe(50)
+    expect(config.CC_WALKTHROUGH_MAX_INPUT_BYTES).toBe(600_000)
+    expect(config.CC_WALKTHROUGH_MAX_OUTPUT_BYTES).toBe(2_097_152)
   })
 })
 

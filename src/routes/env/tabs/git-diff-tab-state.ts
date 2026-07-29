@@ -1,8 +1,6 @@
-export type GitDiffBranchComparison = { kind: 'branch'; originBranch: string | null; includeUncommitted: boolean }
+import { defaultGitDiffComparison, type GitDiffComparison } from './git-comparison'
 
-export type GitDiffComparison =
-  | GitDiffBranchComparison
-  | { kind: 'working-tree'; branch: GitDiffBranchComparison }
+export type { GitDiffComparison } from './git-comparison'
 
 export interface GitDiffTransientState {
   comparison: GitDiffComparison
@@ -14,7 +12,7 @@ const snapshots = new Map<string, unknown>()
 
 export function initialGitDiffState(tabId: string): GitDiffTransientState {
   return states.get(tabId) ?? {
-    comparison: { kind: 'branch', originBranch: null, includeUncommitted: true },
+    comparison: defaultGitDiffComparison,
     expandedFiles: {},
   }
 }

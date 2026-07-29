@@ -53,6 +53,7 @@ type WorkspaceTabRow = {
   shellId: string | null
   path: string | null
   repoRoot: string | null
+  walkthroughId: string | null
   sessionId: string | null
   port: number | null
   url: string | null
@@ -191,6 +192,7 @@ vi.mock('../db/schema.js', () => ({
     id: { _col: 'id' },
     position: { _col: 'position' },
     repoRoot: { _col: 'repoRoot' },
+    walkthroughId: { _col: 'walkthroughId' },
   },
   workspaceAgentTabs: {
     _table: 'workspace_agent_tabs',
@@ -393,6 +395,15 @@ describe('workspace service', () => {
     expect(rowToTab(row)).toEqual(tab)
     expect(sameWorkspaceTabRow(row, { ...row, updatedAt: new Date(9999) })).toBe(true)
     expect(sameWorkspaceTabRow(row, { ...row, repoRoot: '/other' })).toBe(false)
+  })
+
+  it('round trips code walkthrough rows and includes walkthroughId in equality', async () => {
+    const { rowToTab, sameWorkspaceTabRow, tabToRow } = await import('./service.js')
+    const tab = { id: 'walk-tab', type: 'code-walkthrough' as const, envId: 'env-1', repoRoot: '/repo', walkthroughId: 'walk-1', title: 'Code Walkthrough' }
+    const row = tabToRow('workspace-1', tab, 4, new Date(1))
+
+    expect(rowToTab(row)).toEqual(tab)
+    expect(sameWorkspaceTabRow(row, { ...row, walkthroughId: 'walk-2' })).toBe(false)
   })
 
   it('creates, renames, archives, and keeps stable workspace order', async () => {
@@ -753,6 +764,7 @@ describe('workspace router', () => {
     })
     expect(() => paneContentSchema.parse({ type: 'git-diff', cwd: '' })).toThrow()
     expect(() => workspaceTabSchema.parse({ id: 'diff-1', type: 'git-diff', envId: 'env-1', title: 'Git Diff' })).toThrow()
+    expect(workspaceTabSchema.parse({ id: 'walk-tab', type: 'code-walkthrough', envId: 'env-1', repoRoot: '/repo', walkthroughId: 'walk-1', title: 'Code Walkthrough' })).toMatchObject({ walkthroughId: 'walk-1' })
   })
 
   it('persists and reloads UI state for a workspace', async () => {

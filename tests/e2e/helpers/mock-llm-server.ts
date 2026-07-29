@@ -34,9 +34,10 @@ export async function startMockLlmServer(): Promise<MockLlmServer> {
           sendJson(res, { error: { message: failureMessage } }, 500)
           return
         }
+        const text = responseText(body)
         const stream = Boolean((body as { stream?: unknown } | null)?.stream)
-        if (stream) sendChatCompletionStream(res)
-        else sendJson(res, chatCompletionResponse())
+        if (stream) sendChatCompletionStream(res, text)
+        else sendJson(res, chatCompletionResponse(text))
         return
       }
 
@@ -45,9 +46,10 @@ export async function startMockLlmServer(): Promise<MockLlmServer> {
           sendJson(res, { error: { message: failureMessage } }, 500)
           return
         }
+        const text = responseText(body)
         const stream = Boolean((body as { stream?: unknown } | null)?.stream)
-        if (stream) sendResponseStream(res)
-        else sendJson(res, responseApiResponse())
+        if (stream) sendResponseStream(res, text)
+        else sendJson(res, responseApiResponse(text))
         return
       }
 
@@ -83,7 +85,7 @@ async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   return JSON.parse(raw) as unknown
 }
 
-function chatCompletionResponse() {
+function chatCompletionResponse(text = deterministicText) {
   return {
     id: 'chatcmpl-kaivo-test',
     object: 'chat.completion',
@@ -92,7 +94,7 @@ function chatCompletionResponse() {
     choices: [
       {
         index: 0,
-        message: { role: 'assistant', content: deterministicText },
+        message: { role: 'assistant', content: text },
         finish_reason: 'stop',
       },
     ],
@@ -100,70 +102,118 @@ function chatCompletionResponse() {
   }
 }
 
-function responseApiResponse() {
+function responseApiResponse(text = deterministicText) {
   return {
     id: 'resp_kaivo_test',
     object: 'response',
     created_at: Math.floor(Date.now() / 1000),
     model: 'gpt-5.5',
     status: 'completed',
-    output_text: deterministicText,
+    output_text: text,
     output: [
       {
         id: 'msg_kaivo_test',
         type: 'message',
         status: 'completed',
         role: 'assistant',
-        content: [{ type: 'output_text', text: deterministicText, annotations: [] }],
+        content: [{ type: 'output_text', text, annotations: [] }],
       },
     ],
     usage: { input_tokens: 12, output_tokens: 8, total_tokens: 20 },
   }
 }
 
-function sendChatCompletionStream(res: http.ServerResponse): void {
+function sendChatCompletionStream(res: http.ServerResponse, text: string): void {
+  const chunks = streamChunks(text)
   sendSse(res, [
     { id: 'chatcmpl-kaivo-test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] },
-    { id: 'chatcmpl-kaivo-test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: deterministicText }, finish_reason: null }] },
+    ...chunks.map((content) => ({ id: 'chatcmpl-kaivo-test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content }, finish_reason: null }] })),
     { id: 'chatcmpl-kaivo-test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
-  ])
+  ], chunks.length > 1 ? 500 : 0)
 }
 
-function sendResponseStream(res: http.ServerResponse): void {
-  const started = { ...responseApiResponse(), status: 'in_progress', output: [] }
+function sendResponseStream(res: http.ServerResponse, text: string): void {
+  const chunks = streamChunks(text)
+  const started = { ...responseApiResponse(text), status: 'in_progress', output: [] }
   const message = {
     id: 'msg_kaivo_test',
     type: 'message',
     status: 'completed',
     role: 'assistant',
-    content: [{ type: 'output_text', text: deterministicText, annotations: [] }],
+    content: [{ type: 'output_text', text, annotations: [] }],
   }
+  const deltas = chunks.map((delta, index) => ({ type: 'response.output_text.delta', sequence_number: 4 + index, item_id: message.id, output_index: 0, content_index: 0, delta }))
+  const doneSequence = 4 + deltas.length
   sendSse(res, [
     { type: 'response.created', sequence_number: 0, response: started },
     { type: 'response.in_progress', sequence_number: 1, response: started },
     { type: 'response.output_item.added', sequence_number: 2, output_index: 0, item: { ...message, status: 'in_progress', content: [] } },
     { type: 'response.content_part.added', sequence_number: 3, item_id: message.id, output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } },
-    { type: 'response.output_text.delta', sequence_number: 4, item_id: message.id, output_index: 0, content_index: 0, delta: deterministicText },
-    { type: 'response.output_text.done', sequence_number: 5, item_id: message.id, output_index: 0, content_index: 0, text: deterministicText },
-    { type: 'response.content_part.done', sequence_number: 6, item_id: message.id, output_index: 0, content_index: 0, part: message.content[0] },
-    { type: 'response.output_item.done', sequence_number: 7, output_index: 0, item: message },
-    { type: 'response.completed', sequence_number: 8, response: responseApiResponse() },
-  ])
+    ...deltas,
+    { type: 'response.output_text.done', sequence_number: doneSequence, item_id: message.id, output_index: 0, content_index: 0, text },
+    { type: 'response.content_part.done', sequence_number: doneSequence + 1, item_id: message.id, output_index: 0, content_index: 0, part: message.content[0] },
+    { type: 'response.output_item.done', sequence_number: doneSequence + 2, output_index: 0, item: message },
+    { type: 'response.completed', sequence_number: doneSequence + 3, response: responseApiResponse(text) },
+  ], chunks.length > 1 ? 500 : 0)
 }
 
-function sendSse(res: http.ServerResponse, events: unknown[]): void {
+function streamChunks(text: string): string[] {
+  if (!text.startsWith('# Conceptual walkthrough')) return [text]
+  const opening = text.indexOf('```kaivo-diff')
+  const closing = text.indexOf('\n```', opening)
+  if (opening < 0 || closing < 0) return [text]
+  return [text.slice(0, opening), text.slice(opening, closing), text.slice(closing)]
+}
+
+function responseText(body: unknown): string {
+  const strings: string[] = []
+  const visit = (value: unknown) => {
+    if (typeof value === 'string') strings.push(value)
+    else if (Array.isArray(value)) value.forEach(visit)
+    else if (value && typeof value === 'object') Object.values(value).forEach(visit)
+  }
+  visit(body)
+  const prompt = strings.find((value) => value.includes('CANONICAL MANIFEST\n') && value.includes('\n\nRAW UNIFIED DIFF'))
+  if (!prompt) return deterministicText
+  try {
+    const manifest = JSON.parse(prompt.split('CANONICAL MANIFEST\n')[1]!.split('\n\nRAW UNIFIED DIFF')[0]!) as {
+      digest: string
+      files: Array<{ index: number; oldPath: string | null; newPath: string | null }>
+    }
+    return [
+      '# Conceptual walkthrough\n\nThe behavior is reviewed before its supporting files.\n\n',
+      ...manifest.files.slice().reverse().map((file) => {
+        const directive = {
+          version: 1,
+          diff: manifest.digest,
+          id: `concept-${file.index}`,
+          file: { index: file.index, oldPath: file.oldPath, newPath: file.newPath },
+          collapsed: false,
+        }
+        return `## Concept ${file.index + 1}\n\n\`\`\`kaivo-diff\n${JSON.stringify(directive)}\n\`\`\`\n\n`
+      }),
+    ].join('')
+  } catch {
+    return deterministicText
+  }
+}
+
+function sendSse(res: http.ServerResponse, events: unknown[], delayMs = 0): void {
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache',
     connection: 'keep-alive',
   })
-  for (const event of events) {
-    const eventName = typeof event === 'object' && event && 'type' in event ? String((event as { type: unknown }).type) : 'message'
-    res.write(`event: ${eventName}\n`)
-    res.write(`data: ${JSON.stringify(event)}\n\n`)
-  }
-  res.write('data: [DONE]\n\n')
-  res.end()
+  void (async () => {
+    for (const event of events) {
+      const eventName = typeof event === 'object' && event && 'type' in event ? String((event as { type: unknown }).type) : 'message'
+      res.write(`event: ${eventName}\n`)
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+    res.write('data: [DONE]\n\n')
+    res.end()
+  })()
 }
 
 function sendJson(res: http.ServerResponse, body: unknown, status = 200): void {

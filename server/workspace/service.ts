@@ -146,7 +146,8 @@ export function tabToRow(workspaceId: string, tab: WorkspaceTab, position: numbe
     envId: 'envId' in tab ? tab.envId : null,
     shellId: tab.type === 'shell' ? tab.shellId : null,
     path: tab.type === 'file' ? tab.path : null,
-    repoRoot: tab.type === 'git-diff' ? tab.repoRoot : null,
+    repoRoot: tab.type === 'git-diff' || tab.type === 'code-walkthrough' ? tab.repoRoot : null,
+    walkthroughId: tab.type === 'code-walkthrough' ? (tab.walkthroughId ?? null) : null,
     sessionId: tab.type === 'file' ? (tab.sessionId ?? null) : null,
     port: null,
     url: tab.type === 'browser' ? tab.url : null,
@@ -167,6 +168,7 @@ export function sameWorkspaceTabRow(left: WorkspaceTabRow, right: WorkspaceTabRo
     && left.shellId === right.shellId
     && left.path === right.path
     && left.repoRoot === right.repoRoot
+    && left.walkthroughId === right.walkthroughId
     && left.sessionId === right.sessionId
     && left.port === right.port
     && left.url === right.url
@@ -190,6 +192,9 @@ export function rowToTab(row: WorkspaceTabRow): WorkspaceTab | null {
   }
   if (row.type === 'git-diff' && row.envId && row.repoRoot) {
     return { id: row.id, type: 'git-diff', envId: row.envId, repoRoot: row.repoRoot, title: row.title }
+  }
+  if (row.type === 'code-walkthrough' && row.envId && row.repoRoot) {
+    return { id: row.id, type: 'code-walkthrough', envId: row.envId, repoRoot: row.repoRoot, walkthroughId: row.walkthroughId ?? undefined, title: row.title }
   }
   if (row.type === 'browser' && row.url) {
     return { id: row.id, type: 'browser', url: row.url, browserTabId: row.browserTabId ?? undefined, faviconUrl: row.faviconUrl ?? undefined, title: row.title }
@@ -585,6 +590,7 @@ export function createWorkspaceService(database: Db = db) {
           shellId: sql`excluded.shell_id`,
           path: sql`excluded.path`,
           repoRoot: sql`excluded.repo_root`,
+          walkthroughId: sql`excluded.walkthrough_id`,
           sessionId: sql`excluded.session_id`,
           port: sql`excluded.port`,
           url: sql`excluded.url`,

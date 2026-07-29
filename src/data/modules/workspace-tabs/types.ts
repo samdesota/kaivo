@@ -13,6 +13,7 @@ export type WorkspaceTabRecord = {
   shellId: string | null
   path: string | null
   repoRoot: string | null
+  walkthroughId: string | null
   sessionId: string | null
   port: number | null
   url: string | null
