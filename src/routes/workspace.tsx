@@ -75,7 +75,7 @@ import { makeWorkspaceTabId, workspaceTabFromPaneContent } from './workspace/ope
 import { workspaceRollupGlyph, workspaceRollupState } from './workspace/sidebar-rollup-state'
 import { useWorkspaceSidebarLayoutState, WorkspaceSidebarLayout } from './workspace/sidebar-layout'
 import { clearWorkspaceSidebarOverlayTarget, setWorkspaceSidebarOverlayTarget, type WorkspaceSidebarOverlayAction, type WorkspaceSidebarOverlayCommand } from './workspace/sidebar-overlay-controller'
-import { WorkspaceSidebarBridgeStateSource, useWorkspaceSidebarState, type GlobalTabDestination, type GlobalTabsWorkspaceSummary, type WorkspaceSidebarChatRollup, type WorkspaceSidebarStateSnapshot, type WorkspaceSidebarSubtask } from './workspace/sidebar-state'
+import { WorkspaceSidebarBridgeStateSource, useWorkspaceSidebarState, type GlobalTabDestination, type GlobalTabsWorkspaceSummary, type WorkspaceSidebarChatRollup, type WorkspaceSidebarDispatch, type WorkspaceSidebarStateSnapshot, type WorkspaceSidebarSubtask } from './workspace/sidebar-state'
 import { BrowserTabMetadataSync } from './workspace/browser-tab-metadata-sync'
 import { useAgentNotificationsStore, type AgentNotificationRecord } from './workspace/notifications-store'
 import { useAgentRuntimeStore } from './workspace/agent-runtime-store'
@@ -1287,6 +1287,7 @@ export function WorkspaceSidebar({
   const [chatReadVersion, setChatReadVersion] = useState(0)
   const [chatRollups, setChatRollups] = useState<Record<string, WorkspaceSidebarChatRollup>>({})
   const [subtasks, setSubtasks] = useState<Record<string, WorkspaceSidebarSubtask[]>>({})
+  const [dispatches, setDispatches] = useState<Record<string, WorkspaceSidebarDispatch[]>>({})
   const globalDestination = globalTabsDestination ?? EMPTY_GLOBAL_TABS_DESTINATION
   const localEnvAvailable = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
   const workspaceIds = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces])
@@ -1344,6 +1345,13 @@ export function WorkspaceSidebar({
     })
   }, [])
 
+  const updateDispatches = useCallback((workspaceId: string, next: WorkspaceSidebarDispatch[]) => {
+    setDispatches((current) => {
+      if (JSON.stringify(current[workspaceId] ?? []) === JSON.stringify(next)) return current
+      return { ...current, [workspaceId]: next }
+    })
+  }, [])
+
   const closeWorkspaceFromSidebar = useCallback(async (workspaceId: string, archivingWorkspaceIds: Set<string>) => {
     const next = await nextWorkspaceAfterArchive(workspaceId, workspaces, ctx.localEnvTarget, archivingWorkspaceIds)
     if (workspaceId === ctx.workspace.id) {
@@ -1375,9 +1383,10 @@ export function WorkspaceSidebar({
     resources: resourcesStore.records,
     globalTabsDestination: globalDestination,
     chatRollups,
+    dispatches,
     subtasks,
     notifications: notifications.records,
-  }), [chatRollups, ctx.uiState.activeAgentSessionId, ctx.workspace.id, globalDestination, localEnvAvailable, nodes, notifications.records, resourcesStore.records, subtasks, workspaces])
+  }), [chatRollups, ctx.uiState.activeAgentSessionId, ctx.workspace.id, dispatches, globalDestination, localEnvAvailable, nodes, notifications.records, resourcesStore.records, subtasks, workspaces])
 
   useEffect(() => {
     onStateSnapshot?.(state)
@@ -1395,6 +1404,7 @@ export function WorkspaceSidebar({
             onMarkRead={() => setChatReadVersion((version) => version + 1)}
             onRollup={(rollup) => updateChatRollup(workspaceId, rollup)}
             onSubtasks={(tasks) => updateSubtasks(workspaceId, tasks)}
+            onDispatches={(next) => updateDispatches(workspaceId, next)}
           />
         </WorkspaceAgentEnvProvider>
       ))}
@@ -1430,6 +1440,7 @@ function WorkspaceSidebarSnapshotPublisher({
   const [chatReadVersion, setChatReadVersion] = useState(0)
   const [chatRollups, setChatRollups] = useState<Record<string, WorkspaceSidebarChatRollup>>({})
   const [subtasks, setSubtasks] = useState<Record<string, WorkspaceSidebarSubtask[]>>({})
+  const [dispatches, setDispatches] = useState<Record<string, WorkspaceSidebarDispatch[]>>({})
   const localEnvAvailable = Boolean(ctx.localEnvTarget?.available && ctx.localEnvTarget.token)
   const workspaceIds = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces])
   const [soundPrefs] = useAgentNotificationSoundPrefs()
@@ -1486,6 +1497,13 @@ function WorkspaceSidebarSnapshotPublisher({
     })
   }, [])
 
+  const updateDispatches = useCallback((workspaceId: string, next: WorkspaceSidebarDispatch[]) => {
+    setDispatches((current) => {
+      if (JSON.stringify(current[workspaceId] ?? []) === JSON.stringify(next)) return current
+      return { ...current, [workspaceId]: next }
+    })
+  }, [])
+
   const state = useMemo<WorkspaceSidebarStateSnapshot>(() => ({
     currentWorkspaceId: ctx.workspace.id,
     activeSessionId: ctx.uiState.activeAgentSessionId,
@@ -1495,9 +1513,10 @@ function WorkspaceSidebarSnapshotPublisher({
     resources: resourcesStore.records,
     globalTabsDestination,
     chatRollups,
+    dispatches,
     subtasks,
     notifications: notifications.records,
-  }), [chatRollups, ctx.uiState.activeAgentSessionId, ctx.workspace.id, globalTabsDestination, localEnvAvailable, nodes, notifications.records, resourcesStore.records, subtasks, workspaces])
+  }), [chatRollups, ctx.uiState.activeAgentSessionId, ctx.workspace.id, dispatches, globalTabsDestination, localEnvAvailable, nodes, notifications.records, resourcesStore.records, subtasks, workspaces])
 
   useEffect(() => {
     onStateSnapshot(state)
@@ -1515,6 +1534,7 @@ function WorkspaceSidebarSnapshotPublisher({
             onMarkRead={() => setChatReadVersion((version) => version + 1)}
             onRollup={(rollup) => updateChatRollup(workspaceId, rollup)}
             onSubtasks={(tasks) => updateSubtasks(workspaceId, tasks)}
+            onDispatches={(next) => updateDispatches(workspaceId, next)}
           />
         </WorkspaceAgentEnvProvider>
       ))}
@@ -2007,6 +2027,20 @@ function WorkspaceSidebarView({
     const workspaceHref = `/w/${workspace.id}`
     const workspaceRowClassName = 'min-w-0 flex-1 truncate rounded px-0.5 py-0.5 text-left text-xs font-medium'
     const taskRows = state.subtasks?.[workspace.id] ?? []
+    const selectThreadSession = (sessionId: string) => {
+      if (onSelectSession) {
+        onSelectSession(workspace.id, sessionId)
+        return
+      }
+      if (workspace.id === currentWorkspaceId) {
+        dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId })
+      }
+      void navigate({
+        to: '/w/$workspaceId',
+        params: { workspaceId: workspace.id },
+        search: { chat: sessionId, tab: undefined },
+      })
+    }
     const handleWorkspaceLinkClick = (e: ReactMouseEvent) => {
       if (archiving) {
         e.preventDefault()
@@ -2127,32 +2161,99 @@ function WorkspaceSidebarView({
           </div>
         </div>
       </SortableSidebarRow>
-      {taskRows.map((task) => (
-        <WorkspaceSidebarSubtaskRow
-          key={task.id}
-          task={task}
-          depth={row.depth + 1}
-          active={task.sessionId === activeSessionId && workspace.id === currentWorkspaceId}
-          onSelect={() => {
-            if (!task.sessionId) return
-            if (onSelectSession) {
-              onSelectSession(workspace.id, task.sessionId)
-              return
-            }
-            if (workspace.id === currentWorkspaceId) {
-              dispatchWorkspaceState({ type: 'setActiveAgentSession', sessionId: task.sessionId })
-            }
-            void navigate({
-              to: '/w/$workspaceId',
-              params: { workspaceId: workspace.id },
-              search: { chat: task.sessionId, tab: undefined },
-            })
-          }}
-        />
-      ))}
+      {(() => {
+        const wsDispatches = state.dispatches?.[workspace.id] ?? []
+        const byDispatch = new Map<string, WorkspaceSidebarSubtask[]>()
+        for (const task of taskRows) {
+          const arr = byDispatch.get(task.dispatchSessionId) ?? []
+          arr.push(task)
+          byDispatch.set(task.dispatchSessionId, arr)
+        }
+        const out: ReactNode[] = []
+        for (const dispatch of wsDispatches) {
+          const children = byDispatch.get(dispatch.id) ?? []
+          const hasActiveChild = children.some((task) => task.sessionId === activeSessionId)
+          out.push(
+            <WorkspaceSidebarDispatchRow
+              key={dispatch.id}
+              dispatch={dispatch}
+              depth={row.depth + 1}
+              active={dispatch.id === activeSessionId && workspace.id === currentWorkspaceId}
+              childActive={hasActiveChild && workspace.id === currentWorkspaceId}
+              onSelect={() => selectThreadSession(dispatch.id)}
+            />,
+          )
+          for (const task of children) {
+            out.push(
+              <WorkspaceSidebarSubtaskRow
+                key={task.id}
+                task={task}
+                depth={row.depth + 2}
+                active={task.sessionId === activeSessionId && workspace.id === currentWorkspaceId}
+                onSelect={() => {
+                  if (!task.sessionId) return
+                  selectThreadSession(task.sessionId)
+                }}
+              />,
+            )
+          }
+          byDispatch.delete(dispatch.id)
+        }
+        for (const orphanTasks of byDispatch.values()) {
+          for (const task of orphanTasks) {
+            out.push(
+              <WorkspaceSidebarSubtaskRow
+                key={task.id}
+                task={task}
+                depth={row.depth + 1}
+                active={task.sessionId === activeSessionId && workspace.id === currentWorkspaceId}
+                onSelect={() => {
+                  if (!task.sessionId) return
+                  selectThreadSession(task.sessionId)
+                }}
+              />,
+            )
+          }
+        }
+        return out
+      })()}
       </div>
     )
   }
+}
+
+export function WorkspaceSidebarDispatchRow({
+  dispatch,
+  depth,
+  active,
+  childActive,
+  onSelect,
+}: {
+  dispatch: WorkspaceSidebarDispatch
+  depth: number
+  active: boolean
+  childActive: boolean
+  onSelect: () => void
+}) {
+  const label = dispatch.title ?? 'Dispatch'
+  return (
+    <div className="mb-0.5 flex min-w-0 items-center" style={{ paddingLeft: `${depth * 14 + 9}px` }}>
+      <span className="mr-1.5 h-3 border-l border-neutral-700" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`min-w-0 flex-1 rounded px-1.5 py-1 text-left transition-colors ${active ? 'bg-highlight text-neutral-100' : childActive ? 'text-neutral-300 hover:bg-highlight hover:text-neutral-100' : 'text-neutral-400 hover:bg-highlight hover:text-neutral-200'}`}
+        aria-current={active ? 'page' : undefined}
+        aria-label={label}
+        title={label}
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0 text-neutral-500" aria-hidden="true">⌂</span>
+          <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        </span>
+      </button>
+    </div>
+  )
 }
 
 export function WorkspaceSidebarSubtaskRow({
@@ -2469,6 +2570,7 @@ function WorkspaceSidebarChatRollupProbe({
   onMarkRead,
   onRollup,
   onSubtasks,
+  onDispatches,
 }: {
   workspaceId: string
   active: boolean
@@ -2477,6 +2579,7 @@ function WorkspaceSidebarChatRollupProbe({
   onMarkRead: () => void
   onRollup: (rollup: WorkspaceSidebarChatRollup) => void
   onSubtasks: (tasks: WorkspaceSidebarSubtask[]) => void
+  onDispatches: (dispatches: WorkspaceSidebarDispatch[]) => void
 }) {
   const sessions = envTrpc.agent.sessionList.useQuery({ workspaceId }, { refetchOnWindowFocus: false })
   const orchestration = envTrpc.orchestration.snapshot.useQuery({ workspaceId }, { refetchOnWindowFocus: false })
@@ -2498,6 +2601,15 @@ function WorkspaceSidebarChatRollupProbe({
       pendingAttentionCount: task.pendingAttentionCount,
       latestReturnSummary: task.latestReturn?.summary ?? null,
       createdAt: task.createdAt,
+    }))
+  ), [orchestration.data?.dispatches])
+  const dispatches = useMemo<WorkspaceSidebarDispatch[]>(() => (
+    (orchestration.data?.dispatches ?? []).map((dispatch) => ({
+      id: dispatch.id,
+      title: dispatch.title,
+      status: dispatch.status,
+      createdAt: dispatch.createdAt,
+      lastActivityAt: dispatch.lastActivityAt,
     }))
   ), [orchestration.data?.dispatches])
   for (const task of subtasks) if (task.sessionId) sessionIds.add(task.sessionId)
@@ -2530,6 +2642,9 @@ function WorkspaceSidebarChatRollupProbe({
   useEffect(() => {
     onSubtasks(subtasks)
   }, [onSubtasks, subtasks])
+  useEffect(() => {
+    onDispatches(dispatches)
+  }, [dispatches, onDispatches])
   return null
 }
 

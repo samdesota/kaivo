@@ -36,6 +36,14 @@ export type WorkspaceSidebarSubtask = {
   createdAt: string
 }
 
+export type WorkspaceSidebarDispatch = {
+  id: string
+  title: string | null
+  status: 'active' | 'archived'
+  createdAt: string
+  lastActivityAt: string
+}
+
 export type WorkspaceSidebarStateSnapshot = {
   currentWorkspaceId: string
   activeSessionId: string | null
@@ -45,6 +53,7 @@ export type WorkspaceSidebarStateSnapshot = {
   resources: WorkspaceResourceRecord[]
   globalTabsDestination: GlobalTabDestination
   chatRollups: Record<string, WorkspaceSidebarChatRollup>
+  dispatches: Record<string, WorkspaceSidebarDispatch[]>
   subtasks: Record<string, WorkspaceSidebarSubtask[]>
   notifications: AgentNotificationRecord[]
 }
