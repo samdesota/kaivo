@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { DEFAULT_WALKTHROUGH_MAX_INPUT_BYTES } from '../../../shared/walkthrough-input.js'
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -44,6 +45,11 @@ const schema = z.object({
   CC_OPENCODE_GPT55_CONTEXT_LIMIT: z.coerce.number().int().positive().default(1_050_000),
   CC_OPENCODE_GPT55_OUTPUT_LIMIT: z.coerce.number().int().positive().default(128_000),
   CC_OPENCODE_GPT55_COMPACT_LIMIT: z.coerce.number().int().positive().optional(),
+
+  CC_WALKTHROUGH_EVENT_CHUNK_BYTES: z.coerce.number().int().positive().default(8_192),
+  CC_WALKTHROUGH_EVENT_FLUSH_MS: z.coerce.number().int().positive().default(50),
+  CC_WALKTHROUGH_MAX_INPUT_BYTES: z.coerce.number().int().positive().default(DEFAULT_WALKTHROUGH_MAX_INPUT_BYTES),
+  CC_WALKTHROUGH_MAX_OUTPUT_BYTES: z.coerce.number().int().positive().default(2_097_152),
 
   // `file://` URI or absolute path to the Kaivo opencode plugin. In
   // container mode the Dockerfile bakes it to /opt; in local mode

@@ -6,23 +6,26 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { expect, test, type Page } from '@playwright/test'
 import { GitService, type GitDiffInput } from '../../packages/env-server/src/git/service'
+import { assembleDeterministicWalkthrough } from '../../packages/env-server/src/walkthrough/directives'
+import { parseCanonicalDiff } from '../../packages/env-server/src/walkthrough/parser'
 
 const execFileAsync = promisify(execFile)
 
 test('opens and restores the default Git diff from Command-T', async ({ page }) => {
   const fixture = await createRepositoryFixture()
-  const env = await startGitEnvServer(fixture.root, 4096)
+  const sessionId = `git-session-${Date.now()}`
+  const env = await startGitEnvServer(fixture.root, 4096, sessionId)
   try {
     await page.setViewportSize({ width: 1600, height: 900 })
     await login(page)
     const workspace = await trpcMutation<{ id: string; name: string }>(page, 'workspace.create', { name: `Git Diff ${Date.now()}` })
     await trpcMutation(page, 'env.registerLocal', {
       url: env.url,
-      envToken: 'git-diff-e2e-token-123',
+      envToken: `git-diff-e2e-token-${Date.now()}`,
       label: 'Git diff env',
       localIdentityLabel: 'playwright',
     })
-    await trpcMutation(page, 'workspace.saveViewState', { workspaceId: workspace.id, state: { activeAgentSessionId: 'git-session' } })
+    await trpcMutation(page, 'workspace.saveViewState', { workspaceId: workspace.id, state: { activeAgentSessionId: sessionId } })
     await page.goto(`/w/${workspace.id}`)
     await waitForAppDataReady(page)
 
@@ -111,6 +114,63 @@ test('opens and restores the default Git diff from Command-T', async ({ page }) 
   }
 })
 
+test('generates complete walkthroughs for branch and working-tree comparisons', async ({ page }) => {
+  const fixture = await createRepositoryFixture()
+  const sessionId = `walkthrough-session-${Date.now()}`
+  const env = await startGitEnvServer(fixture.root, undefined, sessionId)
+  try {
+    await page.setViewportSize({ width: 1400, height: 900 })
+    await login(page)
+    const workspace = await trpcMutation<{ id: string; name: string }>(page, 'workspace.create', { name: `Code Walkthrough ${Date.now()}` })
+    await trpcMutation(page, 'env.registerLocal', {
+      url: env.url,
+      envToken: `walkthrough-e2e-token-${Date.now()}`,
+      label: 'Walkthrough env',
+      localIdentityLabel: 'playwright',
+    })
+    await trpcMutation(page, 'workspace.saveViewState', { workspaceId: workspace.id, state: { activeAgentSessionId: sessionId } })
+    await page.goto(`/w/${workspace.id}`)
+    await waitForAppDataReady(page)
+
+    await openCodeWalkthrough(page)
+    await expect(page.getByRole('button', { name: 'Base origin branch' })).toContainText('origin/main')
+    await page.getByRole('button', { name: 'Generate walkthrough' }).click()
+    await expect(page.getByRole('heading', { name: 'committed.txt' })).toBeVisible()
+    await expect(page.getByText('committed feature line')).toBeVisible()
+    await expect(page.getByText('Coverage').locator('span')).toContainText('100%')
+    await expect(page.getByRole('heading', { name: 'old.ts -> new.ts' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'image.dat' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'working.txt' })).toBeVisible()
+    await page.setViewportSize({ width: 480, height: 800 })
+    await expect(page.getByText('uncommitted working line')).toBeVisible()
+    const contained = await page.getByRole('article').evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
+    expect(contained).toBe(true)
+
+    await page.reload()
+    await waitForAppDataReady(page)
+    await expect(page.getByRole('heading', { name: 'committed.txt' })).toBeVisible()
+    await expect(page.getByText('Coverage').locator('span')).toContainText('100%')
+
+    await page.getByRole('tab', { name: /Code Walkthrough/ }).getByRole('button', { name: 'Close tab' }).click()
+    await openCodeWalkthrough(page)
+    await page.getByRole('combobox', { name: 'Comparison mode' }).selectOption('working-tree')
+    await page.getByRole('button', { name: 'Generate walkthrough' }).click()
+    await expect(page.getByRole('heading', { name: 'working.txt' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'committed.txt' })).toHaveCount(0)
+    await expect(page.getByText('Coverage').locator('span')).toContainText('100%')
+  } finally {
+    await env.close()
+    await fs.rm(fixture.root, { recursive: true, force: true })
+  }
+})
+
+async function openCodeWalkthrough(page: Page) {
+  await page.keyboard.press('Meta+t')
+  await page.getByLabel('Universal menu search').fill('code walkthrough')
+  await page.getByRole('button', { name: /Open Code Walkthrough/ }).click()
+  await expect(page.getByRole('tab', { name: /Code Walkthrough/ })).toBeVisible()
+}
+
 async function createRepositoryFixture(): Promise<{ root: string }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kaivo-git-diff-e2e-'))
   await execFileAsync('git', ['init', '-b', 'main'], { cwd: root })
@@ -130,11 +190,12 @@ async function createRepositoryFixture(): Promise<{ root: string }> {
   await execFileAsync('git', ['commit', '-m', 'feature'], { cwd: root })
   await execFileAsync('git', ['update-ref', 'refs/remotes/origin/release', 'HEAD'], { cwd: root })
   await fs.writeFile(path.join(root, 'working.txt'), 'uncommitted working line\n')
-  return { root }
+  return { root: await fs.realpath(root) }
 }
 
-async function startGitEnvServer(repoRoot: string, maxPatchBytes?: number): Promise<{ url: string; close: () => Promise<void> }> {
+async function startGitEnvServer(repoRoot: string, maxPatchBytes?: number, sessionId = 'git-session'): Promise<{ url: string; close: () => Promise<void> }> {
   const gitService = new GitService({ maxPatchBytes })
+  const walkthroughs = new Map<string, unknown>()
 
   const server = http.createServer(async (req, res) => {
     setCors(res)
@@ -144,15 +205,52 @@ async function startGitEnvServer(repoRoot: string, maxPatchBytes?: number): Prom
     if (!requestUrl.startsWith('/trpc/')) return sendJson(res, {}, 404)
     const procedures = decodeURIComponent(requestUrl.slice('/trpc/'.length).split('?')[0] ?? '').split(',')
     const url = new URL(requestUrl, 'http://127.0.0.1')
-    const rawInput = url.searchParams.get('input')
-    const parsedInput = rawInput ? JSON.parse(rawInput) as Record<string, { json?: unknown }> & { json?: unknown } : null
+    const rawInput = req.method === 'POST' ? await readBody(req) : url.searchParams.get('input')
+    let parsedInput: Record<string, { json?: unknown }> & { json?: unknown } | null = null
+    try {
+      parsedInput = rawInput ? JSON.parse(rawInput) as Record<string, { json?: unknown }> & { json?: unknown } : null
+    } catch (error) {
+      console.error('Failed to parse mock environment request', { requestUrl, rawInput, error })
+      return sendJson(res, trpcError(error), 400)
+    }
     const inputAt = (index: number) => parsedInput?.[String(index)]?.json ?? parsedInput?.json
     const results = await Promise.all(procedures.map(async (procedure, index) => {
       try {
-        if (procedure === 'agent.sessionList') return trpcResult([{ id: 'git-session', title: 'Git session', status: 'active', workingDir: repoRoot, createdAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() }])
+        if (procedure === 'agent.sessionList') return trpcResult([{ id: sessionId, title: 'Git session', status: 'active', workingDir: repoRoot, createdAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() }])
         if (procedure === 'git.discoverGit') return trpcResult(await gitService.discoverGit((inputAt(index) as { cwd: string }).cwd))
         if (procedure === 'git.originBranches') return trpcResult(await gitService.originBranches((inputAt(index) as { cwd: string }).cwd))
         if (procedure === 'git.diff') return trpcResult(await gitService.diff(inputAt(index) as GitDiffInput))
+        if (procedure === 'walkthrough.start') {
+          const input = inputAt(index) as {
+            cwd: string
+            comparison: { kind: 'branch'; originBranch: string | null; includeUncommitted: boolean } | { kind: 'working-tree' }
+          }
+          const walkthroughId = `walkthrough-${walkthroughs.size + 1}`
+          const originBranch = input.comparison.kind === 'branch'
+            ? input.comparison.originBranch ?? (await gitService.originBranches(input.cwd)).defaultBranch?.name ?? ''
+            : null
+          const diff = await gitService.diff(input.comparison.kind === 'working-tree'
+            ? { cwd: input.cwd, kind: 'working-tree' }
+            : { cwd: input.cwd, kind: 'branch', originBranch: originBranch!, includeUncommitted: input.comparison.includeUncommitted })
+          const canonical = parseCanonicalDiff(diff.patch, { truncated: diff.truncated })
+          const document = assembleDeterministicWalkthrough(canonical)
+          walkthroughs.set(walkthroughId, {
+            id: walkthroughId,
+            status: 'completed',
+            markdown: document.markdown,
+            canonical,
+            warnings: diff.warnings,
+            coverage: { covered: canonical.unitIds.length, total: canonical.unitIds.length, missing: 0 },
+            error: null,
+            sequence: 1,
+          })
+          return trpcResult({ walkthroughId })
+        }
+        if (procedure === 'walkthrough.snapshot') {
+          const { walkthroughId } = inputAt(index) as { walkthroughId: string }
+          return trpcResult(walkthroughs.get(walkthroughId) ?? null)
+        }
+        if (procedure === 'walkthrough.cancel') return trpcResult({ ok: true })
         if (procedure === 'agent.agentStatus') return trpcResult({ hasProvider: true, ready: true })
         if (procedure === 'fs.browseHome') return trpcResult({ path: repoRoot, home: repoRoot, defaultPath: repoRoot, dirs: [], files: [] })
         if (procedure === 'repo.listRecentFolders' || procedure === 'repo.listConfigs' || procedure === 'repo.listWorktrees' || procedure === 'shell.list' || procedure === 'agent.sessionMessages' || procedure === 'agent.childTranscripts') return trpcResult([])
@@ -176,6 +274,12 @@ async function startGitEnvServer(repoRoot: string, maxPatchBytes?: number): Prom
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     },
   }
+}
+
+async function readBody(req: http.IncomingMessage): Promise<string | null> {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  return chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : null
 }
 
 async function login(page: Page) {

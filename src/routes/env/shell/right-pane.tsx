@@ -8,6 +8,8 @@ import { trpcQueryKey } from '../../../lib/trpc-plain'
 import { FileTabContent } from '../tabs/file-tab'
 import { BrowserTabContent } from '../tabs/browser-tab'
 import { ShellTabContent } from '../tabs/shell-tab'
+import { GitDiffTab } from '../tabs/git-diff-tab'
+import { CodeWalkthroughTab } from '../tabs/code-walkthrough-tab'
 import {
   type PaneContent,
   type RightPaneAction,
@@ -188,6 +190,8 @@ function TabContent({
       />
     )
   }
+  if (content.type === 'git-diff') return <GitDiffTab tabId={tabId} cwd={content.cwd} />
+  if (content.type === 'code-walkthrough') return <CodeWalkthroughTab cwd={content.cwd} walkthroughId={content.walkthroughId} onWalkthroughIdChange={(walkthroughId) => dispatch({ type: 'setWalkthroughId', tabId, walkthroughId })} />
   return null
 }
 

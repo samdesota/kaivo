@@ -14,6 +14,7 @@ import { previewRouter } from './routers/preview.js'
 import { syncRouter } from './routers/sync.js'
 import { gitRouter } from './routers/git.js'
 import { orchestrationRouter } from './routers/orchestration.js'
+import { walkthroughRouter } from './routers/walkthrough.js'
 
 export const appRouter = router({
   meta: metaRouter,
@@ -31,6 +32,7 @@ export const appRouter = router({
   sync: syncRouter,
   git: gitRouter,
   orchestration: orchestrationRouter,
+  walkthrough: walkthroughRouter,
 })
 
 export type AppRouter = typeof appRouter

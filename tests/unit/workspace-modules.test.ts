@@ -135,6 +135,14 @@ describe('workspace tab commands', () => {
     expect(recordToWorkspaceTab({ ...record, repoRoot: null })).toBeNull()
   })
 
+  it('round trips a persisted code walkthrough tab record', () => {
+    const tab = { id: 'walk-tab', type: 'code-walkthrough' as const, envId: 'env-1', repoRoot: '/repo', walkthroughId: 'walk-1', title: 'Code Walkthrough' }
+    const record = workspaceTabToRecord('workspace-1', tab, 3)
+
+    expect(record).toMatchObject({ type: 'code-walkthrough', repoRoot: '/repo', walkthroughId: 'walk-1', position: 3 })
+    expect(recordToWorkspaceTab(record)).toEqual(tab)
+  })
+
   it('calculates positions and avoids duplicate tabs by workspaceTabKey', async () => {
     applyWorkspaceTabRowsForTests([tabRecord({ id: 'shell-1', shellId: 'shell-1', position: 0 })])
     vi.mocked(appTrpcMutation).mockImplementation(async (procedure, input) => {
@@ -329,7 +337,8 @@ function tabRecord(input: Partial<WorkspaceTabRecord> & Pick<WorkspaceTabRecord,
     envId: type === 'browser' ? null : 'env-1',
     shellId: type === 'shell' ? input.id : null,
     path: type === 'file' ? '/tmp/file.txt' : null,
-    repoRoot: type === 'git-diff' ? '/repo' : null,
+    repoRoot: type === 'git-diff' || type === 'code-walkthrough' ? '/repo' : null,
+    walkthroughId: null,
     sessionId: null,
     port: null,
     url: type === 'browser' ? 'https://example.com' : null,

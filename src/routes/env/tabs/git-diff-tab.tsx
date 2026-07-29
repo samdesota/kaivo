@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { AppRouter as EnvAppRouter } from '../../../../packages/env-server/src/trpc/router'
 import { envTrpc } from '../../../env-trpc'
@@ -11,10 +11,9 @@ import {
   retainedGitDiffSnapshot,
   type GitDiffComparison,
 } from './git-diff-tab-state'
+import { GitComparisonControls, branchComparisonPreference, gitDiffInput, resolvedOriginBranch, type OriginBranch } from './git-comparison'
 
 type GitSnapshot = inferRouterOutputs<EnvAppRouter>['git']['diff']
-type OriginBranch = inferRouterOutputs<EnvAppRouter>['git']['originBranches']['branches'][number]
-
 export function GitDiffTab({ cwd, tabId = cwd, onRepositoryRootChange }: { cwd: string; tabId?: string; onRepositoryRootChange?: (root: string) => void }) {
   const envUtils = envTrpc.useUtils()
   const [transient, setTransient] = useState(() => initialGitDiffState(tabId))
@@ -24,7 +23,7 @@ export function GitDiffTab({ cwd, tabId = cwd, onRepositoryRootChange }: { cwd: 
   const refreshVersion = useRef(0)
   const reconciledRoot = useRef(cwd)
   const comparison = transient.comparison
-  const branchPreference = comparison.kind === 'branch' ? comparison : comparison.branch
+  const branchPreference = branchComparisonPreference(comparison)
 
   useEffect(() => retainGitDiffState(tabId, transient), [tabId, transient])
 
@@ -45,15 +44,8 @@ export function GitDiffTab({ cwd, tabId = cwd, onRepositoryRootChange }: { cwd: 
     { enabled: !!repository, refetchOnWindowFocus: false, retry: false },
   )
   const branches = branchesQuery.data
-  const selectedBranchName = branchPreference.originBranch ?? branches?.defaultBranch?.name ?? null
-  const diffInput = useMemo(() => comparison.kind === 'working-tree'
-    ? { cwd: repository?.root ?? cwd, kind: 'working-tree' as const }
-    : {
-      cwd: repository?.root ?? cwd,
-      kind: 'branch' as const,
-      originBranch: selectedBranchName ?? '',
-      includeUncommitted: comparison.includeUncommitted,
-    }, [comparison, cwd, repository?.root, selectedBranchName])
+  const selectedBranchName = resolvedOriginBranch(comparison, branches?.defaultBranch?.name)
+  const diffInput = useMemo(() => gitDiffInput(repository?.root ?? cwd, comparison, branches?.defaultBranch?.name), [branches?.defaultBranch?.name, comparison, cwd, repository?.root])
   const canCompare = !!repository && (comparison.kind === 'working-tree'
     || (!!repository.headOid && !!selectedBranchName))
   const diffQuery = envTrpc.git.diff.useQuery(diffInput, {
@@ -91,7 +83,7 @@ export function GitDiffTab({ cwd, tabId = cwd, onRepositoryRootChange }: { cwd: 
       if (version !== refreshVersion.current) return
       let input: typeof diffInput | null
       if (comparison.kind === 'working-tree') {
-        input = { cwd: freshRepository.root, kind: 'working-tree' }
+        input = gitDiffInput(freshRepository.root, comparison)
       } else {
         const branchName = comparison.originBranch ?? freshBranches.defaultBranch?.name ?? null
         input = freshRepository.headOid && branchName
@@ -392,40 +384,10 @@ function GitDiffToolbar({
   onComparisonChange: (comparison: GitDiffComparison) => void
   onRefresh: () => void
 }) {
-  const branchPreference = comparison.kind === 'branch' ? comparison : comparison.branch
   return (
     <header className="z-20 shrink-0 border-b border-neutral-800 bg-neutral-950/95 px-3 py-2 backdrop-blur">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <select
-          aria-label="Comparison mode"
-          value={comparison.kind}
-          onChange={(event) => onComparisonChange(event.target.value === 'working-tree'
-            ? { kind: 'working-tree', branch: branchPreference }
-            : branchPreference)}
-          className="h-7 rounded border border-neutral-800 bg-input px-2 text-xs text-neutral-200 focus:border-neutral-600 focus:outline-none"
-        >
-          <option value="branch">Branch changes</option>
-          <option value="working-tree">Working tree</option>
-        </select>
-        {comparison.kind === 'branch' && (
-          <>
-            <OriginBranchCombobox
-              branches={branches}
-              value={selectedBranchName}
-              defaultBranchName={defaultBranchName}
-              onChange={(originBranch) => onComparisonChange({ ...comparison, originBranch })}
-            />
-            <label className="flex h-7 items-center gap-1.5 whitespace-nowrap rounded border border-neutral-800 px-2 text-[11px] text-neutral-300">
-              <input
-                type="checkbox"
-                checked={comparison.includeUncommitted}
-                onChange={(event) => onComparisonChange({ ...comparison, includeUncommitted: event.target.checked })}
-                className="h-3 w-3 accent-neutral-200"
-              />
-              Include uncommitted
-            </label>
-          </>
-        )}
+        <GitComparisonControls comparison={comparison} branches={branches} defaultBranchName={defaultBranchName} selectedBranchName={selectedBranchName} onComparisonChange={onComparisonChange} />
         <div className="min-w-0 flex-1 truncate text-[11px] text-neutral-500" title={`${headLabel} → ${comparison.kind === 'working-tree' ? 'working tree' : `origin/${selectedBranchName ?? '?'}`}`}>
           {headLabel}<span className="mx-1.5 text-neutral-700">→</span>{comparison.kind === 'working-tree' ? 'working tree' : `origin/${selectedBranchName ?? '?'}`}
         </div>
@@ -448,78 +410,6 @@ function GitDiffToolbar({
         </button>
       </div>
     </header>
-  )
-}
-
-function OriginBranchCombobox({ branches, value, defaultBranchName, onChange }: {
-  branches: OriginBranch[]
-  value: string | null
-  defaultBranchName: string | null
-  onChange: (branch: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [activeIndex, setActiveIndex] = useState(0)
-  const listboxId = useId()
-  const filtered = branches.filter((branch) => branch.name.toLowerCase().includes(query.trim().toLowerCase()))
-  const commit = (branch: OriginBranch) => {
-    onChange(branch.name)
-    setOpen(false)
-    setQuery('')
-  }
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        aria-label="Base origin branch"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="h-7 min-w-28 rounded border border-neutral-800 bg-input px-2 text-left font-mono text-[11px] text-neutral-200 focus:border-neutral-600 focus:outline-none"
-      >
-        origin/{value ?? 'select…'} ▾
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-64 rounded border border-neutral-800 bg-neutral-950 p-1 shadow-xl">
-          <input
-            autoFocus
-            role="combobox"
-            aria-label="Search origin branches"
-            aria-controls={listboxId}
-            aria-expanded="true"
-            aria-activedescendant={filtered[activeIndex] ? `${listboxId}-${activeIndex}` : undefined}
-            value={query}
-            onChange={(event) => { setQuery(event.target.value); setActiveIndex(0) }}
-            onBlur={() => setTimeout(() => setOpen(false), 120)}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex((index) => Math.min(index + 1, filtered.length - 1)) }
-              else if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex((index) => Math.max(index - 1, 0)) }
-              else if (event.key === 'Enter' && filtered[activeIndex]) { event.preventDefault(); commit(filtered[activeIndex]) }
-              else if (event.key === 'Escape') setOpen(false)
-            }}
-            placeholder="Search branches…"
-            className="mb-1 w-full rounded border border-neutral-800 bg-input px-2 py-1 text-xs text-neutral-200 focus:border-neutral-600 focus:outline-none"
-          />
-          <ul id={listboxId} role="listbox" aria-label="Origin branches" className="max-h-56 overflow-auto">
-            {filtered.map((branch, index) => (
-              <li
-                id={`${listboxId}-${index}`}
-                key={branch.ref}
-                role="option"
-                aria-selected={branch.name === value}
-                onMouseDown={(event) => { event.preventDefault(); commit(branch) }}
-                onMouseEnter={() => setActiveIndex(index)}
-                className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs ${index === activeIndex ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-300'}`}
-              >
-                <span className="min-w-0 flex-1 truncate font-mono">origin/{branch.name}</span>
-                {branch.name === defaultBranchName && <span className="text-[10px] text-neutral-500">default</span>}
-              </li>
-            ))}
-          </ul>
-          {filtered.length === 0 && <div className="px-2 py-1 text-xs text-neutral-500">No matching branches.</div>}
-        </div>
-      )}
-    </div>
   )
 }
 

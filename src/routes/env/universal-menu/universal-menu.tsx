@@ -454,6 +454,20 @@ export function UniversalMenu({
     })
 
     out.push({
+      id: 'action:open-code-walkthrough',
+      kind: 'action',
+      label: 'Open Code Walkthrough',
+      detail: activeCwd ? undefined : 'No active working directory',
+      haystack: 'open code walkthrough review changes repository branch working tree',
+      disabled: !activeCwd,
+      run: async () => {
+        if (!activeCwd) return
+        const repository = await envUtils.git.discoverGit.fetch({ cwd: activeCwd }).catch(() => null)
+        onOpenContent?.({ type: 'code-walkthrough', cwd: repository?.root ?? activeCwd })
+      },
+    })
+
+    out.push({
       id: 'action:open-git-diff',
       kind: 'action',
       label: 'Open Git Diff',

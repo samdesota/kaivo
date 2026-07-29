@@ -12,8 +12,8 @@
     "declaration": false,
     "noEmit": true,
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": "../..",
     "types": ["node"]
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "../../shared/walkthrough-directive.ts"]
 }

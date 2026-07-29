@@ -69,6 +69,14 @@ describe('env migrations', () => {
       .toEqual({ id: 'legacy', kind: 'chat', status: 'active' })
     expect(sqliteRaw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='orchestration_subtasks'").get())
       .toBeTruthy()
+    expect(sqliteRaw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='walkthroughs'").get())
+      .toBeTruthy()
+    expect(sqliteRaw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='walkthrough_events'").get())
+      .toBeTruthy()
+    const walkthroughColumns = sqliteRaw.prepare('PRAGMA table_info(walkthroughs)').all() as Array<{ name: string }>
+    expect(walkthroughColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'runner_provider_id', 'runner_model_id', 'runner_model_variant', 'runner_session_id',
+    ]))
     sqliteRaw.close()
   })
 })

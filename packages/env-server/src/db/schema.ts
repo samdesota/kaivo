@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core'
 
 export const envMeta = sqliteTable('env_meta', {
   id: integer('id').primaryKey(),
@@ -214,3 +214,66 @@ export const jobs = sqliteTable('jobs', {
   updatedAt: text('updated_at').notNull(),
   finishedAt: text('finished_at'),
 })
+
+export type WalkthroughStatus =
+  | 'queued'
+  | 'thinking'
+  | 'streaming'
+  | 'checking'
+  | 'repairing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export const walkthroughs = sqliteTable('walkthroughs', {
+  id: text('id').primaryKey(),
+  requestKey: text('request_key').notNull().unique(),
+  status: text('status').$type<WalkthroughStatus>().notNull(),
+  cwd: text('cwd').notNull(),
+  repositoryRoot: text('repository_root').notNull(),
+  repositoryGitDir: text('repository_git_dir').notNull(),
+  repositoryHeadOid: text('repository_head_oid'),
+  repositoryBranch: text('repository_branch'),
+  comparisonJson: text('comparison_json').notNull(),
+  baseRef: text('base_ref'),
+  mergeBaseOid: text('merge_base_oid'),
+  filesJson: text('files_json').notNull(),
+  patch: text('patch').notNull(),
+  patchDigest: text('patch_digest').notNull(),
+  patchByteCount: integer('patch_byte_count').notNull(),
+  canonicalJson: text('canonical_json').notNull(),
+  markdown: text('markdown').notNull(),
+  coveredUnits: integer('covered_units').notNull(),
+  totalUnits: integer('total_units').notNull(),
+  warningsJson: text('warnings_json').notNull(),
+  error: text('error'),
+  runnerProviderId: text('runner_provider_id'),
+  runnerModelId: text('runner_model_id'),
+  runnerModelVariant: text('runner_model_variant'),
+  runnerSessionId: text('runner_session_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  completedAt: text('completed_at'),
+  cancelledAt: text('cancelled_at'),
+})
+
+export type WalkthroughEventType =
+  | 'started'
+  | 'status.changed'
+  | 'markdown.appended'
+  | 'coverage.changed'
+  | 'warning'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export const walkthroughEvents = sqliteTable('walkthrough_events', {
+  walkthroughId: text('walkthrough_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  id: text('id').notNull().unique(),
+  type: text('type').$type<WalkthroughEventType>().notNull(),
+  dataJson: text('data_json').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.walkthroughId, table.sequence] }),
+}))

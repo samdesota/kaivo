@@ -5,6 +5,7 @@ export type PaneContent =
   | { type: 'file'; path: string; absolute?: boolean }
   | { type: 'browser'; url?: string; browserTabId?: string; faviconUrl?: string }
   | { type: 'git-diff'; cwd: string }
+  | { type: 'code-walkthrough'; cwd: string; walkthroughId?: string }
 
 export interface Tab {
   id: string
@@ -26,6 +27,7 @@ export type RightPaneAction =
   | { type: 'setAutoTitle'; tabId: string; title: string }
   | { type: 'setBrowserTabId'; tabId: string; browserTabId: string }
   | { type: 'setBrowserUrl'; tabId: string; url: string }
+  | { type: 'setWalkthroughId'; tabId: string; walkthroughId: string }
   | { type: 'pruneShells'; liveShellIds: ReadonlySet<string> }
   | { type: 'reorder'; tabIds: string[] }
   | { type: 'hydrate'; state: RightPaneState }
@@ -42,6 +44,7 @@ export function defaultTitle(c: PaneContent): string {
   }
   if (c.type === 'browser') return browserTitle(c)
   if (c.type === 'git-diff') return 'Git Diff'
+  if (c.type === 'code-walkthrough') return 'Code Walkthrough'
   return 'Tab'
 }
 
@@ -55,6 +58,7 @@ function sameContent(a: PaneContent, b: PaneContent): boolean {
     return (a.url ?? '') === (b.url ?? '')
   }
   if (a.type === 'git-diff' && b.type === 'git-diff') return a.cwd === b.cwd
+  if (a.type === 'code-walkthrough' && b.type === 'code-walkthrough') return a.cwd === b.cwd
   return false
 }
 
@@ -158,6 +162,14 @@ export function rightPaneReducer(state: RightPaneState, action: RightPaneAction)
         ),
       }
     }
+    case 'setWalkthroughId': {
+      return {
+        ...state,
+        tabs: state.tabs.map((t) => t.id === action.tabId && t.content.type === 'code-walkthrough'
+          ? { ...t, content: { ...t.content, walkthroughId: action.walkthroughId } }
+          : t),
+      }
+    }
     case 'pruneShells': {
       const keep = state.tabs.filter(
         (t) => t.content.type !== 'shell' || action.liveShellIds.has(t.content.shellId),
@@ -208,6 +220,7 @@ function loadStored(envId: string): RightPaneState | null {
         )
       }
       if (c.type === 'git-diff' && typeof c.cwd === 'string') return true
+      if (c.type === 'code-walkthrough' && typeof c.cwd === 'string' && (c.walkthroughId === undefined || typeof c.walkthroughId === 'string')) return true
       return false
     })
     if (tabs.length === 0) return { tabs: [], activeTabId: '' }

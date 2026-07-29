@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Lock, Unlock } from 'lucide-react'
-import type { BundledLanguage, ThemedToken } from 'shiki'
+import type { ThemedToken } from 'shiki'
 import { useOpenState } from './open-state'
 import { DisclosureBody } from './disclosure'
-import { parseUnifiedDiff, type DiffFileMetadata, type ParsedDiffFile, type ParsedDiffLine } from './diff-model'
+import { parseUnifiedDiff, type DiffFileMetadata, type ParsedDiffFile } from './diff-model'
+import { codeText, DiffRowView, languageForPath } from './diff-rows'
 
 type TokenMap = Record<string, ThemedToken[][]>
 
@@ -110,7 +111,7 @@ function DiffFileSection({
   onOpenChange,
   selected,
 }: {
-  file: ParsedDiffFile & { language?: BundledLanguage | 'text' }
+  file: ParsedDiffFile
   tokens?: ThemedToken[][]
   onOpenFile?: (path: string) => void
   unbounded: boolean
@@ -207,7 +208,7 @@ function DiffFileSection({
               {file.lines.length > 0 ? (
                 <div className="py-1">
                   {file.lines.map((line, index) => (
-                    <DiffLineView
+                    <DiffRowView
                       key={index}
                       line={line}
                       tokens={tokens?.[index]}
@@ -284,61 +285,6 @@ function LockedDiffScroll({
   )
 }
 
-function codeText(line: ParsedDiffLine): string {
-  if (line.kind === 'add' || line.kind === 'del') return line.text.slice(1)
-  if (line.kind === 'ctx') return line.text.startsWith(' ') ? line.text.slice(1) : line.text
-  return ''
-}
-
-function DiffLineView({ line, tokens }: { line: ParsedDiffLine; tokens?: ThemedToken[] }) {
-  if (line.kind === 'hunk') {
-    return <div className="px-3 py-0.5 text-[10px] text-sky-300/80">{line.text}</div>
-  }
-  if (line.kind === 'meta') {
-    return <div className="px-3 py-0.5 text-[10px] text-ui-muted">{line.text}</div>
-  }
-
-  const marker = line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '
-  const text = codeText(line)
-  const rowClass =
-    line.kind === 'add'
-      ? 'bg-emerald-500/[0.08]'
-      : line.kind === 'del'
-        ? 'bg-red-500/[0.08]'
-        : 'hover:bg-white/[0.025]'
-  const gutterClass =
-    line.kind === 'add'
-      ? 'text-emerald-300/80'
-      : line.kind === 'del'
-        ? 'text-red-300/80'
-        : 'text-neutral-700'
-
-  return (
-    <div className={`grid grid-cols-[2rem_minmax(0,1fr)] ${rowClass}`}>
-      <span className={`select-none text-center ${gutterClass}`}>{marker}</span>
-      <span className="whitespace-pre pr-3 text-content-default">
-        {tokens && tokens.length > 0 ? <TokenSpans tokens={tokens} /> : text || ' '}
-      </span>
-    </div>
-  )
-}
-
-function TokenSpans({ tokens }: { tokens: ThemedToken[] }) {
-  return (
-    <>
-      {tokens.map((token, index) => (
-        <span key={`${index}:${token.offset}`} style={tokenStyle(token)}>
-          {token.content}
-        </span>
-      ))}
-    </>
-  )
-}
-
-function tokenStyle(token: ThemedToken) {
-  return token.color ? { color: token.color } : undefined
-}
-
 function LineDiffCount({ added, deleted }: { added: number | null; deleted: number | null }) {
   if (added === null || deleted === null || (added === 0 && deleted === 0)) return null
   return (
@@ -355,53 +301,4 @@ function sectionDomId(fileId: string): string {
 
 function yieldToBrowser(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
-}
-
-function languageForPath(path: string): BundledLanguage | 'text' {
-  const filename = path.split('/').pop()?.toLowerCase() ?? ''
-  if (filename === 'dockerfile') return 'docker'
-  if (filename === 'makefile') return 'make'
-
-  const ext = filename.split('.').pop() ?? ''
-  const map: Record<string, BundledLanguage> = {
-    astro: 'astro',
-    c: 'c',
-    cc: 'cpp',
-    cpp: 'cpp',
-    cs: 'csharp',
-    css: 'css',
-    go: 'go',
-    h: 'c',
-    hbs: 'handlebars',
-    html: 'html',
-    java: 'java',
-    js: 'javascript',
-    json: 'json',
-    jsonc: 'jsonc',
-    jsx: 'jsx',
-    kt: 'kotlin',
-    less: 'less',
-    lua: 'lua',
-    md: 'markdown',
-    mdx: 'mdx',
-    php: 'php',
-    py: 'python',
-    rb: 'ruby',
-    rs: 'rust',
-    sass: 'sass',
-    scss: 'scss',
-    sh: 'shellscript',
-    sql: 'sql',
-    svelte: 'svelte',
-    swift: 'swift',
-    toml: 'toml',
-    ts: 'typescript',
-    tsx: 'tsx',
-    vue: 'vue',
-    xml: 'xml',
-    yaml: 'yaml',
-    yml: 'yaml',
-    zig: 'zig',
-  }
-  return map[ext] ?? 'text'
 }

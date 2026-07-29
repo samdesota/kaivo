@@ -65,6 +65,8 @@ export function getAppRealtime(): SqliteRealtimeEngine {
         { name: 'env_id', jsonName: 'envId' },
         { name: 'shell_id', jsonName: 'shellId' },
         { name: 'path' },
+        { name: 'repo_root', jsonName: 'repoRoot' },
+        { name: 'walkthrough_id', jsonName: 'walkthroughId' },
         { name: 'session_id', jsonName: 'sessionId' },
         { name: 'port' },
         { name: 'url' },

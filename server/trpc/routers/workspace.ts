@@ -8,6 +8,7 @@ export const workspaceTabSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string().min(1), type: z.literal('file'), envId: z.string().min(1), path: z.string().min(1), sessionId: z.string().min(1).optional(), title: z.string() }),
   z.object({ id: z.string().min(1), type: z.literal('browser'), url: z.string().min(1), browserTabId: z.string().min(1).optional(), faviconUrl: z.string().min(1).optional(), title: z.string() }),
   z.object({ id: z.string().min(1), type: z.literal('git-diff'), envId: z.string().min(1), repoRoot: z.string().min(1).max(4_096), title: z.string() }),
+  z.object({ id: z.string().min(1), type: z.literal('code-walkthrough'), envId: z.string().min(1), repoRoot: z.string().min(1).max(4_096), walkthroughId: z.string().min(1).optional(), title: z.string() }),
 ])
 
 const uiStateSchema = z.object({
